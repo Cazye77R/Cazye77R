@@ -8,7 +8,7 @@ from typing import Tuple
 import torch
 from torch.utils.data import DataLoader, random_split
 
-from .data import PriceWindowDataset, load_prices
+from .data import PriceWindowDataset, fetch_prices, load_prices
 from .model import ReturnLSTM
 
 
@@ -19,7 +19,7 @@ def split_dataset(dataset: PriceWindowDataset, train_ratio: float) -> Tuple[Pric
 
 
 def train(
-    csv_path: Path,
+    csv_path: Path | None,
     output_dir: Path,
     window: int = 30,
     batch_size: int = 64,
@@ -30,8 +30,17 @@ def train(
     dropout: float = 0.1,
     train_ratio: float = 0.8,
     device: str | None = None,
+    ticker: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    interval: str = "1d",
 ) -> None:
-    data = load_prices(csv_path)
+    if ticker:
+        data = fetch_prices(ticker, start=start, end=end, interval=interval)
+    elif csv_path is not None:
+        data = load_prices(csv_path)
+    else:
+        raise ValueError("Either ticker or csv_path must be provided")
     dataset = PriceWindowDataset(data.returns, window=window)
     train_set, val_set = split_dataset(dataset, train_ratio)
 
@@ -91,7 +100,11 @@ def train(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("csv_path", type=Path, help="Path to CSV file containing prices")
+    parser.add_argument("csv_path", nargs="?", type=Path, help="Optional path to CSV file containing prices")
+    parser.add_argument("--ticker", type=str, help="Download public data for this ticker via Yahoo Finance")
+    parser.add_argument("--start", type=str, help="Optional ISO date (YYYY-MM-DD) for the first observation")
+    parser.add_argument("--end", type=str, help="Optional ISO date (YYYY-MM-DD) for the last observation (exclusive)")
+    parser.add_argument("--interval", type=str, default="1d", help="Sampling interval accepted by Yahoo Finance, e.g. 1d, 1h")
     parser.add_argument("--output", type=Path, default=Path("artifacts"), help="Directory to save model checkpoints")
     parser.add_argument("--window", type=int, default=30, help="Number of past returns per sample")
     parser.add_argument("--batch-size", type=int, default=64, help="Training batch size")
@@ -119,6 +132,10 @@ def main() -> None:
         dropout=args.dropout,
         train_ratio=args.train_ratio,
         device=args.device,
+        ticker=args.ticker,
+        start=args.start,
+        end=args.end,
+        interval=args.interval,
     )
 
 

@@ -20,7 +20,8 @@ Eine CSV-Datei mit mindestens zwei Spalten:
 - `date`: Zeitstempel oder Datum (wird per `pandas` geparst)
 - `close`: Schlusskurs oder Preiswert
 
-Die Reihenfolge der Zeilen ist egal, das Skript sortiert automatisch nach Datum.
+Die Reihenfolge der Zeilen ist egal, das Skript sortiert automatisch nach Datum. Alternativ können öffentliche Kursdaten direk
+t mit dem Trainingsskript heruntergeladen werden.
 
 ## Training starten
 ```bash
@@ -36,6 +37,19 @@ python -m stock_model.train path/zum/daten.csv \
   --output artifacts
 ```
 Standardwerte sind im Skript hinterlegt, sodass Sie optional nur den CSV-Pfad angeben müssen.
+
+### Direktes Laden öffentlicher Kurse
+Über Yahoo Finance lassen sich Daten ohne separate CSV laden. Beispiel für den S&P 500 ETF (SPY) mit täglichen Daten seit 2020:
+
+```bash
+python -m stock_model.train \
+  --ticker SPY \
+  --start 2020-01-01 \
+  --interval 1d \
+  --epochs 15
+```
+
+Der gleiche Befehl kann mit Intraday-Intervallen (z.B. `1h`) oder benutzerdefinierten Zeiträumen genutzt werden.
 
 ## Ergebnisse
 Nach dem Training wird ein Checkpoint unter `artifacts/return_lstm.pt` gespeichert, der sowohl die Modellgewichte als auch die wichtigsten Hyperparameter enthält. Dieses Format kann mit PyTorch geladen und für Inferenz oder weiteres Feintuning verwendet werden.

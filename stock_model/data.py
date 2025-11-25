@@ -10,6 +10,8 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
+import yfinance as yf
+
 
 @dataclass
 class PriceData:
@@ -17,6 +19,15 @@ class PriceData:
 
     prices: np.ndarray
     returns: np.ndarray
+
+
+def _compute_returns(prices: np.ndarray, normalize: bool) -> np.ndarray:
+    returns = np.diff(prices) / prices[:-1]
+    if normalize:
+        mean = returns.mean()
+        std = returns.std() or 1.0
+        returns = (returns - mean) / std
+    return returns
 
 
 def load_prices(
@@ -38,12 +49,37 @@ def load_prices(
     df = df.sort_values(date_col)
 
     prices = df[price_col].astype(float).to_numpy()
-    returns = np.diff(prices) / prices[:-1]
+    returns = _compute_returns(prices, normalize)
 
-    if normalize:
-        mean = returns.mean()
-        std = returns.std() or 1.0
-        returns = (returns - mean) / std
+    return PriceData(prices=prices, returns=returns)
+
+
+def fetch_prices(
+    ticker: str,
+    start: str | None = None,
+    end: str | None = None,
+    interval: str = "1d",
+    normalize: bool = True,
+) -> PriceData:
+    """Download public price data for a ticker using Yahoo Finance.
+
+    Args:
+        ticker: Symbol to download.
+        start: Optional ISO date (YYYY-MM-DD) for the first observation.
+        end: Optional ISO date (YYYY-MM-DD) for the last observation (exclusive).
+        interval: Sampling frequency supported by Yahoo Finance (e.g. "1d", "1h").
+        normalize: Whether to standardize returns.
+
+    Raises:
+        ValueError: If no data is returned for the ticker.
+    """
+
+    df = yf.download(ticker, start=start, end=end, interval=interval, progress=False)
+    if df.empty:
+        raise ValueError(f"No data returned for ticker '{ticker}'")
+
+    prices = df["Close"].astype(float).to_numpy()
+    returns = _compute_returns(prices, normalize)
 
     return PriceData(prices=prices, returns=returns)
 
