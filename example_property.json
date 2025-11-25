@@ -1,0 +1,36 @@
+{
+  "scenarios": [
+    {
+      "name": "Mehrfamilienhaus Musterstadt",
+      "purchase_price": 380000,
+      "closing_costs": 15000,
+      "down_payment": 76000,
+      "interest_rate": 0.0325,
+      "loan_years": 25,
+      "monthly_rent": 3200,
+      "vacancy_rate": 0.04,
+      "monthly_operating_expenses": 900,
+      "property_management_rate": 0.08,
+      "maintenance_reserve_rate": 0.05,
+      "annual_rent_growth": 0.02,
+      "annual_expense_growth": 0.02,
+      "projection_years": 20
+    },
+    {
+      "name": "City-Apartment",
+      "purchase_price": 280000,
+      "closing_costs": 12000,
+      "down_payment": 56000,
+      "interest_rate": 0.035,
+      "loan_years": 20,
+      "monthly_rent": 1750,
+      "vacancy_rate": 0.03,
+      "monthly_operating_expenses": 420,
+      "property_management_rate": 0.07,
+      "maintenance_reserve_rate": 0.04,
+      "annual_rent_growth": 0.015,
+      "annual_expense_growth": 0.018,
+      "projection_years": 15
+    }
+  ]
+}
