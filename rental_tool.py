@@ -7,8 +7,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from dataclasses import dataclass, asdict
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Dict, List
 
@@ -58,6 +58,10 @@ class RentalMetrics:
     dscr: float
     grm: float
     break_even_occupancy: float
+
+
+class ScenarioValidationError(ValueError):
+    """Fehlermeldung mit klaren Hinweisen auf ungültige Eingaben."""
 
 
 def amortized_payment(principal: float, monthly_interest: float, months: int) -> float:
@@ -184,11 +188,69 @@ def plot_projection(scenario: RentalScenario, output: Path) -> None:
 
 
 def load_scenarios(path: Path) -> List[RentalScenario]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    scenarios = []
-    for entry in data.get("scenarios", []):
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:  # pragma: no cover - defensive
+        raise ScenarioValidationError(f"Konfigurationsdatei nicht gefunden: {path}") from exc
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+        raise ScenarioValidationError(f"Ungültiges JSON in {path}: {exc}") from exc
+
+    scenarios: List[RentalScenario] = []
+    entries = data.get("scenarios")
+    if not isinstance(entries, list):
+        raise ScenarioValidationError("Die Datei muss ein 'scenarios'-Array enthalten.")
+
+    for idx, entry in enumerate(entries):
+        _validate_scenario_dict(entry, idx)
         scenarios.append(RentalScenario(**entry))
     return scenarios
+
+
+def _validate_scenario_dict(entry: Dict[str, object], index: int) -> None:
+    required_fields = {
+        "name",
+        "purchase_price",
+        "closing_costs",
+        "down_payment",
+        "interest_rate",
+        "loan_years",
+        "monthly_rent",
+        "vacancy_rate",
+        "monthly_operating_expenses",
+        "property_management_rate",
+        "maintenance_reserve_rate",
+        "annual_rent_growth",
+        "annual_expense_growth",
+    }
+
+    if not isinstance(entry, dict):
+        raise ScenarioValidationError(f"Szenario #{index + 1} muss ein Objekt sein.")
+
+    missing = required_fields - set(entry)
+    if missing:
+        raise ScenarioValidationError(
+            f"Szenario '{entry.get('name', index + 1)}' fehlt: {', '.join(sorted(missing))}"
+        )
+
+    numeric_fields = required_fields - {"name"}
+    for field in numeric_fields:
+        value = entry[field]
+        if not isinstance(value, (int, float)):
+            raise ScenarioValidationError(
+                f"Feld '{field}' in Szenario '{entry.get('name', index + 1)}' muss numerisch sein."
+            )
+        if field.endswith("rate") and value < 0:
+            raise ScenarioValidationError(
+                f"Feld '{field}' in Szenario '{entry.get('name', index + 1)}' darf nicht negativ sein."
+            )
+
+    if entry.get("projection_years", 1) <= 0:
+        raise ScenarioValidationError(
+            f"Feld 'projection_years' in Szenario '{entry.get('name', index + 1)}' muss größer 0 sein."
+        )
 
 
 def print_metrics(name: str, metrics: RentalMetrics) -> None:
@@ -536,7 +598,7 @@ def run_server(initial_scenarios: List[RentalScenario], host: str, port: int, da
             loaded = load_scenarios(data_path)
             print(f"Gespeicherte Daten geladen aus {data_path}")
             initial_scenarios = loaded
-        except Exception as exc:  # pragma: no cover - defensive
+        except ScenarioValidationError as exc:  # pragma: no cover - defensive
             print(f"Konnte {data_path} nicht laden ({exc}), verwende Konfigurationsdatei.")
 
     RentalUIHandler.scenarios = initial_scenarios
@@ -595,7 +657,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    scenarios = load_scenarios(args.config)
+    try:
+        scenarios = load_scenarios(args.config)
+    except ScenarioValidationError as exc:
+        sys.exit(str(exc))
 
     if args.serve:
         try:
