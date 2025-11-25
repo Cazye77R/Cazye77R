@@ -7,6 +7,7 @@ Dieses Repository enthält ein lokal ausführbares Python-Tool, mit dem sich Ver
 - Projektion von Cashflows mit Mieten- und Kostenwachstum
 - Diagrammexport (Cashflow und Restschuldverlauf) via Matplotlib
 - Export der Kennzahlen als JSON für weitere Auswertungen
+- Dunkle Weboberfläche mit interaktiven Diagrammen, Import- und Export-Buttons
 
 ## Installation
 Stelle sicher, dass Python 3.10+ installiert ist. Installiere die benötigten Pakete in einer virtuellen Umgebung:
@@ -30,6 +31,14 @@ python rental_tool.py example_property.json
 ```bash
 python rental_tool.py example_property.json --export reports/metrics.json --plot reports/cashflow.png
 ```
+
+4. Interaktive Dark-UI starten (lokal im Browser nutzen, inkl. Datenimport/-export):
+
+```bash
+python rental_tool.py example_property.json --serve --data-path saved_scenarios.json
+```
+
+Rufe anschließend im Browser `http://localhost:8000` auf. Dort kannst du die Szenarien durchblättern, Kennzahlen ansehen, die Diagramme betrachten sowie JSON-Dateien importieren oder exportieren. Importierte Daten werden automatisch unter `saved_scenarios.json` gespeichert, sodass du sie später erneut laden kannst.
 
 ## Beispiel
 In `example_property.json` sind zwei Szenarien hinterlegt. Der Aufruf oben gibt die Kennzahlen beider Szenarien in der Konsole aus und erzeugt auf Wunsch eine Cashflow-Grafik sowie einen JSON-Report.
