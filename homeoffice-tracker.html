@@ -436,6 +436,12 @@
   const DAYS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
   const MONTHS = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
 
+  function esc(str) {
+    return String(str)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
   function fmt(dateStr) {
     const [y,m,d] = dateStr.split('-');
     return `${d}.${m}.${y}`;
@@ -646,7 +652,7 @@
         <td><span style="color:var(--accent);font-weight:600">${e.ho}h</span></td>
         <td><span style="color:var(--orange)">${e.priv}h</span></td>
         <td>${pctBadge(pct)}</td>
-        <td style="color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.note || '—'}</td>
+        <td style="color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.note ? esc(e.note) : '—'}</td>
         <td><button class="del-btn" onclick="deleteEntry('${e.date}')" title="Löschen">&#x2715;</button></td>
       </tr>`;
     }).join('');
