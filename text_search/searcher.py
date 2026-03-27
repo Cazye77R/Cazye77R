@@ -30,10 +30,21 @@ def build_search_index(
     chunks: List[Chunk],
     semantic: bool = True,
     model_name: str = "all-MiniLM-L6-v2",
+    batch_size: int = 64,
+    offline: bool = False,
 ) -> SearchIndex:
     """Build both sub-indexes from the same chunk list."""
     kw_index = build_index(chunks)
-    emb_index = build_embedding_index(chunks, model_name=model_name) if semantic else None
+    emb_index = (
+        build_embedding_index(
+            chunks,
+            model_name=model_name,
+            batch_size=batch_size,
+            offline=offline,
+        )
+        if semantic
+        else None
+    )
     return SearchIndex(keyword_index=kw_index, embedding_index=emb_index)
 
 
@@ -43,6 +54,7 @@ def search(
     mode: SearchMode = "hybrid",
     top_k: int = 10,
     semantic_weight: float = 0.5,
+    offline: bool = False,
 ) -> List[SearchResult]:
     """
     Run keyword and/or semantic search and return merged, deduplicated results.
@@ -55,23 +67,20 @@ def search(
         return [SearchResult(chunk=r.chunk, score=r.score, mode="keyword") for r in kw_results]
 
     if mode == "semantic":
-        sem_results = search_semantic(index.embedding_index, query, top_k=top_k)
+        sem_results = search_semantic(index.embedding_index, query, top_k=top_k, offline=offline)
         return [SearchResult(chunk=r.chunk, score=r.score, mode="semantic") for r in sem_results]
 
     # Hybrid: fetch more candidates then merge
     fetch_k = max(top_k * 2, 20)
     kw_results = search_keyword(index.keyword_index, query, top_k=fetch_k)
-    sem_results = search_semantic(index.embedding_index, query, top_k=fetch_k)
+    sem_results = search_semantic(index.embedding_index, query, top_k=fetch_k, offline=offline)
 
-    # Build score maps keyed by chunk_id
     kw_map: dict[int, float] = {r.chunk.chunk_id: r.score for r in kw_results}
     sem_map: dict[int, float] = {r.chunk.chunk_id: r.score for r in sem_results}
 
-    # Min-max normalize each list independently
     kw_map = _minmax(kw_map)
     sem_map = _minmax(sem_map)
 
-    # Collect all candidate chunk ids
     all_ids = set(kw_map) | set(sem_map)
     chunk_by_id = {r.chunk.chunk_id: r.chunk for r in kw_results}
     chunk_by_id.update({r.chunk.chunk_id: r.chunk for r in sem_results})

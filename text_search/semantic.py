@@ -1,6 +1,7 @@
 """Semantic search via sentence-transformer embeddings and cosine similarity."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import List
 
@@ -32,9 +33,10 @@ def build_embedding_index(
     model_name: str = DEFAULT_MODEL,
     batch_size: int = 64,
     device: str | None = None,
+    offline: bool = False,
 ) -> EmbeddingIndex:
     """Encode all chunk texts and return a normalized embedding matrix."""
-    model = _get_model(model_name)
+    model = _get_model(model_name, offline=offline)
     texts = [c.text for c in chunks]
     embeddings: torch.Tensor = model.encode(  # type: ignore[attr-defined]
         texts,
@@ -52,9 +54,10 @@ def search_semantic(
     query: str,
     top_k: int = 10,
     device: str | None = None,
+    offline: bool = False,
 ) -> List[SemanticResult]:
     """Embed query and return top_k chunks by cosine similarity."""
-    model = _get_model(index.model_name)
+    model = _get_model(index.model_name, offline=offline)
     query_vec: torch.Tensor = model.encode(  # type: ignore[attr-defined]
         [query],
         convert_to_tensor=True,
@@ -69,8 +72,18 @@ def search_semantic(
     return [SemanticResult(chunk=index.chunks[i], score=float(s)) for i, s in ranked]
 
 
-def _get_model(model_name: str) -> object:
+def _get_model(model_name: str, offline: bool = False) -> object:
+    """Return a cached SentenceTransformer instance.
+
+    When offline=True, sets TRANSFORMERS_OFFLINE=1 and HF_DATASETS_OFFLINE=1
+    so the library never attempts a network connection. The model must already
+    be present in the local HuggingFace cache (~/.cache/huggingface/) or at
+    the path given as model_name.
+    """
     if model_name not in _MODEL_CACHE:
+        if offline:
+            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+            os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
         from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
         _MODEL_CACHE[model_name] = SentenceTransformer(model_name)
     return _MODEL_CACHE[model_name]

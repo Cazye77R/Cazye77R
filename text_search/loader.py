@@ -16,20 +16,20 @@ class Chunk:
     line_start: int | None
 
 
-def load_file(path: Path) -> List[Chunk]:
+def load_file(path: Path, chunk_size: int = 300, overlap: int = 50) -> List[Chunk]:
     """Dispatch to the correct loader based on file suffix."""
     suffix = path.suffix.lower()
     if suffix == ".pdf":
-        return _load_pdf(path)
+        return _load_pdf(path, chunk_size=chunk_size, overlap=overlap)
     if suffix == ".csv":
-        return _load_csv(path)
-    # .txt and .md treated identically
-    return _load_text(path)
+        return _load_csv(path)  # CSV: 1 Chunk pro Zeile, chunk_size irrelevant
+    return _load_text(path, chunk_size=chunk_size, overlap=overlap)
 
 
-def _load_text(path: Path) -> List[Chunk]:
+def _load_text(path: Path, chunk_size: int = 300, overlap: int = 50) -> List[Chunk]:
     text = path.read_text(encoding="utf-8", errors="replace")
-    return _chunk_text(text, source=path.name, base_line=1)
+    return _chunk_text(text, source=path.name, base_line=1,
+                       chunk_size=chunk_size, overlap=overlap)
 
 
 def _load_csv(path: Path) -> List[Chunk]:
@@ -56,7 +56,7 @@ def _load_csv(path: Path) -> List[Chunk]:
     return chunks
 
 
-def _load_pdf(path: Path) -> List[Chunk]:
+def _load_pdf(path: Path, chunk_size: int = 300, overlap: int = 50) -> List[Chunk]:
     import pdfplumber
 
     chunks: List[Chunk] = []
@@ -69,6 +69,8 @@ def _load_pdf(path: Path) -> List[Chunk]:
                 source=path.name,
                 base_line=None,
                 page=page_num,
+                chunk_size=chunk_size,
+                overlap=overlap,
                 start_chunk_id=chunk_id,
             )
             chunks.extend(page_chunks)
@@ -86,9 +88,7 @@ def _chunk_text(
     start_chunk_id: int = 0,
 ) -> List[Chunk]:
     """Split text into overlapping word-window chunks."""
-    # Split preserving rough line positions
     words = re.split(r"(\s+)", text)
-    # Filter to word tokens only, tracking positions
     tokens: List[str] = []
     for w in words:
         stripped = w.strip()
@@ -109,7 +109,6 @@ def _chunk_text(
             break
         chunk_text = " ".join(window)
 
-        # Approximate line_start: count newlines up to this token offset
         line_start: int | None = None
         if base_line is not None:
             prefix_text = " ".join(tokens[:start])
@@ -126,7 +125,6 @@ def _chunk_text(
         )
         chunk_id += 1
 
-        # If this window reaches the end, stop
         if end >= len(tokens):
             break
 

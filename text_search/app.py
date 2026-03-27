@@ -12,13 +12,33 @@ from .loader import Chunk, load_file
 from .searcher import SearchIndex, SearchMode, SearchResult, build_search_index, load_index, save_index
 
 # ---------------------------------------------------------------------------
+# Speed presets
+# ---------------------------------------------------------------------------
+
+PRESETS: dict[str, dict] = {
+    "⚡ Schnell":    {"mode": "keyword",  "chunk_size": 500, "overlap": 0,  "top_k": 5,  "batch_size": 64},
+    "⚖ Ausgewogen": {"mode": "hybrid",   "chunk_size": 300, "overlap": 50, "top_k": 10, "batch_size": 64},
+    "🎯 Präzise":   {"mode": "semantic", "chunk_size": 150, "overlap": 50, "top_k": 15, "batch_size": 128},
+}
+
+# Model metadata for the info box
+MODEL_INFO: dict[str, dict] = {
+    "all-MiniLM-L6-v2":  {"size": "~27 MB",  "dim": 384, "speed": "schnell", "score": "58.9"},
+    "all-mpnet-base-v2":  {"size": "~420 MB", "dim": 768, "speed": "langsam", "score": "63.3"},
+}
+
+# ---------------------------------------------------------------------------
 # Caching helpers
 # ---------------------------------------------------------------------------
 
 @st.cache_resource(show_spinner="Embedding-Modell wird geladen...")
-def _cached_model(model_name: str) -> None:
+def _cached_model(model_name: str, offline: bool) -> None:
     """Pre-load the SentenceTransformer once per session."""
     from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+    import os
+    if offline:
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
     return SentenceTransformer(model_name)
 
 
@@ -26,19 +46,29 @@ def _cached_model(model_name: str) -> None:
 def _cached_index(
     file_bytes_map: dict[str, bytes],
     semantic: bool,
-    model_name: str,
+    effective_model: str,
+    chunk_size: int,
+    overlap: int,
+    batch_size: int,
+    offline: bool,
 ) -> SearchIndex:
     """Build search index from a {filename: bytes} dict.
-    Streamlit hashes the dict automatically — same uploads → instant cache hit.
+    All parameters flow into the cache key — changing any of them triggers a full rebuild.
     """
     chunks: List[Chunk] = []
     with tempfile.TemporaryDirectory() as tmp_dir:
         for filename, data in file_bytes_map.items():
             tmp_path = Path(tmp_dir) / filename
             tmp_path.write_bytes(data)
-            chunks.extend(load_file(tmp_path))
+            chunks.extend(load_file(tmp_path, chunk_size=chunk_size, overlap=overlap))
 
-    return build_search_index(chunks, semantic=semantic, model_name=model_name)
+    return build_search_index(
+        chunks,
+        semantic=semantic,
+        model_name=effective_model,
+        batch_size=batch_size,
+        offline=offline,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -58,13 +88,6 @@ _DARK_CSS = """
     background-color: rgba(255, 255, 255, 0.03);
     border-radius: 12px;
     padding: 8px;
-}
-.result-card {
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin-bottom: 10px;
 }
 .score-badge {
     display: inline-block;
@@ -144,19 +167,16 @@ def _render_result(
             )
 
         with top_cols[1]:
-            # Download-Button direkt im Card (nur wenn Datei hochgeladen wurde)
             if result.chunk.source in file_bytes_map:
                 st.download_button(
-                    label=f"⬇ Quelldatei",
+                    label="⬇ Quelldatei",
                     data=file_bytes_map[result.chunk.source],
                     file_name=result.chunk.source,
                     key=f"dl_{result.chunk.chunk_id}",
                 )
 
         with top_cols[2]:
-            show_full = st.checkbox(
-                "Volltext anzeigen", key=f"full_{result.chunk.chunk_id}"
-            )
+            show_full = st.checkbox("Volltext anzeigen", key=f"full_{result.chunk.chunk_id}")
 
         st.divider()
 
@@ -190,30 +210,92 @@ def main() -> None:
     st.markdown(_DARK_CSS, unsafe_allow_html=True)
     st.title("🔍 Lightweight Text Search")
 
-    # --- Sidebar ---
+    # --- Sidebar: Preset ---
     st.sidebar.header("Einstellungen")
+    preset_name = st.sidebar.radio("Voreinstellung", list(PRESETS.keys()), index=1)
+    preset = PRESETS[preset_name]
+    st.sidebar.markdown("---")
+
+    # --- Sidebar: Search mode (pre-filled from preset) ---
     mode: SearchMode = st.sidebar.radio(  # type: ignore[assignment]
         "Suchmodus",
         options=["hybrid", "keyword", "semantic"],
+        index=["hybrid", "keyword", "semantic"].index(preset["mode"]),
         format_func=lambda x: {"hybrid": "Hybrid", "keyword": "Keyword (BM25)", "semantic": "Semantik"}[x],
     )
-    top_k = st.sidebar.slider("Anzahl Ergebnisse", min_value=1, max_value=20, value=10)
+    top_k = st.sidebar.slider("Anzahl Ergebnisse", min_value=1, max_value=20,
+                               value=preset["top_k"])
     semantic_weight = 0.5
     if mode == "hybrid":
         semantic_weight = st.sidebar.slider(
             "Semantik-Gewicht", min_value=0.0, max_value=1.0, value=0.5, step=0.05
         )
 
+    # --- Sidebar: Advanced settings ---
+    with st.sidebar.expander("Erweiterte Einstellungen", expanded=False):
+        chunk_size = st.slider("Chunk-Größe (Wörter)", 50, 800,
+                               value=preset["chunk_size"], step=50,
+                               help="Größere Chunks = weniger Chunks = schnellerer Index. "
+                                    "Kleinere Chunks = präzisere Treffer.")
+        overlap = st.slider("Überlappung (Wörter)", 0, 200,
+                            value=preset["overlap"], step=10,
+                            help="Überlappung zwischen benachbarten Chunks. 0 = kein Overlap.")
+        batch_size = st.select_slider(
+            "Embedding Batch-Size",
+            options=[16, 32, 64, 128, 256],
+            value=preset["batch_size"],
+            help="Größerer Batch = schnelleres Indexieren (benötigt mehr RAM/VRAM).",
+        )
+
+    # --- Sidebar: Model ---
     use_semantic = mode in ("semantic", "hybrid")
     model_name = "all-MiniLM-L6-v2"
+    offline = False
+    effective_model = model_name
+
     if use_semantic:
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Embedding-Modell")
         model_name = st.sidebar.selectbox(
-            "Embedding-Modell",
-            options=["all-MiniLM-L6-v2", "all-mpnet-base-v2"],
+            "Modell",
+            options=list(MODEL_INFO.keys()),
             index=0,
         )
-        _cached_model(model_name)
 
+        # Offline mode & local path
+        local_model_path = st.sidebar.text_input(
+            "Lokaler Modellpfad (optional)",
+            placeholder="/pfad/zum/modell oder leer für Auto-Download",
+            help="Lokalen Pfad angeben → kein Netzwerkzugriff nötig.",
+        )
+        offline = st.sidebar.checkbox(
+            "Offline-Modus",
+            value=bool(local_model_path.strip()),
+            help="Setzt TRANSFORMERS_OFFLINE=1. Das Modell muss bereits lokal gecacht sein "
+                 "(~/.cache/huggingface/) oder der Pfad oben muss angegeben sein.",
+        )
+        effective_model = local_model_path.strip() or model_name
+
+        # Model info box
+        info = MODEL_INFO.get(model_name, {})
+        network_line = "🔒 Vollständig lokal (Offline-Modus)" if offline else "🌐 Einmalig von HuggingFace · danach 100% lokal"
+        if info:
+            st.sidebar.info(
+                f"**{effective_model}**  \n"
+                f"Größe: {info['size']} · Dim: {info['dim']}  \n"
+                f"Geschwindigkeit: {info['speed']} · MTEB: {info['score']}  \n"
+                f"{network_line}"
+            )
+
+        # Warm up model cache
+        try:
+            _cached_model(effective_model, offline)
+        except Exception:
+            pass
+    else:
+        st.sidebar.info("⚡ Keyword-Modus: kein Modell nötig, 100% lokal & offline.")
+
+    # --- Sidebar: Index cache ---
     st.sidebar.markdown("---")
     st.sidebar.subheader("Index-Cache")
     cached_index_upload = st.sidebar.file_uploader(
@@ -228,9 +310,7 @@ def main() -> None:
         accept_multiple_files=True,
     )
 
-    # Build file_bytes_map for download buttons (empty if no upload)
     file_bytes_map: dict[str, bytes] = {f.name: f.getvalue() for f in (uploaded_files or [])}
-
     search_index: SearchIndex | None = None
 
     # Restore from uploaded cache
@@ -246,33 +326,41 @@ def main() -> None:
 
     if uploaded_files:
         st.subheader("2. Index aufbauen")
-        st.info(f"{len(uploaded_files)} Datei(en) bereit. Klicke auf den Button, um den Index zu erstellen.")
+        preset_hint = f"Preset: **{preset_name}** · Chunk-Größe: {chunk_size} · Overlap: {overlap}"
+        st.info(f"{len(uploaded_files)} Datei(en) bereit. {preset_hint}")
 
         if st.button("Index aufbauen", type="primary"):
             try:
                 search_index = _cached_index(
                     file_bytes_map=file_bytes_map,
                     semantic=use_semantic,
-                    model_name=model_name,
+                    effective_model=effective_model,
+                    chunk_size=chunk_size,
+                    overlap=overlap,
+                    batch_size=batch_size,
+                    offline=offline,
                 )
                 n_chunks = len(search_index.keyword_index.chunks)
                 st.success(f"Index fertig — {n_chunks} Chunks aus {len(uploaded_files)} Datei(en)")
             except Exception as exc:
                 st.error(f"Fehler beim Indexieren: {exc}")
 
-        # Retrieve cached index without re-building
         if search_index is None:
             try:
                 search_index = _cached_index.cache_data(  # type: ignore[attr-defined]
                     file_bytes_map=file_bytes_map,
                     semantic=use_semantic,
-                    model_name=model_name,
+                    effective_model=effective_model,
+                    chunk_size=chunk_size,
+                    overlap=overlap,
+                    batch_size=batch_size,
+                    offline=offline,
                 )
             except Exception:
                 pass
 
     if search_index is not None:
-        # Index download (sidebar)
+        # Index download
         with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as tmp:
             save_index(search_index, Path(tmp.name))
             idx_bytes = Path(tmp.name).read_bytes()
@@ -296,6 +384,7 @@ def main() -> None:
                 mode=mode,
                 top_k=top_k,
                 semantic_weight=semantic_weight,
+                offline=offline,
             )
 
             if results:
