@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Home Office Tracker</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d2e;
+      --surface2: #252840;
+      --border: #2e3250;
+      --accent: #5b8dee;
+      --accent2: #a78bfa;
+      --green: #34d399;
+      --orange: #fb923c;
+      --red: #f87171;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --radius: 10px;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 28px; }
+
+    /* ---- Layout ---- */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .card h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+
+    /* ---- Stats ---- */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 900px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 500px) { .stats-grid { grid-template-columns: 1fr 1fr; } }
+
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+    .stat-label { font-size: 0.75rem; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-value { font-size: 1.8rem; font-weight: 700; line-height: 1; }
+    .stat-sub { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
+    .c-blue  { color: var(--accent); }
+    .c-green { color: var(--green); }
+    .c-orange{ color: var(--orange); }
+    .c-purple{ color: var(--accent2); }
+
+    /* ---- Progress bar ---- */
+    .progress-wrap { margin-top: 8px; }
+    .progress-label { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--muted); margin-bottom: 4px; }
+    .progress { background: var(--surface2); border-radius: 999px; height: 8px; overflow: hidden; }
+    .progress-fill { height: 100%; border-radius: 999px; transition: width 0.4s ease; }
+    .fill-blue   { background: var(--accent); }
+    .fill-green  { background: var(--green); }
+    .fill-orange { background: var(--orange); }
+
+    /* ---- Form ---- */
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr auto;
+      gap: 10px;
+      align-items: end;
+    }
+    @media (max-width: 800px) { .form-row { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 500px) { .form-row { grid-template-columns: 1fr; } }
+
+    label { display: block; font-size: 0.78rem; color: var(--muted); margin-bottom: 5px; }
+
+    input[type="date"],
+    input[type="number"],
+    input[type="text"],
+    textarea {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 8px 10px;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus, textarea:focus { border-color: var(--accent); }
+    input[type="number"] { -moz-appearance: textfield; }
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+    .btn {
+      padding: 8px 18px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 600;
+      transition: opacity 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-ghost   { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-danger  { background: #3d1f1f; color: var(--red); border: 1px solid #5c2626; }
+    .btn-green   { background: #14432e; color: var(--green); border: 1px solid #1e6644; }
+    .btn:hover   { opacity: 0.85; }
+
+    .btn-group { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+
+    /* ---- Table ---- */
+    .table-wrap { overflow-x: auto; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    thead th {
+      text-align: left;
+      padding: 8px 10px;
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background 0.15s; }
+    tbody tr:hover { background: var(--surface2); }
+    tbody td { padding: 9px 10px; vertical-align: middle; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge-green  { background: #14432e; color: var(--green); }
+    .badge-orange { background: #3d2710; color: var(--orange); }
+    .badge-red    { background: #3d1f1f; color: var(--red); }
+
+    .del-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .del-btn:hover { color: var(--red); background: #3d1f1f; }
+
+    /* ---- Chart ---- */
+    .chart-container {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      height: 120px;
+      overflow-x: auto;
+      padding-bottom: 20px;
+      position: relative;
+    }
+    .chart-bar-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      flex-shrink: 0;
+      width: 28px;
+    }
+    .chart-bar {
+      width: 100%;
+      border-radius: 3px 3px 0 0;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .chart-bar:hover { opacity: 0.75; }
+    .chart-label { font-size: 0.6rem; color: var(--muted); writing-mode: vertical-rl; transform: rotate(180deg); height: 40px; line-height: 1; }
+    .chart-legend { display: flex; gap: 16px; margin-top: 8px; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--muted); }
+    .legend-dot  { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+    /* ---- Filter/Sort ---- */
+    .filter-row { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+    .filter-row input, .filter-row select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.85rem;
+      outline: none;
+    }
+    .filter-row select option { background: var(--surface2); }
+
+    /* ---- Toast ---- */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.25s, transform 0.25s;
+      pointer-events: none;
+      z-index: 9999;
+      max-width: 300px;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+
+    /* ---- Modal ---- */
+    .modal-backdrop {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      width: 90%;
+      max-width: 480px;
+    }
+    .modal h2 { margin-bottom: 12px; }
+    .modal textarea { min-height: 120px; font-family: monospace; font-size: 0.8rem; }
+    .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+    .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+    .empty { text-align: center; color: var(--muted); padding: 32px; font-size: 0.9rem; }
+
+    /* ---- Year summary ---- */
+    .year-select { background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 10px; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+
+<h1>Home Office Tracker</h1>
+<p class="subtitle">Erfasse deine Homeoffice-Tage und die private Hardwarenutzung zur steuerlichen Auswertung.</p>
+
+<!-- Stats -->
+<div class="stats-grid" id="statsGrid">
+  <div class="stat">
+    <div class="stat-label">HO-Tage gesamt</div>
+    <div class="stat-value c-blue" id="s-days">0</div>
+    <div class="stat-sub">Eingetragene Tage</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">HO-Stunden gesamt</div>
+    <div class="stat-value c-green" id="s-hoHours">0h</div>
+    <div class="stat-sub">Homeoffice gearbeitet</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Privatnutzung gesamt</div>
+    <div class="stat-value c-orange" id="s-privHours">0h</div>
+    <div class="stat-sub">Private Hardwarenutzung</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Berufl. Nutzungsanteil</div>
+    <div class="stat-value c-purple" id="s-pct">0%</div>
+    <div class="stat-sub">für Steuer relevant</div>
+  </div>
+</div>
+
+<!-- Progress bars -->
+<div class="card" style="margin-bottom:16px">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+    <h2 style="margin:0">Auswertung</h2>
+    <select class="year-select" id="yearSelect" onchange="render()"></select>
+  </div>
+  <div class="progress-wrap" style="margin-bottom:14px">
+    <div class="progress-label"><span>Berufliche Nutzung</span><span id="pb-label1">0% von 100%</span></div>
+    <div class="progress"><div class="progress-fill fill-blue" id="pb1" style="width:0%"></div></div>
+  </div>
+  <div class="progress-wrap" style="margin-bottom:14px">
+    <div class="progress-label"><span>Private Nutzung</span><span id="pb-label2">0% von 100%</span></div>
+    <div class="progress"><div class="progress-fill fill-orange" id="pb2" style="width:0%"></div></div>
+  </div>
+  <div class="progress-wrap">
+    <div class="progress-label"><span>Ø HO-Stunden / Tag</span><span id="pb-label3">0h</span></div>
+    <div class="progress"><div class="progress-fill fill-green" id="pb3" style="width:0%"></div></div>
+  </div>
+  <div class="chart-legend" style="margin-top:16px">
+    <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div> Homeoffice-Stunden</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div> Privatnutzung-Stunden</div>
+  </div>
+  <div class="chart-container" id="chart" style="margin-top:10px"></div>
+</div>
+
+<div class="grid-2">
+  <!-- Eingabe -->
+  <div class="card">
+    <h2>Eintrag hinzufügen</h2>
+    <div class="form-row">
+      <div>
+        <label>Datum</label>
+        <input type="date" id="f-date" />
+      </div>
+      <div>
+        <label>HO-Stunden</label>
+        <input type="number" id="f-ho" min="0" max="24" step="0.25" placeholder="z.B. 8" />
+      </div>
+      <div>
+        <label>Privatnutzung (h)</label>
+        <input type="number" id="f-priv" min="0" max="24" step="0.25" placeholder="z.B. 2" />
+      </div>
+      <div>
+        <label>Notiz (opt.)</label>
+        <input type="text" id="f-note" placeholder="z.B. Meeting…" maxlength="80" />
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button class="btn btn-primary" onclick="addEntry()">+ Hinzufügen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import / Export -->
+  <div class="card">
+    <h2>Import &amp; Export</h2>
+    <div class="btn-group">
+      <button class="btn btn-green" onclick="exportCSV()">&#8595; CSV exportieren</button>
+      <button class="btn btn-ghost" onclick="openImportModal()">&#8593; CSV importieren</button>
+      <button class="btn btn-danger" onclick="clearAll()">&#x2715; Alle löschen</button>
+    </div>
+    <p style="font-size:0.78rem; color:var(--muted); line-height:1.5;">
+      CSV-Format: <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:0.75rem">Datum,HO-Stunden,Privatnutzung,Notiz</code><br>
+      Datum im Format <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:0.75rem">YYYY-MM-DD</code>
+    </p>
+  </div>
+</div>
+
+<hr class="divider" />
+
+<!-- Table -->
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+    <h2 style="margin:0">Alle Einträge</h2>
+    <div class="filter-row" style="margin:0">
+      <input type="month" id="filterMonth" onchange="render()" title="Monat filtern" />
+      <select id="filterSort" onchange="render()">
+        <option value="desc">Neueste zuerst</option>
+        <option value="asc">Älteste zuerst</option>
+      </select>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table id="entriesTable">
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Wochentag</th>
+          <th>HO-Stunden</th>
+          <th>Privatnutzung</th>
+          <th>Berufl. Anteil</th>
+          <th>Notiz</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="entriesBody">
+      </tbody>
+    </table>
+    <div class="empty" id="emptyMsg" style="display:none">Noch keine Einträge. Füge deinen ersten Tag hinzu!</div>
+  </div>
+</div>
+
+<!-- Import Modal -->
+<div class="modal-backdrop" id="importModal">
+  <div class="modal">
+    <h2>CSV importieren</h2>
+    <p style="font-size:0.82rem;color:var(--muted);margin-bottom:10px;">
+      Füge den CSV-Inhalt ein. Bestehende Einträge bleiben erhalten (Duplikate werden übersprungen).
+    </p>
+    <label>CSV-Inhalt</label>
+    <textarea id="csvInput" placeholder="Datum,HO-Stunden,Privatnutzung,Notiz&#10;2025-01-15,8,1.5,Projekt X"></textarea>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeImportModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="importCSV()">Importieren</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const STORAGE_KEY = 'ho_tracker_v1';
+
+  // ---- Data ----
+  let entries = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+  }
+
+  // ---- Helpers ----
+  const DAYS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+  const MONTHS = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+
+  function fmt(dateStr) {
+    const [y,m,d] = dateStr.split('-');
+    return `${d}.${m}.${y}`;
+  }
+  function weekday(dateStr) {
+    return DAYS[new Date(dateStr + 'T12:00:00').getDay()];
+  }
+  function pctBadge(pct) {
+    if (pct >= 70) return `<span class="badge badge-green">${pct.toFixed(0)}%</span>`;
+    if (pct >= 40) return `<span class="badge badge-orange">${pct.toFixed(0)}%</span>`;
+    return `<span class="badge badge-red">${pct.toFixed(0)}%</span>`;
+  }
+  function toast(msg, dur = 2500) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), dur);
+  }
+  function getYears() {
+    const years = [...new Set(entries.map(e => e.date.slice(0,4)))].sort().reverse();
+    if (years.length === 0) years.push(new Date().getFullYear().toString());
+    return years;
+  }
+
+  // ---- Add Entry ----
+  function addEntry() {
+    const date  = document.getElementById('f-date').value;
+    const ho    = parseFloat(document.getElementById('f-ho').value);
+    const priv  = parseFloat(document.getElementById('f-priv').value);
+    const note  = document.getElementById('f-note').value.trim();
+
+    if (!date)           { toast('Bitte ein Datum eingeben.'); return; }
+    if (isNaN(ho) || ho < 0)   { toast('Bitte gültige HO-Stunden eingeben.'); return; }
+    if (isNaN(priv) || priv < 0) { toast('Bitte gültige Privatnutzung eingeben.'); return; }
+    if (ho + priv > 24)  { toast('Summe darf 24h nicht überschreiten.'); return; }
+
+    if (entries.find(e => e.date === date)) {
+      if (!confirm(`Für ${fmt(date)} existiert bereits ein Eintrag. Überschreiben?`)) return;
+      entries = entries.filter(e => e.date !== date);
+    }
+
+    entries.push({ date, ho, priv, note });
+    entries.sort((a,b) => a.date.localeCompare(b.date));
+    save();
+    render();
+    document.getElementById('f-ho').value = '';
+    document.getElementById('f-priv').value = '';
+    document.getElementById('f-note').value = '';
+    toast(`Eintrag für ${fmt(date)} gespeichert.`);
+  }
+
+  // ---- Delete ----
+  function deleteEntry(date) {
+    if (!confirm(`Eintrag vom ${fmt(date)} wirklich löschen?`)) return;
+    entries = entries.filter(e => e.date !== date);
+    save();
+    render();
+    toast('Eintrag gelöscht.');
+  }
+
+  // ---- Clear All ----
+  function clearAll() {
+    if (!confirm('Wirklich ALLE Einträge löschen? Diese Aktion kann nicht rückgängig gemacht werden!')) return;
+    entries = [];
+    save();
+    render();
+    toast('Alle Einträge gelöscht.');
+  }
+
+  // ---- Export CSV ----
+  function exportCSV() {
+    if (entries.length === 0) { toast('Keine Daten zum Exportieren.'); return; }
+    const header = 'Datum,HO-Stunden,Privatnutzung,Notiz';
+    const rows = entries.map(e => `${e.date},${e.ho},${e.priv},"${(e.note||'').replace(/"/g,'""')}"`);
+    const csv = [header, ...rows].join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `homeoffice_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast(`${entries.length} Einträge exportiert.`);
+  }
+
+  // ---- Import CSV ----
+  function openImportModal() {
+    document.getElementById('importModal').classList.add('open');
+    document.getElementById('csvInput').value = '';
+  }
+  function closeImportModal() {
+    document.getElementById('importModal').classList.remove('open');
+  }
+  function importCSV() {
+    const raw = document.getElementById('csvInput').value.trim();
+    if (!raw) { toast('Kein Inhalt eingegeben.'); return; }
+    const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+    let imported = 0, skipped = 0;
+    for (const line of lines) {
+      if (line.toLowerCase().startsWith('datum')) continue; // header
+      // parse CSV respecting quoted fields
+      const cols = parseCSVLine(line);
+      if (cols.length < 2) { skipped++; continue; }
+      const date = cols[0].trim();
+      const ho   = parseFloat(cols[1]) || 0;
+      const priv = parseFloat(cols[2]) || 0;
+      const note = (cols[3] || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { skipped++; continue; }
+      if (entries.find(e => e.date === date)) { skipped++; continue; }
+      entries.push({ date, ho, priv, note });
+      imported++;
+    }
+    entries.sort((a,b) => a.date.localeCompare(b.date));
+    save();
+    render();
+    closeImportModal();
+    toast(`${imported} importiert, ${skipped} übersprungen.`);
+  }
+  function parseCSVLine(line) {
+    const result = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"' && !inQ) { inQ = true; continue; }
+      if (c === '"' && inQ) {
+        if (line[i+1] === '"') { cur += '"'; i++; } else inQ = false;
+        continue;
+      }
+      if (c === ',' && !inQ) { result.push(cur); cur = ''; continue; }
+      cur += c;
+    }
+    result.push(cur);
+    return result;
+  }
+
+  // ---- Render ----
+  function render() {
+    renderYearSelect();
+    const selectedYear = document.getElementById('yearSelect').value;
+    const filterMonth  = document.getElementById('filterMonth').value; // YYYY-MM
+    const sortDir      = document.getElementById('filterSort').value;
+
+    // Year-filtered for stats/chart
+    const yearEntries = selectedYear
+      ? entries.filter(e => e.date.startsWith(selectedYear))
+      : entries;
+
+    // Month+sort filtered for table
+    let tableEntries = filterMonth
+      ? entries.filter(e => e.date.startsWith(filterMonth))
+      : entries;
+    tableEntries = [...tableEntries].sort((a,b) =>
+      sortDir === 'asc' ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date)
+    );
+
+    renderStats(yearEntries);
+    renderTable(tableEntries);
+    renderChart(yearEntries);
+  }
+
+  function renderYearSelect() {
+    const sel = document.getElementById('yearSelect');
+    const years = getYears();
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Alle Jahre</option>' +
+      years.map(y => `<option value="${y}" ${y===cur?'selected':''}>${y}</option>`).join('');
+    if (!sel.value && years.length) sel.value = years[0]; // default to latest
+  }
+
+  function renderStats(data) {
+    const totalHO   = data.reduce((s,e) => s + e.ho,   0);
+    const totalPriv = data.reduce((s,e) => s + e.priv, 0);
+    const totalAll  = totalHO + totalPriv;
+    const pctBusiness = totalAll > 0 ? (totalHO / totalAll * 100) : 0;
+    const pctPrivate  = totalAll > 0 ? (totalPriv / totalAll * 100) : 0;
+    const avgHO = data.length > 0 ? totalHO / data.length : 0;
+
+    document.getElementById('s-days').textContent    = data.length;
+    document.getElementById('s-hoHours').textContent = totalHO % 1 === 0 ? totalHO + 'h' : totalHO.toFixed(1) + 'h';
+    document.getElementById('s-privHours').textContent = totalPriv % 1 === 0 ? totalPriv + 'h' : totalPriv.toFixed(1) + 'h';
+    document.getElementById('s-pct').textContent    = pctBusiness.toFixed(1) + '%';
+
+    document.getElementById('pb1').style.width   = Math.min(pctBusiness,100) + '%';
+    document.getElementById('pb-label1').textContent = pctBusiness.toFixed(1) + '% beruflich';
+    document.getElementById('pb2').style.width   = Math.min(pctPrivate,100) + '%';
+    document.getElementById('pb-label2').textContent = pctPrivate.toFixed(1) + '% privat';
+    const avgPct = Math.min(avgHO / 10 * 100, 100);
+    document.getElementById('pb3').style.width   = avgPct + '%';
+    document.getElementById('pb-label3').textContent = avgHO.toFixed(2) + 'h / Tag';
+  }
+
+  function renderTable(data) {
+    const tbody = document.getElementById('entriesBody');
+    const empty = document.getElementById('emptyMsg');
+    if (data.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+    const totalPerEntry = (e) => e.ho + e.priv;
+    tbody.innerHTML = data.map(e => {
+      const total = totalPerEntry(e);
+      const pct = total > 0 ? (e.ho / total * 100) : 0;
+      return `<tr>
+        <td><strong>${fmt(e.date)}</strong></td>
+        <td style="color:var(--muted)">${weekday(e.date)}</td>
+        <td><span style="color:var(--accent);font-weight:600">${e.ho}h</span></td>
+        <td><span style="color:var(--orange)">${e.priv}h</span></td>
+        <td>${pctBadge(pct)}</td>
+        <td style="color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.note || '—'}</td>
+        <td><button class="del-btn" onclick="deleteEntry('${e.date}')" title="Löschen">&#x2715;</button></td>
+      </tr>`;
+    }).join('');
+  }
+
+  function renderChart(data) {
+    const chart = document.getElementById('chart');
+    if (data.length === 0) { chart.innerHTML = ''; return; }
+
+    // Group by month for bar chart
+    const byMonth = {};
+    for (const e of data) {
+      const mo = e.date.slice(0,7);
+      if (!byMonth[mo]) byMonth[mo] = { ho: 0, priv: 0 };
+      byMonth[mo].ho   += e.ho;
+      byMonth[mo].priv += e.priv;
+    }
+    const keys = Object.keys(byMonth).sort();
+    const maxVal = Math.max(...keys.map(k => byMonth[k].ho + byMonth[k].priv), 1);
+    const H = 90; // px height for 100%
+
+    chart.innerHTML = keys.map(k => {
+      const { ho, priv } = byMonth[k];
+      const total = ho + priv;
+      const hoH   = Math.round((ho / maxVal) * H);
+      const privH = Math.round((priv / maxVal) * H);
+      const [y, m] = k.split('-');
+      const label = MONTHS[parseInt(m,10)-1] + ' ' + y.slice(2);
+      return `<div class="chart-bar-wrap" title="${label}: ${ho}h HO, ${priv}h Privat, ${total>0?(ho/total*100).toFixed(0):'0'}% beruflich">
+        <div style="display:flex;flex-direction:column;justify-content:flex-end;height:${H}px;gap:2px">
+          <div class="chart-bar" style="background:var(--orange);height:${privH}px"></div>
+          <div class="chart-bar" style="background:var(--accent);height:${hoH}px"></div>
+        </div>
+        <div class="chart-label">${label}</div>
+      </div>`;
+    }).join('');
+  }
+
+  // ---- Init ----
+  (function init() {
+    // set today as default date
+    document.getElementById('f-date').value = new Date().toISOString().slice(0,10);
+    render();
+  })();
+
+  // close modal on backdrop click
+  document.getElementById('importModal').addEventListener('click', function(e) {
+    if (e.target === this) closeImportModal();
+  });
+
+  // keyboard shortcut: Enter on form
+  document.querySelectorAll('#f-date,#f-ho,#f-priv,#f-note').forEach(el => {
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') addEntry(); });
+  });
+</script>
+</body>
+</html>
