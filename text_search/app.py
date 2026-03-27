@@ -75,15 +75,6 @@ _DARK_CSS = """
     font-size: 0.8em;
     margin-right: 8px;
 }
-.meta-badge {
-    display: inline-block;
-    background: rgba(168,85,247,0.15);
-    color: #c084fc;
-    border-radius: 6px;
-    padding: 2px 8px;
-    font-size: 0.78em;
-    margin-right: 4px;
-}
 </style>
 """
 
@@ -104,36 +95,90 @@ def _build_snippet(text: str, query: str, context_words: int = 30) -> str:
         snippet = "..." + snippet
     if end < len(words):
         snippet = snippet + "..."
-    # Highlight query terms (case-insensitive)
-    for term in query_tokens:
-        snippet = re.sub(
-            rf"(?i)({re.escape(term)})",
-            r"**\1**",
-            snippet,
-        )
-    return snippet
+    return _highlight_query(snippet, query)
 
 
-def _render_result(result: SearchResult, rank: int, query: str) -> None:
+def _highlight_query(text: str, query: str) -> str:
+    """Bold all query terms in text (case-insensitive)."""
+    for term in re.sub(r"[^\w\s]", " ", query).lower().split():
+        text = re.sub(rf"(?i)({re.escape(term)})", r"**\1**", text)
+    return text
+
+
+def _get_neighbors(all_chunks: list[Chunk], chunk: Chunk, n: int = 1) -> list[Chunk]:
+    """Return up to n chunks before and after chunk within the same source."""
+    same = sorted(
+        [c for c in all_chunks if c.source == chunk.source],
+        key=lambda c: c.chunk_id,
+    )
+    idx = next((i for i, c in enumerate(same) if c.chunk_id == chunk.chunk_id), None)
+    if idx is None:
+        return []
+    return same[max(0, idx - n) : idx] + same[idx + 1 : idx + 1 + n]
+
+
+def _render_result(
+    result: SearchResult,
+    rank: int,
+    query: str,
+    all_chunks: list[Chunk],
+    file_bytes_map: dict[str, bytes],
+) -> None:
     score_pct = f"{result.score * 100:.1f}%" if result.score <= 1.0 else f"{result.score:.2f}"
-    meta_parts = [f"Datei: {result.chunk.source}"]
-    if result.chunk.page is not None:
-        meta_parts.append(f"Seite {result.chunk.page}")
-    if result.chunk.line_start is not None:
-        meta_parts.append(f"Zeile {result.chunk.line_start}")
 
-    header = f"#{rank}  {result.chunk.source}"
+    # Seite/Zeile prominent im Header
+    loc = ""
+    if result.chunk.page is not None:
+        loc = f"  ·  Seite {result.chunk.page}"
+    elif result.chunk.line_start is not None:
+        loc = f"  ·  Zeile {result.chunk.line_start}"
+    header = f"#{rank}  {result.chunk.source}{loc}"
+
     with st.expander(header, expanded=rank <= 3):
-        cols = st.columns([1, 4])
-        with cols[0]:
+        top_cols = st.columns([2, 2, 3])
+
+        with top_cols[0]:
             st.markdown(
-                f'<span class="score-badge">Score {score_pct}</span>'
-                + "".join(f'<span class="meta-badge">{m}</span>' for m in meta_parts[1:]),
+                f'<span class="score-badge">Score {score_pct}</span>',
                 unsafe_allow_html=True,
             )
-        with cols[1]:
-            snippet = _build_snippet(result.chunk.text, query)
-            st.markdown(snippet)
+
+        with top_cols[1]:
+            # Download-Button direkt im Card (nur wenn Datei hochgeladen wurde)
+            if result.chunk.source in file_bytes_map:
+                st.download_button(
+                    label=f"⬇ Quelldatei",
+                    data=file_bytes_map[result.chunk.source],
+                    file_name=result.chunk.source,
+                    key=f"dl_{result.chunk.chunk_id}",
+                )
+
+        with top_cols[2]:
+            show_full = st.checkbox(
+                "Volltext anzeigen", key=f"full_{result.chunk.chunk_id}"
+            )
+
+        st.divider()
+
+        if show_full:
+            neighbors = _get_neighbors(all_chunks, result.chunk)
+            neighbors_before = [c for c in neighbors if c.chunk_id < result.chunk.chunk_id]
+            neighbors_after = [c for c in neighbors if c.chunk_id > result.chunk.chunk_id]
+
+            for c in neighbors_before:
+                st.caption(f"← Vorheriger Chunk (Chunk #{c.chunk_id})")
+                st.text(c.text)
+                st.divider()
+
+            st.caption(f"Treffer-Chunk #{result.chunk.chunk_id}")
+            st.markdown(_highlight_query(result.chunk.text, query))
+
+            for c in neighbors_after:
+                st.divider()
+                st.caption(f"→ Nächster Chunk (Chunk #{c.chunk_id})")
+                st.text(c.text)
+        else:
+            st.markdown(_build_snippet(result.chunk.text, query))
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +212,6 @@ def main() -> None:
             options=["all-MiniLM-L6-v2", "all-mpnet-base-v2"],
             index=0,
         )
-        # Warm up model cache
         _cached_model(model_name)
 
     st.sidebar.markdown("---")
@@ -183,6 +227,9 @@ def main() -> None:
         type=["txt", "md", "csv", "pdf"],
         accept_multiple_files=True,
     )
+
+    # Build file_bytes_map for download buttons (empty if no upload)
+    file_bytes_map: dict[str, bytes] = {f.name: f.getvalue() for f in (uploaded_files or [])}
 
     search_index: SearchIndex | None = None
 
@@ -202,7 +249,6 @@ def main() -> None:
         st.info(f"{len(uploaded_files)} Datei(en) bereit. Klicke auf den Button, um den Index zu erstellen.")
 
         if st.button("Index aufbauen", type="primary"):
-            file_bytes_map = {f.name: f.getvalue() for f in uploaded_files}
             try:
                 search_index = _cached_index(
                     file_bytes_map=file_bytes_map,
@@ -214,10 +260,8 @@ def main() -> None:
             except Exception as exc:
                 st.error(f"Fehler beim Indexieren: {exc}")
 
-        # If index was already built this session (cached), retrieve it
+        # Retrieve cached index without re-building
         if search_index is None:
-            file_bytes_map = {f.name: f.getvalue() for f in uploaded_files}
-            # Try cache without re-building (no-op if not cached yet)
             try:
                 search_index = _cached_index.cache_data(  # type: ignore[attr-defined]
                     file_bytes_map=file_bytes_map,
@@ -228,7 +272,7 @@ def main() -> None:
                 pass
 
     if search_index is not None:
-        # Index download
+        # Index download (sidebar)
         with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as tmp:
             save_index(search_index, Path(tmp.name))
             idx_bytes = Path(tmp.name).read_bytes()
@@ -255,9 +299,23 @@ def main() -> None:
             )
 
             if results:
+                # Quell-Filter (nur wenn mehrere Quellen vorhanden)
+                all_sources = sorted({r.chunk.source for r in results})
+                if len(all_sources) > 1:
+                    st.sidebar.markdown("---")
+                    st.sidebar.subheader("Ergebnisse filtern")
+                    selected_sources = st.sidebar.multiselect(
+                        "Nach Quelle",
+                        options=all_sources,
+                        default=all_sources,
+                        key="source_filter",
+                    )
+                    results = [r for r in results if r.chunk.source in selected_sources]
+
+                all_chunks = search_index.keyword_index.chunks
                 st.markdown(f"**{len(results)} Ergebnis(se)** für *{query}*")
                 for rank, result in enumerate(results, start=1):
-                    _render_result(result, rank, query)
+                    _render_result(result, rank, query, all_chunks, file_bytes_map)
             else:
                 st.warning("Keine Treffer gefunden.")
     elif not uploaded_files and cached_index_upload is None:
