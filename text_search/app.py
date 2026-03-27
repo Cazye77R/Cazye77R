@@ -270,9 +270,10 @@ def main() -> None:
         )
         offline = st.sidebar.checkbox(
             "Offline-Modus",
-            value=bool(local_model_path.strip()),
+            value=True,
             help="Setzt TRANSFORMERS_OFFLINE=1. Das Modell muss bereits lokal gecacht sein "
-                 "(~/.cache/huggingface/) oder der Pfad oben muss angegeben sein.",
+                 "(~/.cache/huggingface/) oder der Pfad oben muss angegeben sein. "
+                 "Deaktivieren für den ersten Download.",
         )
         effective_model = local_model_path.strip() or model_name
 
