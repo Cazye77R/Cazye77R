@@ -181,6 +181,22 @@
     }
     .del-btn:hover { color: var(--red); background: #3d1f1f; }
 
+    .edit-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: color 0.15s, background 0.15s;
+      margin-right: 2px;
+    }
+    .edit-btn:hover { color: var(--accent); background: rgba(91,141,238,0.12); }
+
+    .form-editing #addBtn { background: var(--green); }
+    .form-editing #addBtn:hover { opacity: 0.85; }
+
     /* ---- Chart ---- */
     .chart-container {
       display: flex;
@@ -271,12 +287,67 @@
 
     /* ---- Year summary ---- */
     .year-select { background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 10px; font-size: 0.85rem; }
+
+    /* ---- Monthly table ---- */
+    tbody tr.year-row { background: var(--surface2); font-weight: 600; }
+    tbody tr.year-row td { border-top: 2px solid var(--border); }
+    tbody tr.year-spacer { height: 8px; border: none; }
+    tbody tr.year-spacer td { border: none; padding: 0; }
+    .pauschale-note { color: var(--green); font-size: 0.75rem; margin-left: 8px; }
+
+    /* ---- Recurring ---- */
+    .recurring-section { display: none; border-top: 1px solid var(--border); margin-top: 16px; padding-top: 16px; }
+    .recurring-section.open { display: block; }
+    .weekday-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .pill-check { display: flex; align-items: center; cursor: pointer; }
+    .pill-check input[type="checkbox"] { display: none; }
+    .pill-check span {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      user-select: none;
+    }
+    .pill-check input:checked + span { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+    /* ---- Print ---- */
+    .print-only { display: none; }
+    @media print {
+      :root {
+        --bg: #fff; --surface: #fff; --surface2: #f5f5f7;
+        --border: #ccc; --text: #111; --muted: #555;
+        --accent: #1d4ed8; --accent2: #6d28d9;
+        --green: #047857; --orange: #b45309; --red: #b91c1c;
+      }
+      body { background: #fff; padding: 0; font-size: 11pt; }
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+      #toast, .modal-backdrop { display: none !important; }
+      .edit-btn, .del-btn { display: none !important; }
+      .filter-row { display: none !important; }
+      .chart-container, .chart-legend { display: none !important; }
+      .card { border: 1px solid #ccc; break-inside: avoid; box-shadow: none; margin-bottom: 10px; }
+      .stats-grid { break-inside: avoid; }
+      .badge { border: 1px solid currentColor; }
+      .progress { background: #e5e7eb; }
+      .progress-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .grid-2 { display: none !important; }
+      hr.divider { margin: 8px 0; }
+    }
   </style>
 </head>
 <body>
 
-<h1>Home Office Tracker</h1>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+  <h1>Home Office Tracker</h1>
+  <button class="btn btn-ghost no-print" onclick="window.print()" style="margin-top:2px">&#128424; Drucken</button>
+</div>
 <p class="subtitle">Erfasse deine Homeoffice-Tage und die private Hardwarenutzung zur steuerlichen Auswertung.</p>
+<p class="print-only" style="font-size:0.82rem;color:var(--muted);margin-bottom:16px">Erstellt am: <span id="printDate"></span></p>
 
 <!-- Stats -->
 <div class="stats-grid" id="statsGrid">
@@ -327,14 +398,42 @@
   <div class="chart-container" id="chart" style="margin-top:10px"></div>
 </div>
 
-<div class="grid-2">
+<!-- Monatstabelle -->
+<div class="card" style="margin-bottom:16px">
+  <h2>Monatsübersicht</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Monat</th>
+          <th>Arbeitstage</th>
+          <th>HO-Tage</th>
+          <th>HO-Stunden</th>
+          <th>Privatnutzung</th>
+          <th>Berufl. Anteil</th>
+          <th>HO / Arbeitstage</th>
+        </tr>
+      </thead>
+      <tbody id="monthlyBody"></tbody>
+    </table>
+    <div class="empty" id="monthlyEmpty" style="display:none">Keine Daten für den gewählten Zeitraum.</div>
+  </div>
+</div>
+
+<div class="grid-2 no-print">
   <!-- Eingabe -->
-  <div class="card">
-    <h2>Eintrag hinzufügen</h2>
+  <div class="card" id="entryFormCard">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h2 style="margin:0">Eintrag hinzufügen</h2>
+      <button class="btn btn-ghost" onclick="toggleRecurring()" style="font-size:0.8rem;padding:5px 12px">&#8635; Mehrere Tage</button>
+    </div>
     <div class="form-row">
       <div>
         <label>Datum</label>
-        <input type="date" id="f-date" />
+        <div style="display:flex;gap:6px">
+          <input type="date" id="f-date" style="flex:1" />
+          <button class="btn btn-ghost" onclick="setToday()" style="padding:8px 10px;flex-shrink:0" title="Heute">&#8634;</button>
+        </div>
       </div>
       <div>
         <label>HO-Stunden</label>
@@ -350,7 +449,48 @@
       </div>
       <div>
         <label>&nbsp;</label>
-        <button class="btn btn-primary" onclick="addEntry()">+ Hinzufügen</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="addBtn" onclick="addEntry()">+ Hinzufügen</button>
+          <button class="btn btn-ghost" id="cancelEditBtn" onclick="cancelEdit()" style="display:none">&#x2715; Abbrechen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Wiederholen -->
+    <div id="recurringSection" class="recurring-section">
+      <div class="form-row" style="grid-template-columns:1fr 1fr 1fr 1fr">
+        <div>
+          <label>Von</label>
+          <input type="date" id="r-from" oninput="updateRecurringCount()" />
+        </div>
+        <div>
+          <label>Bis</label>
+          <input type="date" id="r-to" oninput="updateRecurringCount()" />
+        </div>
+        <div>
+          <label>HO-Stunden</label>
+          <input type="number" id="r-ho" min="0" max="24" step="0.25" placeholder="8" />
+        </div>
+        <div>
+          <label>Privatnutzung (h)</label>
+          <input type="number" id="r-priv" min="0" max="24" step="0.25" placeholder="1" />
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <label>Wochentage</label>
+        <div class="weekday-pills">
+          <label class="pill-check"><input type="checkbox" name="rwd" value="1" checked onchange="updateRecurringCount()" /><span>Mo</span></label>
+          <label class="pill-check"><input type="checkbox" name="rwd" value="2" checked onchange="updateRecurringCount()" /><span>Di</span></label>
+          <label class="pill-check"><input type="checkbox" name="rwd" value="3" checked onchange="updateRecurringCount()" /><span>Mi</span></label>
+          <label class="pill-check"><input type="checkbox" name="rwd" value="4" checked onchange="updateRecurringCount()" /><span>Do</span></label>
+          <label class="pill-check"><input type="checkbox" name="rwd" value="5" checked onchange="updateRecurringCount()" /><span>Fr</span></label>
+          <label class="pill-check"><input type="checkbox" name="rwd" value="6" onchange="updateRecurringCount()" /><span>Sa</span></label>
+          <label class="pill-check"><input type="checkbox" name="rwd" value="0" onchange="updateRecurringCount()" /><span>So</span></label>
+        </div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="addRecurring()"><span id="recurringCount">0</span> Einträge anlegen</button>
+        <span style="font-size:0.78rem;color:var(--muted)">Bestehende Tage werden übersprungen.</span>
       </div>
     </div>
   </div>
@@ -466,17 +606,54 @@
     return years;
   }
 
-  // ---- Add Entry ----
+  // ---- Edit State ----
+  let editingDate = null;
+
+  function startEdit(date) {
+    const e = entries.find(x => x.date === date);
+    if (!e) return;
+    editingDate = date;
+    document.getElementById('f-date').value = e.date;
+    document.getElementById('f-ho').value   = e.ho;
+    document.getElementById('f-priv').value = e.priv;
+    document.getElementById('f-note').value = e.note || '';
+    document.getElementById('addBtn').textContent = '✓ Speichern';
+    document.getElementById('cancelEditBtn').style.display = 'inline-block';
+    document.getElementById('entryFormCard').classList.add('form-editing');
+    document.getElementById('entryFormCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function cancelEdit() {
+    editingDate = null;
+    document.getElementById('f-date').value = new Date().toISOString().slice(0,10);
+    document.getElementById('f-ho').value   = '';
+    document.getElementById('f-priv').value = '';
+    document.getElementById('f-note').value = '';
+    document.getElementById('addBtn').textContent = '+ Hinzufügen';
+    document.getElementById('cancelEditBtn').style.display = 'none';
+    document.getElementById('entryFormCard').classList.remove('form-editing');
+  }
+
+  // ---- Add / Save Entry ----
   function addEntry() {
     const date  = document.getElementById('f-date').value;
     const ho    = parseFloat(document.getElementById('f-ho').value);
     const priv  = parseFloat(document.getElementById('f-priv').value);
     const note  = document.getElementById('f-note').value.trim();
 
-    if (!date)           { toast('Bitte ein Datum eingeben.'); return; }
+    if (!date)               { toast('Bitte ein Datum eingeben.'); return; }
     if (isNaN(ho) || ho < 0)   { toast('Bitte gültige HO-Stunden eingeben.'); return; }
     if (isNaN(priv) || priv < 0) { toast('Bitte gültige Privatnutzung eingeben.'); return; }
-    if (ho + priv > 24)  { toast('Summe darf 24h nicht überschreiten.'); return; }
+    if (ho + priv > 24)      { toast('Summe darf 24h nicht überschreiten.'); return; }
+
+    // Im Edit-Modus: alten Eintrag entfernen, dann normal weiter
+    if (editingDate) {
+      entries = entries.filter(e => e.date !== editingDate);
+      editingDate = null;
+      document.getElementById('addBtn').textContent = '+ Hinzufügen';
+      document.getElementById('cancelEditBtn').style.display = 'none';
+      document.getElementById('entryFormCard').classList.remove('form-editing');
+    }
 
     if (entries.find(e => e.date === date)) {
       if (!confirm(`Für ${fmt(date)} existiert bereits ein Eintrag. Überschreiben?`)) return;
@@ -485,11 +662,13 @@
 
     entries.push({ date, ho, priv, note });
     entries.sort((a,b) => a.date.localeCompare(b.date));
+    saveLastValues(ho, priv);
     save();
     render();
-    document.getElementById('f-ho').value = '';
+    document.getElementById('f-ho').value   = '';
     document.getElementById('f-priv').value = '';
     document.getElementById('f-note').value = '';
+    loadLastValues();
     toast(`Eintrag für ${fmt(date)} gespeichert.`);
   }
 
@@ -577,19 +756,178 @@
     return result;
   }
 
+  // ---- Quick entry ----
+  function setToday() {
+    document.getElementById('f-date').value = new Date().toISOString().slice(0,10);
+  }
+
+  const LAST_KEY = 'ho_tracker_last';
+  function saveLastValues(ho, priv) {
+    localStorage.setItem(LAST_KEY, JSON.stringify({ ho, priv }));
+  }
+  function loadLastValues() {
+    const last = JSON.parse(localStorage.getItem(LAST_KEY) || 'null');
+    if (last) {
+      document.getElementById('f-ho').value   = last.ho;
+      document.getElementById('f-priv').value = last.priv;
+    }
+  }
+
+  // ---- Recurring ----
+  function toggleRecurring() {
+    const sec = document.getElementById('recurringSection');
+    sec.classList.toggle('open');
+    if (sec.classList.contains('open')) {
+      const today = new Date().toISOString().slice(0,10);
+      if (!document.getElementById('r-from').value) document.getElementById('r-from').value = today;
+      if (!document.getElementById('r-to').value)   document.getElementById('r-to').value   = today;
+      updateRecurringCount();
+    }
+  }
+
+  function updateRecurringCount() {
+    const from = document.getElementById('r-from').value;
+    const to   = document.getElementById('r-to').value;
+    if (!from || !to || from > to) { document.getElementById('recurringCount').textContent = '0'; return; }
+    const sel = [...document.querySelectorAll('input[name="rwd"]:checked')].map(c => parseInt(c.value));
+    let count = 0;
+    const cur = new Date(from + 'T12:00:00');
+    const end = new Date(to   + 'T12:00:00');
+    while (cur <= end) { if (sel.includes(cur.getDay())) count++; cur.setDate(cur.getDate() + 1); }
+    document.getElementById('recurringCount').textContent = count;
+  }
+
+  function addRecurring() {
+    const from = document.getElementById('r-from').value;
+    const to   = document.getElementById('r-to').value;
+    const ho   = parseFloat(document.getElementById('r-ho').value);
+    const priv = parseFloat(document.getElementById('r-priv').value);
+    if (!from || !to)          { toast('Bitte Von- und Bis-Datum angeben.'); return; }
+    if (from > to)             { toast('Von-Datum muss vor Bis-Datum liegen.'); return; }
+    if (isNaN(ho)   || ho   < 0) { toast('Bitte gültige HO-Stunden eingeben.'); return; }
+    if (isNaN(priv) || priv < 0) { toast('Bitte gültige Privatnutzung eingeben.'); return; }
+    if (ho + priv > 24)        { toast('Summe darf 24h nicht überschreiten.'); return; }
+    const sel = [...document.querySelectorAll('input[name="rwd"]:checked')].map(c => parseInt(c.value));
+    if (sel.length === 0)      { toast('Bitte mindestens einen Wochentag wählen.'); return; }
+
+    let added = 0, skipped = 0;
+    const cur = new Date(from + 'T12:00:00');
+    const end = new Date(to   + 'T12:00:00');
+    while (cur <= end) {
+      if (sel.includes(cur.getDay())) {
+        const d = cur.toISOString().slice(0, 10);
+        if (entries.find(e => e.date === d)) { skipped++; }
+        else { entries.push({ date: d, ho, priv, note: '' }); added++; }
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+    if (added > 0) { entries.sort((a,b) => a.date.localeCompare(b.date)); save(); render(); }
+    toast(`${added} Einträge hinzugefügt, ${skipped} übersprungen.`);
+  }
+
+  // ---- Monthly helpers ----
+  function workingDaysInMonth(year, month) {
+    const days = new Date(year, month, 0).getDate();
+    let count = 0;
+    for (let d = 1; d <= days; d++) {
+      const dow = new Date(year, month - 1, d).getDay();
+      if (dow !== 0 && dow !== 6) count++;
+    }
+    return count;
+  }
+
+  function pauschale(year, hoDays) {
+    const y = parseInt(year, 10);
+    if (y >= 2023) return { rate: 6, max: 210, amount: Math.min(hoDays, 210) * 6 };
+    return { rate: 5, max: 120, amount: Math.min(hoDays, 120) * 5 };
+  }
+
+  function renderMonthlyTable(yearEntries, selectedYear) {
+    const tbody = document.getElementById('monthlyBody');
+    const empty = document.getElementById('monthlyEmpty');
+    if (yearEntries.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+
+    const byMonth = {};
+    for (const e of yearEntries) {
+      const mo = e.date.slice(0, 7);
+      if (!byMonth[mo]) byMonth[mo] = [];
+      byMonth[mo].push(e);
+    }
+
+    const byYear = {};
+    for (const mo of Object.keys(byMonth).sort()) {
+      const y = mo.slice(0, 4);
+      if (!byYear[y]) byYear[y] = [];
+      byYear[y].push(mo);
+    }
+
+    const years = Object.keys(byYear).sort();
+    let html = '';
+
+    for (const year of years) {
+      let yHoDays = 0, yHoH = 0, yPrivH = 0, yArbeit = 0;
+
+      for (const mo of byYear[year]) {
+        const [y, m] = mo.split('-').map(Number);
+        const arbeit  = workingDaysInMonth(y, m);
+        const mes     = byMonth[mo];
+        const hoDays  = mes.filter(e => e.ho > 0).length;
+        const hoH     = mes.reduce((s, e) => s + e.ho,   0);
+        const privH   = mes.reduce((s, e) => s + e.priv, 0);
+        const total   = hoH + privH;
+        const bPct    = total > 0 ? hoH / total * 100 : 0;
+        const hoPct   = arbeit > 0 ? hoDays / arbeit * 100 : 0;
+
+        yHoDays += hoDays; yHoH += hoH; yPrivH += privH; yArbeit += arbeit;
+
+        html += `<tr>
+          <td>${MONTHS[m - 1]} ${year}</td>
+          <td style="color:var(--muted)">${arbeit}</td>
+          <td><strong>${hoDays}</strong></td>
+          <td style="color:var(--accent)">${hoH % 1 === 0 ? hoH : hoH.toFixed(1)}h</td>
+          <td style="color:var(--orange)">${privH % 1 === 0 ? privH : privH.toFixed(1)}h</td>
+          <td>${pctBadge(bPct)}</td>
+          <td>${pctBadge(hoPct)}</td>
+        </tr>`;
+      }
+
+      const p      = pauschale(year, yHoDays);
+      const yTotal = yHoH + yPrivH;
+      const yBPct  = yTotal > 0 ? yHoH / yTotal * 100 : 0;
+      const yHoPct = yArbeit > 0 ? yHoDays / yArbeit * 100 : 0;
+
+      html += `<tr class="year-row">
+        <td>Gesamt ${year}</td>
+        <td>${yArbeit}</td>
+        <td>${yHoDays}</td>
+        <td>${yHoH % 1 === 0 ? yHoH : yHoH.toFixed(1)}h</td>
+        <td>${yPrivH % 1 === 0 ? yPrivH : yPrivH.toFixed(1)}h</td>
+        <td>${pctBadge(yBPct)}</td>
+        <td>${pctBadge(yHoPct)}<span class="pauschale-note" title="${p.rate}€/Tag, max ${p.max} Tage">Pauschale: ${p.amount}€</span></td>
+      </tr>`;
+
+      if (years.length > 1) html += `<tr class="year-spacer"><td colspan="7"></td></tr>`;
+    }
+
+    tbody.innerHTML = html;
+  }
+
   // ---- Render ----
   function render() {
     renderYearSelect();
     const selectedYear = document.getElementById('yearSelect').value;
-    const filterMonth  = document.getElementById('filterMonth').value; // YYYY-MM
+    const filterMonth  = document.getElementById('filterMonth').value;
     const sortDir      = document.getElementById('filterSort').value;
 
-    // Year-filtered for stats/chart
     const yearEntries = selectedYear
       ? entries.filter(e => e.date.startsWith(selectedYear))
       : entries;
 
-    // Month+sort filtered for table
     let tableEntries = filterMonth
       ? entries.filter(e => e.date.startsWith(filterMonth))
       : entries;
@@ -598,6 +936,7 @@
     );
 
     renderStats(yearEntries);
+    renderMonthlyTable(yearEntries, selectedYear);
     renderTable(tableEntries);
     renderChart(yearEntries);
   }
@@ -653,7 +992,10 @@
         <td><span style="color:var(--orange)">${e.priv}h</span></td>
         <td>${pctBadge(pct)}</td>
         <td style="color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.note ? esc(e.note) : '—'}</td>
-        <td><button class="del-btn" onclick="deleteEntry('${e.date}')" title="Löschen">&#x2715;</button></td>
+        <td style="white-space:nowrap">
+          <button class="edit-btn" onclick="startEdit('${e.date}')" title="Bearbeiten">&#9998;</button>
+          <button class="del-btn" onclick="deleteEntry('${e.date}')" title="Löschen">&#x2715;</button>
+        </td>
       </tr>`;
     }).join('');
   }
@@ -693,8 +1035,10 @@
 
   // ---- Init ----
   (function init() {
-    // set today as default date
     document.getElementById('f-date').value = new Date().toISOString().slice(0,10);
+    document.getElementById('printDate').textContent =
+      new Date().toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' });
+    loadLastValues();
     render();
   })();
 
