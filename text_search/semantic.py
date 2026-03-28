@@ -3,9 +3,18 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path as _Path
 from typing import List
 
 import torch
+
+# Set HuggingFace cache to a user-writable location BEFORE sentence_transformers
+# is imported (the library reads these paths at import time, not at model-load time).
+# Uses ~/hf_cache which is always writable on all platforms including Windows.
+_HF_CACHE = str(_Path.home() / "hf_cache")
+os.environ.setdefault("HF_HOME", _HF_CACHE)
+os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", _HF_CACHE)
+os.environ.setdefault("HF_HUB_CACHE", str(_Path(_HF_CACHE) / "hub"))
 
 from .loader import Chunk
 
