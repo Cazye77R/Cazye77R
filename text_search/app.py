@@ -8,8 +8,15 @@ from typing import List
 
 import streamlit as st
 
-from .loader import Chunk, load_file
-from .searcher import SearchIndex, SearchMode, SearchResult, build_search_index, load_index, save_index
+try:
+    from .loader import Chunk, load_file
+    from .searcher import SearchIndex, SearchMode, SearchResult, build_search_index, load_index, save_index
+except ImportError:
+    import sys
+    from pathlib import Path as _Path
+    sys.path.insert(0, str(_Path(__file__).parent.parent))
+    from text_search.loader import Chunk, load_file  # type: ignore[no-redef]
+    from text_search.searcher import SearchIndex, SearchMode, SearchResult, build_search_index, load_index, save_index  # type: ignore[no-redef]
 
 # ---------------------------------------------------------------------------
 # Speed presets
@@ -377,7 +384,10 @@ def main() -> None:
         query = st.text_input("Suchanfrage", placeholder="z.B. maschinelles Lernen")
 
         if query.strip():
-            from .searcher import search as do_search
+            try:
+                from .searcher import search as do_search
+            except ImportError:
+                from text_search.searcher import search as do_search  # type: ignore[no-redef]
 
             results = do_search(
                 search_index,
