@@ -662,6 +662,7 @@
 
   // ---- Edit State ----
   let editingDate = null;
+  let yearSelectInitialized = false;
 
   function startEdit(date) {
     const e = entries.find(x => x.date === date);
@@ -801,6 +802,7 @@
     }
     entries.sort((a,b) => a.date.localeCompare(b.date));
     save();
+    yearSelectInitialized = false;
     render();
     closeImportModal();
     toast(`${imported} importiert, ${skipped} übersprungen.`);
@@ -1003,7 +1005,7 @@
         const [y, m] = mo.split('-').map(Number);
         const arbeit   = workingDaysInMonth(y, m);
         const mes      = byMonth[mo];
-        const hoDays   = mes.filter(e => (e.type || 'ho') === 'ho').length;
+        const hoDays   = mes.filter(e => (e.type || 'ho') === 'ho' && (e.ho || 0) > 0).length;
         const bürotage = mes.filter(e => e.type === 'office').length;
         const hoH      = mes.reduce((s, e) => s + (e.ho   || 0), 0);
         const privH    = mes.reduce((s, e) => s + (e.priv || 0), 0);
@@ -1083,7 +1085,10 @@
     const cur = sel.value;
     sel.innerHTML = '<option value="">Alle Jahre</option>' +
       years.map(y => `<option value="${y}" ${y===cur?'selected':''}>${y}</option>`).join('');
-    if (!sel.value && years.length) sel.value = years[0]; // default to latest
+    if (!yearSelectInitialized && years.length) {
+      sel.value = years[0];
+      yearSelectInitialized = true;
+    }
   }
 
   function renderStats(data) {
@@ -1092,7 +1097,7 @@
     const totalAll  = totalHO + totalPriv;
     const pctBusiness = totalAll > 0 ? (totalHO / totalAll * 100) : 0;
     const pctPrivate  = totalAll > 0 ? (totalPriv / totalAll * 100) : 0;
-    const hoDays     = data.filter(e => (e.type || 'ho') === 'ho').length;
+    const hoDays     = data.filter(e => (e.type || 'ho') === 'ho' && (e.ho || 0) > 0).length;
     const officeDays = data.filter(e => e.type === 'office').length;
     const avgHO = hoDays > 0 ? totalHO / hoDays : 0;
 
