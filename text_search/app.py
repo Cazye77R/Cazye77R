@@ -11,12 +11,14 @@ import streamlit as st
 try:
     from .loader import Chunk, load_file
     from .searcher import SearchIndex, SearchMode, SearchResult, build_search_index, load_index, save_index
+    from .chat import ChatConfig, answer_question
 except ImportError:
     import sys
     from pathlib import Path as _Path
     sys.path.insert(0, str(_Path(__file__).parent.parent))
     from text_search.loader import Chunk, load_file  # type: ignore[no-redef]
     from text_search.searcher import SearchIndex, SearchMode, SearchResult, build_search_index, load_index, save_index  # type: ignore[no-redef]
+    from text_search.chat import ChatConfig, answer_question  # type: ignore[no-redef]
 
 # ---------------------------------------------------------------------------
 # Speed presets
@@ -204,18 +206,33 @@ def main() -> None:
     preset = PRESETS[preset_name]
     st.sidebar.markdown("---")
 
-    mode: SearchMode = st.sidebar.radio(  # type: ignore[assignment]
+    _all_modes = ["hybrid", "keyword", "semantic", "chat"]
+    _preset_mode = preset["mode"] if preset["mode"] in _all_modes else "hybrid"
+    mode: str = st.sidebar.radio(  # type: ignore[assignment]
         "Suchmodus",
-        options=["hybrid", "keyword", "semantic"],
-        index=["hybrid", "keyword", "semantic"].index(preset["mode"]),
-        format_func=lambda x: {"hybrid": "Hybrid", "keyword": "Keyword (BM25)", "semantic": "Semantik"}[x],
+        options=_all_modes,
+        index=_all_modes.index(_preset_mode),
+        format_func=lambda x: {
+            "hybrid": "Hybrid",
+            "keyword": "Keyword (BM25)",
+            "semantic": "Semantik",
+            "chat": "💬 Chat",
+        }[x],
+        captions=[
+            "Kombination aus beidem, beste Ergebnisse",
+            "Exakte Wortsuche, sehr schnell, kein KI-Modell nötig",
+            "Bedeutungssuche, findet sinnverwandte Treffer, benötigt KI-Modell",
+            "Stellt Fragen in natürlicher Sprache, KI antwortet aus deinen Dokumenten",
+        ],
     )
-    top_k = st.sidebar.slider("Anzahl Ergebnisse", 1, 20, value=preset["top_k"])
+    top_k = preset["top_k"]
     semantic_weight = 0.5
-    if mode == "hybrid":
-        semantic_weight = st.sidebar.slider(
-            "Semantik-Gewicht", 0.0, 1.0, value=0.5, step=0.05
-        )
+    if mode != "chat":
+        top_k = st.sidebar.slider("Anzahl Ergebnisse", 1, 20, value=preset["top_k"])
+        if mode == "hybrid":
+            semantic_weight = st.sidebar.slider(
+                "Semantik-Gewicht", 0.0, 1.0, value=0.5, step=0.05
+            )
 
     with st.sidebar.expander("Erweiterte Einstellungen", expanded=False):
         chunk_size = st.slider("Chunk-Größe (Wörter)", 50, 800,
@@ -232,6 +249,61 @@ def main() -> None:
     model_name = "all-MiniLM-L6-v2"
     offline = True
     effective_model = model_name
+
+    # ── Chat-Einstellungen (nur wenn Chat-Modus aktiv) ───────────────────────
+    chat_config = ChatConfig()
+    if mode == "chat":
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Chat-Einstellungen")
+
+        _provider_labels = ["Ollama (lokal)", "Claude API", "OpenAI API"]
+        _provider_keys   = ["ollama", "claude", "openai"]
+        if "chat_provider" not in st.session_state:
+            st.session_state["chat_provider"] = "Ollama (lokal)"
+
+        provider_label = st.sidebar.selectbox(
+            "Provider",
+            _provider_labels,
+            index=_provider_labels.index(st.session_state["chat_provider"]),
+            key="chat_provider_select",
+        )
+        provider = _provider_keys[_provider_labels.index(provider_label)]
+
+        _default_models = {"ollama": "llama3.2", "claude": "claude-3-5-haiku-20241022", "openai": "gpt-4o-mini"}
+        chat_model = st.sidebar.text_input(
+            "Modell",
+            value=_default_models[provider],
+            key=f"chat_model_{provider}",
+        )
+        api_key = ""
+        if provider in ("claude", "openai"):
+            api_key = st.sidebar.text_input(
+                "API-Key",
+                type="password",
+                key=f"chat_apikey_{provider}",
+            )
+        ollama_host = "http://localhost:11434"
+        if provider == "ollama":
+            ollama_host = st.sidebar.text_input(
+                "Ollama Host",
+                value="http://localhost:11434",
+                key="chat_ollama_host",
+            )
+        context_chunks = st.sidebar.slider(
+            "Kontext-Chunks", min_value=1, max_value=10, value=3,
+            help="Anzahl der Dokument-Ausschnitte, die an die KI übergeben werden. Weniger = schneller.",
+        )
+        if st.sidebar.button("Lokal zurücksetzen", key="chat_reset"):
+            st.session_state["chat_provider"] = "Ollama (lokal)"
+            st.rerun()
+
+        chat_config = ChatConfig(
+            provider=provider,
+            model=chat_model,
+            api_key=api_key,
+            ollama_host=ollama_host,
+            context_chunks=context_chunks,
+        )
 
     if use_semantic:
         st.sidebar.markdown("---")
@@ -305,13 +377,15 @@ def main() -> None:
         n_files  = len({c.source for c in search_index.keyword_index.chunks})
 
         # Search form — Enter key works
+        _placeholder = "Stelle eine Frage zu deinen Dokumenten…" if mode == "chat" else "Begriff oder Frage eingeben und Enter drücken…"
+        _btn_label   = "Fragen" if mode == "chat" else "Suchen"
         with st.form("search_form"):
             query = st.text_input(
                 "Suchanfrage",
-                placeholder="Begriff oder Frage eingeben und Enter drücken…",
+                placeholder=_placeholder,
                 label_visibility="collapsed",
             )
-            submitted = st.form_submit_button("Suchen", type="primary", use_container_width=True)
+            submitted = st.form_submit_button(_btn_label, type="primary", use_container_width=True)
 
         st.caption(f"Index aktiv: **{n_chunks} Chunks** aus **{n_files} Datei(en)**")
 
@@ -324,36 +398,57 @@ def main() -> None:
 
         # Results
         if submitted and query.strip():
-            try:
-                from .searcher import search as do_search
-            except ImportError:
-                from text_search.searcher import search as do_search  # type: ignore[no-redef]
+            all_chunks = search_index.keyword_index.chunks
 
-            results = do_search(
-                search_index,
-                query=query,
-                mode=mode,
-                top_k=top_k,
-                semantic_weight=semantic_weight,
-                offline=offline,
-            )
-
-            if results:
-                all_sources = sorted({r.chunk.source for r in results})
-                if len(all_sources) > 1:
-                    st.sidebar.markdown("---")
-                    st.sidebar.subheader("Ergebnisse filtern")
-                    selected_sources = st.sidebar.multiselect(
-                        "Nach Quelle", all_sources, default=all_sources, key="source_filter"
+            if mode == "chat":
+                # API-Key validation
+                if chat_config.provider in ("claude", "openai") and not chat_config.api_key.strip():
+                    st.warning(
+                        f"Bitte einen API-Key für {chat_config.provider.capitalize()} eingeben."
                     )
-                    results = [r for r in results if r.chunk.source in selected_sources]
-
-                st.markdown(f"**{len(results)} Ergebnis(se)** für *{query}*")
-                all_chunks = search_index.keyword_index.chunks
-                for rank, result in enumerate(results, start=1):
-                    _render_result(result, rank, query, all_chunks, file_bytes_map)
+                    st.stop()
+                try:
+                    stream_gen, sources = answer_question(query, search_index, chat_config)
+                    st.markdown("**Antwort:**")
+                    st.write_stream(stream_gen)
+                    if sources:
+                        with st.expander("📎 Quellen"):
+                            for rank, r in enumerate(sources, 1):
+                                _render_result(r, rank, query, all_chunks, file_bytes_map)
+                except ConnectionError as exc:
+                    st.error(str(exc))
+                except Exception as exc:
+                    st.error(f"Fehler: {exc}")
             else:
-                st.warning("Keine Treffer gefunden.")
+                try:
+                    from .searcher import search as do_search
+                except ImportError:
+                    from text_search.searcher import search as do_search  # type: ignore[no-redef]
+
+                results = do_search(
+                    search_index,
+                    query=query,
+                    mode=mode,
+                    top_k=top_k,
+                    semantic_weight=semantic_weight,
+                    offline=offline,
+                )
+
+                if results:
+                    all_sources = sorted({r.chunk.source for r in results})
+                    if len(all_sources) > 1:
+                        st.sidebar.markdown("---")
+                        st.sidebar.subheader("Ergebnisse filtern")
+                        selected_sources = st.sidebar.multiselect(
+                            "Nach Quelle", all_sources, default=all_sources, key="source_filter"
+                        )
+                        results = [r for r in results if r.chunk.source in selected_sources]
+
+                    st.markdown(f"**{len(results)} Ergebnis(se)** für *{query}*")
+                    for rank, result in enumerate(results, start=1):
+                        _render_result(result, rank, query, all_chunks, file_bytes_map)
+                else:
+                    st.warning("Keine Treffer gefunden.")
 
     # ── SETUP MODE ───────────────────────────────────────────────────────────
     else:
