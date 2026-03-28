@@ -62,12 +62,10 @@
     /* ---- Stats ---- */
     .stats-grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
       gap: 12px;
       margin-bottom: 20px;
     }
-    @media (max-width: 900px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
-    @media (max-width: 500px) { .stats-grid { grid-template-columns: 1fr 1fr; } }
 
     .stat {
       background: var(--surface);
@@ -373,9 +371,14 @@
 <!-- Stats -->
 <div class="stats-grid" id="statsGrid">
   <div class="stat">
-    <div class="stat-label">HO-Tage gesamt</div>
-    <div class="stat-value c-blue" id="s-days">0</div>
-    <div class="stat-sub">Eingetragene Tage</div>
+    <div class="stat-label">HO-Tage</div>
+    <div class="stat-value c-blue" id="s-hoDays">0</div>
+    <div class="stat-sub">Homeoffice-Tage</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Bürotage</div>
+    <div class="stat-value c-orange" id="s-officeDays">0</div>
+    <div class="stat-sub">Tage im Büro</div>
   </div>
   <div class="stat">
     <div class="stat-label">HO-Stunden gesamt</div>
@@ -1084,14 +1087,17 @@
   }
 
   function renderStats(data) {
-    const totalHO   = data.reduce((s,e) => s + e.ho,   0);
-    const totalPriv = data.reduce((s,e) => s + e.priv, 0);
+    const totalHO   = data.reduce((s,e) => s + (e.ho || 0), 0);
+    const totalPriv = data.reduce((s,e) => s + (e.priv || 0), 0);
     const totalAll  = totalHO + totalPriv;
     const pctBusiness = totalAll > 0 ? (totalHO / totalAll * 100) : 0;
     const pctPrivate  = totalAll > 0 ? (totalPriv / totalAll * 100) : 0;
-    const avgHO = data.length > 0 ? totalHO / data.length : 0;
+    const hoDays     = data.filter(e => (e.type || 'ho') === 'ho').length;
+    const officeDays = data.filter(e => e.type === 'office').length;
+    const avgHO = hoDays > 0 ? totalHO / hoDays : 0;
 
-    document.getElementById('s-days').textContent    = data.length;
+    document.getElementById('s-hoDays').textContent     = hoDays;
+    document.getElementById('s-officeDays').textContent = officeDays;
     document.getElementById('s-hoHours').textContent = totalHO % 1 === 0 ? totalHO + 'h' : totalHO.toFixed(1) + 'h';
     document.getElementById('s-privHours').textContent = totalPriv % 1 === 0 ? totalPriv + 'h' : totalPriv.toFixed(1) + 'h';
     document.getElementById('s-pct').textContent    = pctBusiness.toFixed(1) + '%';
