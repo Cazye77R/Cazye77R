@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D-Drucker Kostenrechner</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg-primary: #0f1117;
+      --bg-card: #1a1d27;
+      --bg-input: #252836;
+      --border: #2e3247;
+      --accent: #6c63ff;
+      --accent-light: #8b85ff;
+      --danger: #e05260;
+      --success: #4caf84;
+      --warning: #f59e0b;
+      --text-primary: #e8eaf0;
+      --text-muted: #7b82a0;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background-color: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 0;
+    }
+
+    .header-brand-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-light));
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .header-brand-text h1 {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1.2;
+    }
+
+    .header-brand-text span {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* ── NAVIGATION TABS ── */
+    nav {
+      background-color: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex;
+      gap: 0;
+      overflow-x: auto;
+    }
+
+    .tab-btn {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      padding: 14px 20px;
+      transition: color 0.2s, border-color 0.2s;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tab-btn:hover {
+      color: var(--text-primary);
+    }
+
+    .tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .tab-icon {
+      font-size: 16px;
+    }
+
+    /* ── MAIN CONTENT ── */
+    main {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .tab-section {
+      display: none;
+    }
+
+    .tab-section.active {
+      display: block;
+    }
+
+    /* ── CARDS ── */
+    .card {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ── FORM GRID ── */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form-group.full-width {
+      grid-column: 1 / -1;
+    }
+
+    .form-group label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      background-color: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 14px;
+      padding: 10px 12px;
+      transition: border-color 0.2s;
+      width: 100%;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus {
+      border-color: var(--accent);
+      outline: none;
+    }
+
+    .form-group input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .duration-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .duration-row .input-with-unit {
+      position: relative;
+    }
+
+    .input-with-unit input {
+      padding-right: 40px;
+    }
+
+    .input-unit {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      font-size: 12px;
+      pointer-events: none;
+    }
+
+    /* ── PREVIEW BOX ── */
+    .preview-box {
+      background-color: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .preview-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .preview-item label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .preview-item .preview-value {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .preview-item .preview-value.positive {
+      color: var(--success);
+    }
+
+    .preview-item .preview-value.negative {
+      color: var(--danger);
+    }
+
+    /* ── BUTTONS ── */
+    .btn {
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px 20px;
+      transition: opacity 0.2s, transform 0.1s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn:hover {
+      opacity: 0.85;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn-primary {
+      background-color: var(--accent);
+      color: #fff;
+    }
+
+    .btn-danger {
+      background-color: var(--danger);
+      color: #fff;
+    }
+
+    .btn-neutral {
+      background-color: var(--bg-input);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+    }
+
+    .btn-sm {
+      font-size: 12px;
+      padding: 6px 12px;
+    }
+
+    .btn-icon {
+      background: none;
+      border: none;
+      color: var(--danger);
+      cursor: pointer;
+      font-size: 16px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      transition: background 0.2s;
+    }
+
+    .btn-icon:hover {
+      background-color: rgba(224, 82, 96, 0.15);
+    }
+
+    /* ── ACTION BAR ── */
+    .action-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .action-bar-title {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .action-bar-buttons {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    /* ── TABLE ── */
+    .table-wrapper {
+      overflow-x: auto;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      min-width: 900px;
+    }
+
+    thead {
+      background-color: var(--bg-input);
+    }
+
+    th {
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      padding: 12px 14px;
+      text-align: left;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    td {
+      border-top: 1px solid var(--border);
+      color: var(--text-primary);
+      font-size: 13px;
+      padding: 12px 14px;
+      white-space: nowrap;
+    }
+
+    tbody tr:hover {
+      background-color: rgba(108, 99, 255, 0.04);
+    }
+
+    .empty-state {
+      color: var(--text-muted);
+      font-size: 14px;
+      padding: 48px;
+      text-align: center;
+    }
+
+    .profit-positive {
+      color: var(--success);
+      font-weight: 600;
+    }
+
+    .profit-negative {
+      color: var(--danger);
+      font-weight: 600;
+    }
+
+    /* ── CHART ── */
+    .chart-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .chart-controls label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .chart-controls select {
+      background-color: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 14px;
+      padding: 8px 12px;
+    }
+
+    .chart-canvas-wrapper {
+      position: relative;
+      height: 400px;
+    }
+
+    /* ── STATISTICS ── */
+    .stats-controls {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .radio-group {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .radio-group label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      color: var(--text-primary);
+      font-size: 14px;
+    }
+
+    .radio-group input[type="radio"] {
+      accent-color: var(--accent);
+      width: 16px;
+      height: 16px;
+    }
+
+    .date-range-pickers {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .date-range-pickers.hidden {
+      display: none;
+    }
+
+    .date-range-pickers label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-right: 6px;
+    }
+
+    .date-range-pickers input[type="date"] {
+      background-color: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 14px;
+      padding: 8px 12px;
+    }
+
+    .stats-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+    }
+
+    .stat-card {
+      background-color: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .stat-card-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .stat-card-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1.2;
+    }
+
+    .stat-card-value.positive { color: var(--success); }
+    .stat-card-value.negative { color: var(--danger); }
+
+    /* ── SETTINGS ── */
+    .settings-section {
+      max-width: 480px;
+    }
+
+    /* ── MODAL ── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+
+    .modal-overlay.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-dialog {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px;
+      max-width: 420px;
+      width: 90%;
+      transform: translateY(20px);
+      transition: transform 0.2s;
+    }
+
+    .modal-overlay.visible .modal-dialog {
+      transform: translateY(0);
+    }
+
+    .modal-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .modal-text {
+      color: var(--text-muted);
+      margin-bottom: 24px;
+      font-size: 14px;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    /* ── TOAST ── */
+    #toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 2000;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .toast {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 18px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-primary);
+      min-width: 240px;
+      max-width: 360px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transform: translateX(110%);
+      transition: transform 0.3s ease;
+      pointer-events: auto;
+    }
+
+    .toast.show {
+      transform: translateX(0);
+    }
+
+    .toast.success { border-left: 4px solid var(--success); }
+    .toast.error   { border-left: 4px solid var(--danger); }
+    .toast.info    { border-left: 4px solid #60a5fa; }
+
+    .toast-icon { font-size: 18px; flex-shrink: 0; }
+
+    /* ── DIVIDER ── */
+    .section-divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 20px 0;
+    }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 768px) {
+      main { padding: 16px; }
+      nav { padding: 0 16px; }
+      header { padding: 0 16px; }
+
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .form-group.full-width {
+        grid-column: 1;
+      }
+
+      .preview-box {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .stats-cards {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .tab-btn {
+        padding: 12px 14px;
+        font-size: 13px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .preview-box {
+        grid-template-columns: 1fr;
+      }
+
+      .stats-cards {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* ── HIDDEN FILE INPUT ── */
+    #csv-file-input {
+      display: none;
+    }
+
+    /* ── COLOR SWATCH FOR CHART LEGEND ── */
+    .chart-legend {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .legend-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    /* ── FORM SUBMIT ROW ── */
+    .form-submit-row {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 8px;
+    }
+
+    select option {
+      background-color: var(--bg-card);
+      color: var(--text-primary);
+    }
+
+    input[type="date"]::-webkit-calendar-picker-indicator {
+      filter: invert(0.6);
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-brand">
+      <div class="header-brand-icon">&#128424;</div>
+      <div class="header-brand-text">
+        <h1>3D-Drucker Kostenrechner</h1>
+        <span>Kostenverfolgung &amp; Gewinnanalyse</span>
+      </div>
+    </div>
+  </header>
+
+  <nav>
+    <button class="tab-btn active" onclick="activateTab('tab-buchungen')" id="nav-tab-buchungen">
+      <span class="tab-icon">&#128203;</span> Buchungen
+    </button>
+    <button class="tab-btn" onclick="activateTab('tab-diagramm')" id="nav-tab-diagramm">
+      <span class="tab-icon">&#128200;</span> Diagramm
+    </button>
+    <button class="tab-btn" onclick="activateTab('tab-statistiken')" id="nav-tab-statistiken">
+      <span class="tab-icon">&#128202;</span> Statistiken
+    </button>
+    <button class="tab-btn" onclick="activateTab('tab-einstellungen')" id="nav-tab-einstellungen">
+      <span class="tab-icon">&#9881;</span> Einstellungen
+    </button>
+  </nav>
+
+  <main>
+
+    <!-- ══════════════════════════════════════════════
+         TAB 1: BUCHUNGEN
+    ══════════════════════════════════════════════ -->
+    <section id="tab-buchungen" class="tab-section active">
+
+      <!-- Booking Form -->
+      <div class="card">
+        <div class="card-title">&#10010; Neue Buchung</div>
+        <form id="booking-form" autocomplete="off">
+          <div class="form-grid">
+
+            <!-- Beschreibung -->
+            <div class="form-group full-width">
+              <label for="f-description">Beschreibung</label>
+              <input type="text" id="f-description" placeholder="z.B. Halterung XYZ" required />
+            </div>
+
+            <!-- Datum -->
+            <div class="form-group">
+              <label for="f-date">Datum</label>
+              <input type="date" id="f-date" required />
+            </div>
+
+            <!-- Druckdauer -->
+            <div class="form-group">
+              <label>Druckdauer</label>
+              <div class="duration-row">
+                <div class="input-with-unit">
+                  <input type="number" id="f-hours" placeholder="0" min="0" step="1" />
+                  <span class="input-unit">Std</span>
+                </div>
+                <div class="input-with-unit">
+                  <input type="number" id="f-minutes" placeholder="0" min="0" max="59" step="1" />
+                  <span class="input-unit">Min</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Filament -->
+            <div class="form-group">
+              <label for="f-filament-grams">Filament in Gramm</label>
+              <div class="input-with-unit">
+                <input type="number" id="f-filament-grams" placeholder="0.00" min="0.01" step="0.01" required />
+                <span class="input-unit">g</span>
+              </div>
+            </div>
+
+            <!-- Stromverbrauch -->
+            <div class="form-group">
+              <label for="f-kwh">Stromverbrauch</label>
+              <div class="input-with-unit">
+                <input type="number" id="f-kwh" placeholder="0.000" min="0" step="0.001" />
+                <span class="input-unit">kWh</span>
+              </div>
+            </div>
+
+            <!-- Verkaufspreis -->
+            <div class="form-group">
+              <label for="f-selling-price">Verkaufspreis</label>
+              <div class="input-with-unit">
+                <input type="number" id="f-selling-price" placeholder="0.00" min="0" step="0.01" required />
+                <span class="input-unit">&euro;</span>
+              </div>
+            </div>
+
+            <!-- Live-Vorschau -->
+            <div class="form-group full-width">
+              <label>Live-Vorschau</label>
+              <div class="preview-box">
+                <div class="preview-item">
+                  <label>Filamentkosten</label>
+                  <div class="preview-value" id="prev-filament-cost">— &euro;</div>
+                </div>
+                <div class="preview-item">
+                  <label>Stromkosten</label>
+                  <div class="preview-value" id="prev-electricity-cost">— &euro;</div>
+                </div>
+                <div class="preview-item">
+                  <label>Gesamtkosten</label>
+                  <div class="preview-value" id="prev-total-cost">— &euro;</div>
+                </div>
+                <div class="preview-item">
+                  <label>Gewinn</label>
+                  <div class="preview-value" id="prev-profit">— &euro;</div>
+                </div>
+              </div>
+            </div>
+
+          </div><!-- /.form-grid -->
+
+          <div class="form-submit-row" style="margin-top:16px;">
+            <button type="submit" class="btn btn-primary">&#10010; Buchung speichern</button>
+          </div>
+        </form>
+      </div><!-- /.card -->
+
+      <!-- Action Bar + Table -->
+      <div class="card">
+        <div class="action-bar">
+          <div class="action-bar-title">&#128203; Buchungen</div>
+          <div class="action-bar-buttons">
+            <button class="btn btn-neutral btn-sm" onclick="exportCSV()">&#8595; CSV exportieren</button>
+            <button class="btn btn-neutral btn-sm" onclick="document.getElementById('csv-file-input').click()">&#8593; CSV importieren</button>
+          </div>
+        </div>
+
+        <div class="table-wrapper">
+          <table id="bookings-table">
+            <thead>
+              <tr>
+                <th>Datum</th>
+                <th>Beschreibung</th>
+                <th>Dauer</th>
+                <th>Filament (g)</th>
+                <th>kWh</th>
+                <th>Filamentkosten</th>
+                <th>Stromkosten</th>
+                <th>Gesamtkosten</th>
+                <th>Verkaufspreis</th>
+                <th>Gewinn</th>
+                <th>L&ouml;schen</th>
+              </tr>
+            </thead>
+            <tbody id="bookings-tbody">
+              <tr>
+                <td colspan="11" class="empty-state">Keine Buchungen vorhanden</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </section><!-- /#tab-buchungen -->
+
+
+    <!-- ══════════════════════════════════════════════
+         TAB 2: DIAGRAMM
+    ══════════════════════════════════════════════ -->
+    <section id="tab-diagramm" class="tab-section">
+
+      <div class="card">
+        <div class="card-title">&#128200; Monatsdiagramm</div>
+
+        <div class="chart-controls">
+          <label for="year-selector">Jahr:</label>
+          <select id="year-selector" onchange="renderChart(parseInt(this.value))"></select>
+        </div>
+
+        <div id="chart-error" style="display:none; color:var(--danger); padding:20px; text-align:center;">
+          Diagramm konnte nicht geladen werden (Chart.js nicht verfügbar).
+        </div>
+
+        <div class="chart-canvas-wrapper" id="chart-canvas-wrapper">
+          <canvas id="monthly-chart"></canvas>
+        </div>
+
+        <div class="chart-legend">
+          <div class="legend-item">
+            <div class="legend-dot" style="background:#6c63ff;"></div>
+            Umsatz
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot" style="background:#e05260;"></div>
+            Kosten
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot" style="background:#4caf84;"></div>
+            Gewinn
+          </div>
+        </div>
+      </div>
+
+    </section><!-- /#tab-diagramm -->
+
+
+    <!-- ══════════════════════════════════════════════
+         TAB 3: STATISTIKEN
+    ══════════════════════════════════════════════ -->
+    <section id="tab-statistiken" class="tab-section">
+
+      <div class="card">
+        <div class="card-title">&#128202; Statistiken</div>
+
+        <div class="stats-controls">
+          <div class="radio-group">
+            <label>
+              <input type="radio" name="stats-range" value="all" id="stats-range-all" checked onchange="renderStatistics()" />
+              Gesamter Zeitraum
+            </label>
+            <label>
+              <input type="radio" name="stats-range" value="custom" id="stats-range-custom" onchange="renderStatistics()" />
+              Benutzerdefinierter Zeitraum
+            </label>
+          </div>
+
+          <div class="date-range-pickers hidden" id="stats-date-range">
+            <label for="stats-date-from">Von</label>
+            <input type="date" id="stats-date-from" onchange="renderStatistics()" />
+            <label for="stats-date-to">Bis</label>
+            <input type="date" id="stats-date-to" onchange="renderStatistics()" />
+          </div>
+        </div>
+
+        <div class="stats-cards" id="stats-cards">
+          <div class="stat-card">
+            <div class="stat-card-label">Gesamtumsatz</div>
+            <div class="stat-card-value" id="stat-umsatz">— €</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Gesamtkosten</div>
+            <div class="stat-card-value" id="stat-kosten">— €</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Gesamtgewinn</div>
+            <div class="stat-card-value" id="stat-gewinn">— €</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Anzahl Buchungen</div>
+            <div class="stat-card-value" id="stat-count">—</div>
+          </div>
+        </div>
+      </div>
+
+    </section><!-- /#tab-statistiken -->
+
+
+    <!-- ══════════════════════════════════════════════
+         TAB 4: EINSTELLUNGEN
+    ══════════════════════════════════════════════ -->
+    <section id="tab-einstellungen" class="tab-section">
+
+      <div class="card settings-section">
+        <div class="card-title">&#9881; Einstellungen</div>
+        <p style="color:var(--text-muted); font-size:13px; margin-bottom:20px;">
+          Diese Werte werden als Standardwerte für neue Buchungen verwendet.
+          Bereits gespeicherte Buchungen werden <strong>nicht</strong> rückwirkend angepasst.
+        </p>
+
+        <form id="settings-form" autocomplete="off">
+          <div class="form-grid" style="grid-template-columns:1fr;">
+
+            <div class="form-group">
+              <label for="s-filament-price">Filamentpreis pro kg</label>
+              <div class="input-with-unit">
+                <input type="number" id="s-filament-price" placeholder="22.99" min="0" step="0.01" required />
+                <span class="input-unit">&euro;/kg</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="s-electricity-price">Strompreis pro kWh</label>
+              <div class="input-with-unit">
+                <input type="number" id="s-electricity-price" placeholder="0.32" min="0" step="0.001" required />
+                <span class="input-unit">&euro;/kWh</span>
+              </div>
+            </div>
+
+            <div class="form-submit-row" style="margin-top:8px;">
+              <button type="submit" class="btn btn-primary">&#10003; Einstellungen speichern</button>
+            </div>
+
+          </div>
+        </form>
+      </div>
+
+    </section><!-- /#tab-einstellungen -->
+
+  </main>
+
+  <!-- Toast container -->
+  <div id="toast-container"></div>
+
+  <!-- Import modal -->
+  <div id="import-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title-text">
+    <div class="modal-dialog">
+      <h2 class="modal-title" id="modal-title-text">CSV importieren</h2>
+      <p class="modal-text">Wie sollen die Daten importiert werden?</p>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="modal-btn-merge">&#128257; Zusammenf&uuml;hren</button>
+        <button class="btn btn-danger" id="modal-btn-replace">&#128465; Ersetzen</button>
+        <button class="btn btn-neutral" id="modal-btn-cancel">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="csv-file-input" accept=".csv,text/csv" />
+
+</body>
+</html>
