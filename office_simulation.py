@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AI Office Simulation - Top-down 3D style with AI Agents"""
+"""KI Konstruktionsbüro - Abteilungssimulation (isometrisch, Top-Down)"""
 
 import pygame
 import math
@@ -16,34 +16,35 @@ WIDTH, HEIGHT = 1280, 800
 FPS = 60
 TILE = 48
 
-# Palette
-C_BG       = (240, 235, 225)
-C_FLOOR    = (210, 200, 185)
-C_FLOOR2   = (220, 212, 198)
-C_WALL     = (140, 120, 100)
-C_WALL_TOP = (160, 145, 125)
-C_DESK     = (180, 140, 90)
-C_DESK_TOP = (200, 160, 110)
-C_DESK_SHADOW = (150, 115, 70)
-C_SCREEN   = (80, 180, 230)
-C_SCREEN_GLOW = (120, 200, 255)
-C_CABINET  = (150, 120, 80)
-C_CABINET_TOP = (170, 140, 100)
-C_MEETING  = (160, 200, 140)
-C_MEETING_TOP = (180, 220, 160)
-C_PLANT    = (80, 160, 80)
-C_PLANT_POT = (160, 100, 60)
-C_COFFEE   = (120, 80, 40)
-C_WHITE    = (255, 255, 255)
-C_BLACK    = (20, 20, 20)
-C_SHADOW   = (0, 0, 0, 60)
+# Palette – kühler, technisch/industriell
+C_BG        = (235, 232, 228)
+C_FLOOR     = (205, 200, 195)   # Betongrau
+C_FLOOR2    = (215, 210, 205)
+C_WALL      = (120, 115, 108)
+C_WALL_TOP  = (148, 142, 132)
+C_ZTISCH    = (160, 130,  80)   # Zeichentisch Holz
+C_ZTISCH_BP = (175, 210, 240)   # Blaupausen-Fläche
+C_SCREEN    = ( 60, 160, 220)
+C_SCREEN_GLOW = (100, 185, 255)
+C_CABINET   = ( 95, 100, 108)   # Planschrank (Stahl-grau)
+C_CABINET_TOP = (115, 120, 130)
+C_MEETING   = (150, 185, 130)
+C_MEETING_TOP = (170, 205, 150)
+C_PLOTTER   = (190, 190, 188)   # Plottertisch
+C_PLOTTER_TOP = (210, 210, 208)
+C_PLANT     = ( 80, 155,  75)
+C_PLANT_POT = (150,  90,  50)
+C_COFFEE    = (110,  70,  35)
+C_WHITE     = (255, 255, 255)
+C_BLACK     = ( 20,  20,  20)
+C_SHADOW    = (0, 0, 0, 60)
 
 AGENT_COLORS = {
-    "Planner":  (220,  80,  80),
-    "Analyst":  ( 80, 140, 220),
-    "Dev":      ( 80, 200, 120),
-    "Manager":  (200, 160,  40),
-    "Designer": (180,  80, 200),
+    "Projektleiter": (210,  70,  70),   # Rot
+    "Statiker":      ( 70, 130, 210),   # Blau
+    "CAD-Ingenieur": ( 70, 190, 110),   # Grün
+    "Bauleiter":     (195, 155,  35),   # Gelb
+    "Konstrukteur":  (170,  70, 195),   # Lila
 }
 
 AGENT_COLORS_DARK = {k: tuple(max(0, c - 60) for c in v) for k, v in AGENT_COLORS.items()}
@@ -153,11 +154,13 @@ class Agent:
     anim: float = 0.0
     walk_cycle: float = 0.0
     busy_timer: float = 0.0
+    coffee_timer: float = field(default_factory=lambda: random.uniform(20, 40))
+    coffee_break_timer: float = 0.0   # wie lange noch an der Maschine
+    prev_state: AgentState = AgentState.IDLE
 
-    def say(self, text, lifetime=3.5):
+    def say(self, text, lifetime=3.5, color=(255, 252, 230)):
         sx, sy = iso(self.gx, self.gy)
-        self.bubble = Bubble(text, sx, sy - 20, lifetime,
-                             color=(255, 252, 230))
+        self.bubble = Bubble(text, sx, sy - 20, lifetime, color=color)
 
     def set_target(self, gx, gy):
         self.target = (gx, gy)
@@ -181,7 +184,13 @@ class Agent:
             if dist < speed + 0.05:
                 self.gx, self.gy = tx, ty
                 self.target = None
-                self.state = AgentState.WORKING
+                # Kaffeemaschine erreicht?
+                if math.hypot(self.gx - 10.6, self.gy - 7.6) < 0.3:
+                    self.state = AgentState.COFFEE
+                    self.say(random.choice(COFFEE_LINES), 3.0,
+                             color=(255, 235, 180))
+                else:
+                    self.state = AgentState.WORKING
                 self.walk_cycle = 0
             else:
                 self.gx += dx / dist * speed
@@ -192,6 +201,24 @@ class Agent:
             self.busy_timer -= dt
             if self.busy_timer <= 0:
                 self.state = AgentState.IDLE
+
+        # Kaffeepausen-Countdown (nur wenn gerade nicht Meeting/Fetching/Coffee)
+        if self.state in (AgentState.IDLE, AgentState.WORKING):
+            self.coffee_timer -= dt
+            if self.coffee_timer <= 0:
+                self.prev_state = self.state
+                self.state = AgentState.MOVING
+                self.target = (10.6, 7.6)
+                self.coffee_break_timer = 4.5
+                self.coffee_timer = random.uniform(25, 45)
+
+        # An der Kaffeemaschine warten, dann zurück zum Schreibtisch
+        if self.state == AgentState.COFFEE:
+            self.coffee_break_timer -= dt
+            if self.coffee_break_timer <= 0:
+                hx, hy = self.desk
+                self.set_target(hx, hy)
+                self.state = AgentState.MOVING
 
     def draw(self, surf):
         sx, sy = iso(self.gx, self.gy)
@@ -247,7 +274,7 @@ def draw_floor(surf):
             pts = [iso(gx, gy), iso(gx+1, gy), iso(gx+1, gy+1), iso(gx, gy+1)]
             c = C_FLOOR if (gx + gy) % 2 == 0 else C_FLOOR2
             pygame.draw.polygon(surf, c, pts)
-            pygame.draw.polygon(surf, (190, 180, 165), pts, 1)
+            pygame.draw.polygon(surf, (182, 176, 170), pts, 1)
 
 
 def draw_iso_box(surf, gx, gy, w, d, h, top_c, left_c, right_c):
@@ -267,10 +294,26 @@ def darken(c, amt=40):
     return tuple(max(0, x - amt) for x in c[:3])
 
 
+def draw_blueprint_grid(surf, gx, gy, w, d, h):
+    """Zeichnet ein blaues Gitter auf die Tischfläche (Blaupausen-Optik)."""
+    grid_c = (100, 155, 210)
+    steps = 4
+    for i in range(1, steps):
+        # Linien parallel zur gx-Achse
+        t = i / steps
+        p0 = iso(gx + w * t, gy,     h)
+        p1 = iso(gx + w * t, gy + d, h)
+        pygame.draw.line(surf, grid_c, p0, p1, 1)
+        # Linien parallel zur gy-Achse
+        p2 = iso(gx,     gy + d * t, h)
+        p3 = iso(gx + w, gy + d * t, h)
+        pygame.draw.line(surf, grid_c, p2, p3, 1)
+
+
 def draw_office(surf):
     draw_floor(surf)
 
-    # Walls (top and left border)
+    # Wände oben und links
     for i in range(12):
         draw_iso_box(surf, i, 0, 1, 0.2, 3,
                      C_WALL_TOP, C_WALL, darken(C_WALL, 20))
@@ -278,51 +321,71 @@ def draw_office(surf):
         draw_iso_box(surf, 0, i, 0.2, 1, 3,
                      C_WALL_TOP, C_WALL, darken(C_WALL, 20))
 
-    # Desks (5 agent desks)
+    # Fenster-Andeutungen in der oberen Wand
+    for fx in [3, 6, 9]:
+        p0 = iso(fx + 0.2, 0.18, 1.2)
+        p1 = iso(fx + 0.8, 0.18, 1.2)
+        p2 = iso(fx + 0.8, 0.18, 2.5)
+        p3 = iso(fx + 0.2, 0.18, 2.5)
+        pygame.draw.polygon(surf, (200, 225, 245), [p0, p1, p2, p3])
+        pygame.draw.polygon(surf, (160, 200, 230), [p0, p1, p2, p3], 1)
+
+    # Zeichentische (5 Agenten) mit Blaupausen-Fläche
     desk_positions = [
         (2, 2), (5, 2), (8, 2),
         (2, 5), (5, 5),
     ]
     for gx, gy in desk_positions:
-        draw_iso_box(surf, gx, gy, 1.8, 1.2, 1,
-                     C_DESK_TOP, C_DESK, darken(C_DESK, 30))
-        # Monitor
+        # Tischbeine / Körper
+        draw_iso_box(surf, gx, gy, 1.8, 1.3, 1.0,
+                     C_ZTISCH_BP, C_ZTISCH, darken(C_ZTISCH, 30))
+        # Blaupausen-Gitter
+        draw_blueprint_grid(surf, gx + 0.1, gy + 0.1, 1.6, 1.1, 1.0)
+        # Monitor / CAD-Bildschirm
         draw_iso_box(surf, gx + 0.3, gy + 0.1, 0.9, 0.15, 1.6,
                      C_SCREEN_GLOW, C_SCREEN, darken(C_SCREEN, 30))
 
-    # Meeting table (center right)
+    # Besprechungstisch
     draw_iso_box(surf, 7, 5, 2.5, 2, 0.8,
                  C_MEETING_TOP, C_MEETING, darken(C_MEETING, 30))
 
-    # File cabinet
-    draw_iso_box(surf, 10, 2, 1, 1.5, 2,
-                 C_CABINET_TOP, C_CABINET, darken(C_CABINET, 30))
-    # Cabinet drawers
-    for i in range(3):
-        h_off = i * 0.5
-        pts = [iso(10, 2 + h_off/2, 0.3 + h_off),
-               iso(11, 2 + h_off/2, 0.3 + h_off),
-               iso(11, 2 + h_off/2 + 0.7, 0.3 + h_off),
-               iso(10, 2 + h_off/2 + 0.7, 0.3 + h_off)]
-        pygame.draw.polygon(surf, (180, 150, 110, 80), pts, 1)
-        # Handle
-        mx = (pts[0][0] + pts[1][0]) // 2
-        my = (pts[0][1] + pts[1][1]) // 2
-        pygame.draw.circle(surf, (200, 170, 100), (mx, my + 3), 3)
+    # Planschrank (breit, stahl-grau)
+    draw_iso_box(surf, 9.8, 1.5, 1.5, 1.8, 2.4,
+                 C_CABINET_TOP, C_CABINET, darken(C_CABINET, 25))
+    # Schubladen-Linien
+    for i in range(4):
+        h_off = 0.4 + i * 0.5
+        p0 = iso(9.8,  1.5, h_off)
+        p1 = iso(11.3, 1.5, h_off)
+        p2 = iso(11.3, 3.3, h_off)
+        p3 = iso(9.8,  3.3, h_off)
+        pygame.draw.polygon(surf, darken(C_CABINET, 10), [p0, p1, p2, p3], 1)
+        # Griff
+        mx = (p0[0] + p1[0]) // 2
+        my = (p0[1] + p1[1]) // 2
+        pygame.draw.rect(surf, (180, 185, 195), (mx - 8, my - 3, 16, 5), border_radius=2)
 
-    # Coffee machine
-    draw_iso_box(surf, 10, 7, 0.8, 0.8, 1.5,
+    # Plottertisch
+    draw_iso_box(surf, 8.5, 7.0, 1.8, 1.0, 0.9,
+                 C_PLOTTER_TOP, C_PLOTTER, darken(C_PLOTTER, 25))
+    # Plotterrolle (schwarze Linie = Papierausgabe)
+    p0 = iso(8.6, 7.0, 0.9)
+    p1 = iso(10.2, 7.0, 0.9)
+    pygame.draw.line(surf, (40, 40, 40), p0, p1, 3)
+    # Plottergehäuse oben
+    draw_iso_box(surf, 8.7, 7.05, 1.4, 0.25, 1.3,
+                 (160, 160, 162), (130, 130, 132), (100, 100, 102))
+
+    # Kaffeemaschine
+    draw_iso_box(surf, 10.2, 7.2, 0.8, 0.8, 1.5,
                  C_COFFEE, darken(C_COFFEE, 20), darken(C_COFFEE, 40))
-    # Coffee light
     pygame.draw.circle(surf, (255, 100, 50),
-                       (iso(10.4, 7.4, 1.5)[0], iso(10.4, 7.4, 1.5)[1] + 4), 4)
+                       (iso(10.6, 7.6, 1.5)[0], iso(10.6, 7.6, 1.5)[1] + 4), 4)
 
-    # Plants (corners)
-    for gx, gy in [(1.5, 8.5), (10.5, 0.8)]:
+    # Pflanzen
+    for gx, gy in [(1.5, 8.5), (10.8, 0.7)]:
         sx, sy = iso(gx, gy)
-        # Pot
-        pygame.draw.ellipse(surf, C_PLANT_POT, (sx-8, sy-6, 16, 12))
-        # Leaves
+        pygame.draw.ellipse(surf, C_PLANT_POT, (sx - 8, sy - 6, 16, 12))
         for angle in range(0, 360, 60):
             rad = math.radians(angle)
             ex = sx + math.cos(rad) * 12
@@ -331,78 +394,101 @@ def draw_office(surf):
         pygame.draw.circle(surf, darken(C_PLANT, 20), (sx, sy - 18), 9)
 
 
-# ── Scenarios ──────────────────────────────────────────────────────────────────
+# ── Szenarien ──────────────────────────────────────────────────────────────────
 SCENARIOS = {
-    "Product Launch": [
-        ("Planner",  "office_fetching", (10.5, 3.0), "Collecting market data..."),
-        ("Analyst",  "desk",             None,        "Analyzing sales figures..."),
-        ("Dev",      "desk",             None,        "Building launch dashboard..."),
-        ("Manager",  "meeting",          (8.3, 6.5),  "Scheduling team meeting!"),
-        ("Designer", "desk",             None,        "Creating UI mockups..."),
-        ("Planner",  "meeting",          (8.3, 5.8),  "Meeting: Launch in 3 days!"),
-        ("Analyst",  "meeting",          (7.5, 6.8),  "Market risk: LOW ✓"),
-        ("Dev",      "meeting",          (9.0, 6.2),  "Feature complete!"),
-        ("Designer", "meeting",          (7.8, 5.5),  "Designs approved!"),
-        ("Manager",  "desk",             None,        "Sending launch report..."),
-        ("Planner",  "desk",             None,        "Launch plan finalized!"),
+    "Brueckenplanung": [
+        ("Projektleiter", "desk",            None,         "Neues Projekt: Bruecke B47!"),
+        ("Projektleiter", "office_fetching", (10.6, 2.5),  "Bestandsplaene holen..."),
+        ("Statiker",      "desk",            None,         "Lastannahmen berechnen..."),
+        ("CAD-Ingenieur", "desk",            None,         "3D-Modell aufbauen..."),
+        ("Konstrukteur",  "office_fetching", (10.6, 3.0),  "DIN-Normen pruefen..."),
+        ("Bauleiter",     "meeting",         (8.3, 6.5),   "Planungsbesprechung!"),
+        ("Projektleiter", "meeting",         (8.3, 5.8),   "Zeitplan: 6 Monate"),
+        ("Statiker",      "meeting",         (7.5, 6.8),   "Traglast: 60t OK!"),
+        ("CAD-Ingenieur", "meeting",         (9.0, 6.2),   "Entwurf freigegeben!"),
+        ("Konstrukteur",  "desk",            None,         "Ausfuehrungsplanung..."),
+        ("Projektleiter", "desk",            None,         "Plaene an Behoerde!"),
     ],
-    "Bug Crisis": [
-        ("Planner",  "desk",             None,        "ALERT: Critical bug detected!"),
-        ("Dev",      "office_fetching",  (10.5, 2.5), "Pulling error logs..."),
-        ("Analyst",  "desk",             None,        "Tracing the stack trace..."),
-        ("Dev",      "desk",             None,        "Found the bug! Line 247..."),
-        ("Planner",  "meeting",          (8.5, 6.0),  "Emergency meeting NOW!"),
-        ("Analyst",  "meeting",          (7.5, 6.8),  "Root cause: null pointer"),
-        ("Dev",      "meeting",          (9.0, 6.5),  "Hotfix ready in 10 min"),
-        ("Manager",  "meeting",          (8.3, 5.5),  "Notify stakeholders?"),
-        ("Planner",  "desk",             None,        "Hotfix approved. Deploy!"),
-        ("Dev",      "desk",             None,        "Deploying fix... Done!"),
-        ("Analyst",  "desk",             None,        "Bug resolved. Monitoring..."),
+    "Statikpruefung": [
+        ("Statiker",      "desk",            None,         "Statikpruefung gestartet"),
+        ("Statiker",      "office_fetching", (10.6, 2.2),  "Bestandsplaene holen..."),
+        ("Statiker",      "desk",            None,         "Traglastberechnung..."),
+        ("Konstrukteur",  "desk",            None,         "Bewehrungsplan pruefen..."),
+        ("Statiker",      "desk",            None,         "Fehler in Bewehrung!"),
+        ("Projektleiter", "meeting",         (8.5, 6.0),   "Notfallbesprechung!"),
+        ("Statiker",      "meeting",         (7.5, 6.8),   "Stahl fehlt in Achse 3"),
+        ("CAD-Ingenieur", "meeting",         (9.0, 6.5),   "Korrektur in CAD..."),
+        ("Bauleiter",     "meeting",         (8.3, 5.5),   "Baustop anordnen?"),
+        ("Konstrukteur",  "desk",            None,         "Plan ueberarbeitet!"),
+        ("Statiker",      "desk",            None,         "Statik freigegeben!"),
     ],
-    "Data Analysis": [
-        ("Planner",  "desk",             None,        "Task: Q4 data report"),
-        ("Analyst",  "office_fetching",  (10.5, 3.5), "Fetching Q4 datasets..."),
-        ("Analyst",  "desk",             None,        "Running statistical models..."),
-        ("Dev",      "desk",             None,        "Building data pipeline..."),
-        ("Analyst",  "desk",             None,        "Anomaly found in dataset!"),
-        ("Planner",  "desk",             None,        "Investigating anomaly..."),
-        ("Analyst",  "office_fetching",  (10.5, 2.8), "Cross-referencing archives..."),
-        ("Dev",      "desk",             None,        "Visualization ready!"),
-        ("Manager",  "meeting",          (8.3, 6.5),  "Review report together"),
-        ("Analyst",  "meeting",          (7.5, 6.8),  "Revenue up 23%!"),
-        ("Planner",  "desk",             None,        "Report sent to board!"),
+    "Baugenehmigung": [
+        ("Bauleiter",     "desk",            None,         "Unterlagen zusammenstellen"),
+        ("Konstrukteur",  "office_fetching", (10.6, 3.2),  "Lageplan holen..."),
+        ("CAD-Ingenieur", "desk",            None,         "Grundrisse aktualisieren"),
+        ("Statiker",      "desk",            None,         "Statiknachweis erstellen"),
+        ("Projektleiter", "office_fetching", (10.6, 2.8),  "Baubeschreibung pruefen"),
+        ("Bauleiter",     "meeting",         (8.3, 6.5),   "Einreichungscheck!"),
+        ("CAD-Ingenieur", "meeting",         (9.0, 6.2),   "Plaene druckfertig!"),
+        ("Statiker",      "meeting",         (7.5, 6.8),   "Nachweise vollstaendig"),
+        ("Konstrukteur",  "meeting",         (7.8, 5.5),   "Unterschriften fehlen!"),
+        ("Projektleiter", "desk",            None,         "Unterlagen eingereicht!"),
+        ("Bauleiter",     "desk",            None,         "Behoerde bestaetigt!"),
     ],
-    "New AI Feature": [
-        ("Planner",  "desk",             None,        "Brainstorming AI features..."),
-        ("Designer", "office_fetching",  (10.5, 3.0), "Getting design specs..."),
-        ("Dev",      "desk",             None,        "Setting up ML pipeline..."),
-        ("Analyst",  "desk",             None,        "Training data prep..."),
-        ("Designer", "desk",             None,        "Designing AI interface..."),
-        ("Planner",  "meeting",          (8.5, 5.8),  "Feature review meeting"),
-        ("Dev",      "meeting",          (9.0, 6.5),  "Model accuracy: 94%!"),
-        ("Analyst",  "meeting",          (7.5, 6.8),  "Bias check: passed!"),
-        ("Designer", "meeting",          (7.8, 5.5),  "UX score: excellent!"),
-        ("Planner",  "desk",             None,        "Greenlit! Ship it!"),
-        ("Dev",      "desk",             None,        "AI feature deployed!"),
+    "Notfall: Rissbildung": [
+        ("Bauleiter",     "desk",            None,         "ALARM: Riss entdeckt!"),
+        ("Statiker",      "office_fetching", (10.6, 2.0),  "Bodengutachten holen!"),
+        ("Statiker",      "desk",            None,         "Rissursache analysieren"),
+        ("Projektleiter", "meeting",         (8.5, 5.8),   "Krisensitzung JETZT!"),
+        ("Bauleiter",     "meeting",         (8.3, 6.5),   "Baustop verhaengt!"),
+        ("Statiker",      "meeting",         (7.5, 6.8),   "Setzung: 4cm kritisch!"),
+        ("CAD-Ingenieur", "meeting",         (9.0, 6.2),   "Verstaerkung zeichnen"),
+        ("Konstrukteur",  "meeting",         (7.8, 5.5),   "Stahltraeger pruefen"),
+        ("CAD-Ingenieur", "desk",            None,         "Verstaerkungsplan fertig"),
+        ("Statiker",      "desk",            None,         "Massnahmen freigegeben!"),
+        ("Projektleiter", "desk",            None,         "Bericht an Auftraggeber"),
     ],
 }
 
 RANDOM_EVENTS = [
-    ("Analyst",  "Server spiked to 100%!"),
-    ("Dev",      "Dependency update broke build!"),
-    ("Manager",  "Client wants demo NOW!"),
-    ("Planner",  "Switching priorities..."),
-    ("Designer", "Brand guidelines changed!"),
-    ("Dev",      "Found performance bottleneck!"),
-    ("Analyst",  "New data arrived!"),
-    ("Manager",  "Budget cut by 20%!"),
-    ("Planner",  "Competitor launched feature!"),
+    ("Projektleiter", "Neue DIN-Norm erschienen!"),
+    ("Statiker",      "Lieferverzug: Bewehrungsstahl!"),
+    ("Bauleiter",     "Kunde aendert Grundriss!"),
+    ("CAD-Ingenieur", "CAD-Software abgestuerzt!"),
+    ("Konstrukteur",  "Ausfuehrungsplan fehlt!"),
+    ("Statiker",      "Brandschutzgutachten noetig!"),
+    ("Bauleiter",     "Kostenexplosion Fundament!"),
+    ("Projektleiter", "Behoerde fordert Nachbesserung!"),
+    ("CAD-Ingenieur", "Plotterpapierstau!"),
+    ("Konstrukteur",  "Masskette stimmt nicht!"),
+]
+
+# Kaffee-Dialoge zwischen je zwei Rollen
+COFFEE_CHATS = {
+    ("Projektleiter", "Statiker"):      ("Wie steht die Statik?",        "Traglast passt, keine Sorge!"),
+    ("Projektleiter", "CAD-Ingenieur"): ("Plan schon im System?",        "Ja, gerade hochgeladen!"),
+    ("Projektleiter", "Bauleiter"):     ("Baustelle laeuft?",            "Alles im Zeitplan!"),
+    ("Projektleiter", "Konstrukteur"):  ("Detailplaene fertig?",         "Noch zwei Stunden..."),
+    ("Statiker",      "CAD-Ingenieur"): ("Hast du Achse 3 angepasst?",   "Kommt gleich!"),
+    ("Statiker",      "Bauleiter"):     ("Bodengutachten angekommen?",   "Liegt auf meinem Tisch."),
+    ("Statiker",      "Konstrukteur"):  ("Bewehrung stimmt so?",         "Ja, hab alles geprueft."),
+    ("CAD-Ingenieur", "Bauleiter"):     ("Plotter macht Probleme...",    "Ich schau nachher drauf."),
+    ("CAD-Ingenieur", "Konstrukteur"):  ("3D-Modell ist online!",        "Super, ich schaue gleich."),
+    ("Bauleiter",     "Konstrukteur"):  ("Meeting um 14 Uhr?",           "Bin dabei!"),
+}
+
+COFFEE_LINES = [
+    "Kurze Kaffeepause!",
+    "Ich brauch Koffein!",
+    "Endlich mal durchatmen.",
+    "Kaffee = Bauenergie!",
+    "Mmh, frischer Kaffee!",
 ]
 
 # ── Main Simulation ────────────────────────────────────────────────────────────
 def main():
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("AI Office Simulation")
+    pygame.display.set_caption("KI Konstruktionsbüro – Abteilungssimulation")
     clock = pygame.time.Clock()
 
     font_title = pygame.font.SysFont("Arial", 22, bold=True)
@@ -411,24 +497,24 @@ def main():
     font_tiny  = pygame.font.SysFont("Arial", 11)
 
     desk_home = {
-        "Planner":  (2.9, 2.5),
-        "Analyst":  (5.9, 2.5),
-        "Dev":      (8.9, 2.5),
-        "Manager":  (2.9, 5.5),
-        "Designer": (5.9, 5.5),
+        "Projektleiter": (2.9, 2.5),
+        "Statiker":      (5.9, 2.5),
+        "CAD-Ingenieur": (8.9, 2.5),
+        "Bauleiter":     (2.9, 5.5),
+        "Konstrukteur":  (5.9, 5.5),
     }
 
     agents = [
-        Agent("Lexi",    "Planner",  2.9, 2.5, desk_home["Planner"],
-              AGENT_COLORS["Planner"],  AGENT_COLORS_DARK["Planner"]),
-        Agent("Axel",    "Analyst",  5.9, 2.5, desk_home["Analyst"],
-              AGENT_COLORS["Analyst"],  AGENT_COLORS_DARK["Analyst"]),
-        Agent("Dev-3000","Dev",      8.9, 2.5, desk_home["Dev"],
-              AGENT_COLORS["Dev"],      AGENT_COLORS_DARK["Dev"]),
-        Agent("Marco",   "Manager",  2.9, 5.5, desk_home["Manager"],
-              AGENT_COLORS["Manager"],  AGENT_COLORS_DARK["Manager"]),
-        Agent("Aria",    "Designer", 5.9, 5.5, desk_home["Designer"],
-              AGENT_COLORS["Designer"], AGENT_COLORS_DARK["Designer"]),
+        Agent("KAI-PL",  "Projektleiter", 2.9, 2.5, desk_home["Projektleiter"],
+              AGENT_COLORS["Projektleiter"], AGENT_COLORS_DARK["Projektleiter"]),
+        Agent("MAX-ST",  "Statiker",      5.9, 2.5, desk_home["Statiker"],
+              AGENT_COLORS["Statiker"],      AGENT_COLORS_DARK["Statiker"]),
+        Agent("CAD-3",   "CAD-Ingenieur", 8.9, 2.5, desk_home["CAD-Ingenieur"],
+              AGENT_COLORS["CAD-Ingenieur"], AGENT_COLORS_DARK["CAD-Ingenieur"]),
+        Agent("OTTO-BL", "Bauleiter",     2.9, 5.5, desk_home["Bauleiter"],
+              AGENT_COLORS["Bauleiter"],     AGENT_COLORS_DARK["Bauleiter"]),
+        Agent("VERA-KO", "Konstrukteur",  5.9, 5.5, desk_home["Konstrukteur"],
+              AGENT_COLORS["Konstrukteur"],  AGENT_COLORS_DARK["Konstrukteur"]),
     ]
     agent_map = {a.role: a for a in agents}
 
@@ -454,7 +540,7 @@ def main():
         step_timer = 0
         running_scenario = True
         scene_complete = False
-        log.append(f"▶ Starting: {scenario_names[idx]}")
+        log.append(f"▶ Szenario: {scenario_names[idx]}")
 
     def execute_step(step):
         role, action, pos, text = step
@@ -479,7 +565,7 @@ def main():
                 a.set_target(pos[0], pos[1])
                 a.state = AgentState.FETCHING
         elif action == "coffee":
-            a.set_target(10.4, 7.4)
+            a.set_target(10.6, 7.6)
             a.state = AgentState.COFFEE
         a.busy_timer = step_delay + 1
 
@@ -488,7 +574,7 @@ def main():
         a = agent_map.get(role)
         if a:
             a.say("⚡ " + msg, 4.0)
-            log.append(f"[RANDOM] {msg}")
+            log.append(f"[Ereignis] {msg}")
             if len(log) > 12:
                 log.pop(0)
 
@@ -556,6 +642,28 @@ def main():
             for a in agents:
                 a.update(dt)
 
+            # Kaffee-Gespräche: zwei Agenten nahe der Maschine → Dialog
+            coffee_agents = [a for a in agents
+                             if a.state == AgentState.COFFEE and not a.bubble]
+            if len(coffee_agents) >= 2:
+                a1, a2 = coffee_agents[0], coffee_agents[1]
+                key = (a1.role, a2.role)
+                rkey = (a2.role, a1.role)
+                if key in COFFEE_CHATS:
+                    line1, line2 = COFFEE_CHATS[key]
+                    a1.say(line1, 3.5, color=(255, 235, 180))
+                    a2.say(line2, 3.5, color=(255, 235, 180))
+                    log.append(f"[Kaffee] {a1.name}: {line1}")
+                    if len(log) > 12:
+                        log.pop(0)
+                elif rkey in COFFEE_CHATS:
+                    line2, line1 = COFFEE_CHATS[rkey]
+                    a1.say(line1, 3.5, color=(255, 235, 180))
+                    a2.say(line2, 3.5, color=(255, 235, 180))
+                    log.append(f"[Kaffee] {a1.name}: {line1}")
+                    if len(log) > 12:
+                        log.pop(0)
+
             random_event_timer -= dt
             if random_event_timer <= 0:
                 if running_scenario:
@@ -573,7 +681,7 @@ def main():
                     else:
                         scene_complete = True
                         running_scenario = False
-                        log.append(f"✓ Scenario complete!")
+                        log.append(f"✓ Szenario abgeschlossen!")
 
         # ── Draw ────────────────────────────────────────────────────────────────
         screen.fill(C_BG)
@@ -595,12 +703,12 @@ def main():
         screen.blit(panel, (panel_x, 10))
 
         # Title
-        t = font_title.render("AI Office Sim", True, (40, 60, 120))
+        t = font_title.render("KI Konstruktionsbüro", True, (40, 60, 120))
         screen.blit(t, (panel_x + 15, 22))
 
         # Scenario label
         y = 55
-        screen.blit(font_med.render("Scenario:", True, (80, 80, 100)), (panel_x + 15, y))
+        screen.blit(font_med.render("Szenario:", True, (80, 80, 100)), (panel_x + 15, y))
         y += 22
         sn = font_med.render(scenario_names[current_scenario], True, (30, 100, 180))
         screen.blit(sn, (panel_x + 15, y))
@@ -616,7 +724,7 @@ def main():
         y += 18
 
         # Agents status
-        screen.blit(font_med.render("Agents:", True, (80, 80, 100)), (panel_x + 15, y))
+        screen.blit(font_med.render("Agenten:", True, (80, 80, 100)), (panel_x + 15, y))
         y += 22
         for a in agents:
             col = a.color
@@ -629,7 +737,7 @@ def main():
 
         # Log
         y += 8
-        screen.blit(font_med.render("Event Log:", True, (80, 80, 100)), (panel_x + 15, y))
+        screen.blit(font_med.render("Ereignislog:", True, (80, 80, 100)), (panel_x + 15, y))
         y += 22
         for line in log[-10:]:
             wrapped = []
@@ -666,7 +774,7 @@ def main():
         draw_button(screen, btn_rand, "⚡ Random Event", hover=btn_rand.collidepoint(mx, my))
 
         # Hotkeys hint
-        hint = font_tiny.render("SPACE: Play/Pause | ←→: Scenario | R: Random Event | ESC: Quit",
+        hint = font_tiny.render("LEERTASTE: Play/Pause | ←→: Szenario | R: Zufallsereignis | ESC: Beenden",
                                  True, (100, 100, 120))
         screen.blit(hint, (panel_x - 400, HEIGHT - 20))
 
@@ -678,7 +786,7 @@ def main():
             banner.fill((80, 200, 120, 220))
             pygame.draw.rect(banner, (40, 140, 80, 255), banner.get_rect(), 2, border_radius=12)
             screen.blit(banner, (bx, by))
-            ct = font_title.render("✓ Scenario Complete!", True, C_WHITE)
+            ct = font_title.render("✓ Szenario abgeschlossen!", True, C_WHITE)
             screen.blit(ct, (bx + bw//2 - ct.get_width()//2, by + bh//2 - ct.get_height()//2))
 
         # Paused overlay
