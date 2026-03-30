@@ -561,8 +561,8 @@
             </div>
 
             <div class="form-group">
-              <label for="f-kwh">Stromverbrauch in kWh</label>
-              <input type="number" id="f-kwh" placeholder="0.000" min="0" step="0.001" />
+              <label for="f-kwh">Ø Leistung (kW/h)</label>
+              <input type="number" id="f-kwh" placeholder="0.100" min="0" step="0.001" />
             </div>
 
             <div class="form-group">
@@ -577,6 +577,10 @@
                 <div class="preview-item">
                   <span class="preview-label">Filamentkosten</span>
                   <span class="preview-value" id="prev-filament">— €</span>
+                </div>
+                <div class="preview-item">
+                  <span class="preview-label">Strom gesamt (kWh)</span>
+                  <span class="preview-value" id="prev-kwh-total">— kWh</span>
                 </div>
                 <div class="preview-item">
                   <span class="preview-label">Stromkosten</span>
@@ -616,7 +620,8 @@
                 <th>Beschreibung</th>
                 <th>Dauer</th>
                 <th>Filament (g)</th>
-                <th>kWh</th>
+                <th>kW/h</th>
+                <th>kWh ges.</th>
                 <th>Filamentkosten</th>
                 <th>Stromkosten</th>
                 <th>Gesamtkosten</th>
@@ -761,7 +766,7 @@
 
     const CSV_HEADER = [
       'ID','Datum','Beschreibung','Dauer_Stunden','Dauer_Minuten',
-      'Filament_g','Filament_EUR_per_kg','Strom_kWh','Strom_EUR_per_kWh',
+      'Filament_g','Filament_EUR_per_kg','Strom_kW_pro_h','Strom_kWh_gesamt','Strom_EUR_per_kWh',
       'Verkaufspreis_EUR','Filamentkosten_EUR','Stromkosten_EUR',
       'Gesamtkosten_EUR','Gewinn_EUR'
     ].join(';');
@@ -857,12 +862,13 @@
     /* ─────────────────────────────────────────────
        CALCULATIONS
     ───────────────────────────────────────────── */
-    function calculateCosts(filamentGrams, filamentPricePerKg, electricityKwh, electricityPricePerKwh, sellingPrice) {
+    function calculateCosts(filamentGrams, filamentPricePerKg, electricityKwPerHour, durationHours, durationMinutes, electricityPricePerKwh, sellingPrice) {
       const filamentCost    = Math.round((filamentGrams / 1000) * filamentPricePerKg * 100) / 100;
-      const electricityCost = Math.round(electricityKwh * electricityPricePerKwh * 100) / 100;
+      const totalKwh        = Math.round(electricityKwPerHour * (durationHours + durationMinutes / 60) * 1000) / 1000;
+      const electricityCost = Math.round(totalKwh * electricityPricePerKwh * 100) / 100;
       const totalCost       = Math.round((filamentCost + electricityCost) * 100) / 100;
       const profit          = Math.round((sellingPrice - totalCost) * 100) / 100;
-      return { filamentCost, electricityCost, totalCost, profit };
+      return { filamentCost, electricityCost, totalCost, profit, totalKwh };
     }
 
     /* ─────────────────────────────────────────────
@@ -871,11 +877,13 @@
     function updateFormPreview() {
       const settings = loadSettings();
       const grams    = parseFloat(document.getElementById('f-filament').value) || 0;
-      const kwh      = parseFloat(document.getElementById('f-kwh').value)      || 0;
+      const powerKw  = parseFloat(document.getElementById('f-kwh').value)      || 0;
+      const hours    = parseInt(document.getElementById('f-hours').value)      || 0;
+      const minutes  = parseInt(document.getElementById('f-minutes').value)    || 0;
       const selling  = parseFloat(document.getElementById('f-selling').value)  || 0;
 
-      const { filamentCost, electricityCost, totalCost, profit } =
-        calculateCosts(grams, settings.filamentPricePerKg, kwh, settings.electricityPricePerKwh, selling);
+      const { filamentCost, electricityCost, totalCost, profit, totalKwh } =
+        calculateCosts(grams, settings.filamentPricePerKg, powerKw, hours, minutes, settings.electricityPricePerKwh, selling);
 
       const setVal = (id, val, coloured) => {
         const el = document.getElementById(id);
@@ -889,6 +897,7 @@
       setVal('prev-elec',     electricityCost, false);
       setVal('prev-total',    totalCost, false);
       setVal('prev-profit',   profit, true);
+      document.getElementById('prev-kwh-total').textContent = totalKwh.toFixed(3) + ' kWh';
     }
 
     /* ─────────────────────────────────────────────
@@ -899,23 +908,26 @@
 
       const settings = loadSettings();
       const grams    = parseFloat(document.getElementById('f-filament').value) || 0;
-      const kwh      = parseFloat(document.getElementById('f-kwh').value)      || 0;
+      const powerKw  = parseFloat(document.getElementById('f-kwh').value)      || 0;
+      const hours    = parseInt(document.getElementById('f-hours').value)      || 0;
+      const minutes  = parseInt(document.getElementById('f-minutes').value)    || 0;
       const selling  = parseFloat(document.getElementById('f-selling').value)  || 0;
 
-      const { filamentCost, electricityCost, totalCost, profit } =
-        calculateCosts(grams, settings.filamentPricePerKg, kwh, settings.electricityPricePerKwh, selling);
+      const { filamentCost, electricityCost, totalCost, profit, totalKwh } =
+        calculateCosts(grams, settings.filamentPricePerKg, powerKw, hours, minutes, settings.electricityPricePerKwh, selling);
 
       const booking = {
-        id:                   generateId(),
-        date:                 document.getElementById('f-date').value,
-        description:          document.getElementById('f-desc').value.trim(),
-        durationHours:        parseInt(document.getElementById('f-hours').value)   || 0,
-        durationMinutes:      parseInt(document.getElementById('f-minutes').value) || 0,
-        filamentGrams:        grams,
-        filamentPricePerKg:   settings.filamentPricePerKg,
-        electricityKwh:       kwh,
+        id:                     generateId(),
+        date:                   document.getElementById('f-date').value,
+        description:            document.getElementById('f-desc').value.trim(),
+        durationHours:          hours,
+        durationMinutes:        minutes,
+        filamentGrams:          grams,
+        filamentPricePerKg:     settings.filamentPricePerKg,
+        electricityKwPerHour:   powerKw,
+        electricityKwhTotal:    totalKwh,
         electricityPricePerKwh: settings.electricityPricePerKwh,
-        sellingPrice:         selling,
+        sellingPrice:           selling,
         filamentCost,
         electricityCost,
         totalCost,
@@ -977,7 +989,8 @@
           <td>${escapeHtml(b.description)}</td>
           <td>${dur}</td>
           <td>${b.filamentGrams}</td>
-          <td>${b.electricityKwh}</td>
+          <td>${b.electricityKwPerHour}</td>
+          <td>${(b.electricityKwhTotal || 0).toFixed(3)}</td>
           <td>${formatEur(b.filamentCost)}</td>
           <td>${formatEur(b.electricityCost)}</td>
           <td>${formatEur(b.totalCost)}</td>
@@ -1008,7 +1021,8 @@
 
       const rows = bookings.map(b => [
         b.id, b.date, b.description, b.durationHours, b.durationMinutes,
-        b.filamentGrams, b.filamentPricePerKg, b.electricityKwh, b.electricityPricePerKwh,
+        b.filamentGrams, b.filamentPricePerKg,
+        b.electricityKwPerHour, b.electricityKwhTotal, b.electricityPricePerKwh,
         b.sellingPrice, b.filamentCost, b.electricityCost, b.totalCost, b.profit
       ].map(csvEscape).join(';'));
 
@@ -1059,22 +1073,23 @@
 
           for (const line of dataLines) {
             const cols = parseCSVLine(line);
-            if (cols.length < 14) continue;
+            if (cols.length < 15) continue;
             imported.push({
-              id:                    cols[0],
-              date:                  cols[1],
-              description:           cols[2],
-              durationHours:         Number(cols[3])  || 0,
-              durationMinutes:       Number(cols[4])  || 0,
-              filamentGrams:         Number(cols[5])  || 0,
-              filamentPricePerKg:    Number(cols[6])  || 0,
-              electricityKwh:        Number(cols[7])  || 0,
-              electricityPricePerKwh:Number(cols[8])  || 0,
-              sellingPrice:          Number(cols[9])  || 0,
-              filamentCost:          Number(cols[10]) || 0,
-              electricityCost:       Number(cols[11]) || 0,
-              totalCost:             Number(cols[12]) || 0,
-              profit:                Number(cols[13]) || 0,
+              id:                     cols[0],
+              date:                   cols[1],
+              description:            cols[2],
+              durationHours:          Number(cols[3])  || 0,
+              durationMinutes:        Number(cols[4])  || 0,
+              filamentGrams:          Number(cols[5])  || 0,
+              filamentPricePerKg:     Number(cols[6])  || 0,
+              electricityKwPerHour:   Number(cols[7])  || 0,
+              electricityKwhTotal:    Number(cols[8])  || 0,
+              electricityPricePerKwh: Number(cols[9])  || 0,
+              sellingPrice:           Number(cols[10]) || 0,
+              filamentCost:           Number(cols[11]) || 0,
+              electricityCost:        Number(cols[12]) || 0,
+              totalCost:              Number(cols[13]) || 0,
+              profit:                 Number(cols[14]) || 0,
             });
           }
 
@@ -1348,7 +1363,7 @@
       });
 
       /* Booking form live preview */
-      ['f-filament', 'f-kwh', 'f-selling'].forEach(id => {
+      ['f-filament', 'f-kwh', 'f-hours', 'f-minutes', 'f-selling'].forEach(id => {
         document.getElementById(id).addEventListener('input', updateFormPreview);
       });
 
