@@ -11,14 +11,14 @@ import streamlit as st
 try:
     from .loader import Chunk, load_file
     from .searcher import SearchIndex, SearchMode, SearchResult, build_search_index, load_index, save_index
-    from .chat import ChatConfig, answer_question
+    from .chat import ChatConfig, answer_question, DEFAULT_SMALL_MODEL
 except ImportError:
     import sys
     from pathlib import Path as _Path
     sys.path.insert(0, str(_Path(__file__).parent.parent))
     from text_search.loader import Chunk, load_file  # type: ignore[no-redef]
     from text_search.searcher import SearchIndex, SearchMode, SearchResult, build_search_index, load_index, save_index  # type: ignore[no-redef]
-    from text_search.chat import ChatConfig, answer_question  # type: ignore[no-redef]
+    from text_search.chat import ChatConfig, answer_question, DEFAULT_SMALL_MODEL  # type: ignore[no-redef]
 
 # ---------------------------------------------------------------------------
 # Speed presets
@@ -192,6 +192,107 @@ def _render_result(
 
 
 # ---------------------------------------------------------------------------
+# Ollama setup wizard
+# ---------------------------------------------------------------------------
+
+def _run_ollama_pull(model: str, host: str) -> None:
+    import subprocess, shutil
+    if not shutil.which("ollama"):
+        st.error("ollama-Binary nicht gefunden. Bitte zuerst Ollama installieren.")
+        return
+    with st.status(f"Lade {model} herunter…", expanded=True) as pull_status:
+        proc = subprocess.Popen(
+            ["ollama", "pull", model],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        output_area = st.empty()
+        lines: list = []
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            lines.append(line.rstrip())
+            output_area.code("\n".join(lines[-15:]))
+        proc.wait()
+        if proc.returncode == 0:
+            pull_status.update(label=f"✅ {model} bereit!", state="complete")
+            st.session_state["ollama_model_ready"] = model
+            st.rerun()
+        else:
+            pull_status.update(label="Fehler beim Herunterladen", state="error")
+
+
+def _show_model_picker(config: "ChatConfig") -> None:  # type: ignore[name-defined]
+    try:
+        from .chat import MODEL_CATALOG, DEFAULT_SMALL_MODEL
+    except ImportError:
+        from text_search.chat import MODEL_CATALOG, DEFAULT_SMALL_MODEL  # type: ignore[no-redef]
+
+    st.markdown("### Modell herunterladen")
+    model_options = list(MODEL_CATALOG.keys())
+    default_idx = model_options.index(DEFAULT_SMALL_MODEL) if DEFAULT_SMALL_MODEL in model_options else 0
+    sel = st.selectbox(
+        "Modell wählen",
+        model_options,
+        index=default_idx,
+        format_func=lambda m: MODEL_CATALOG[m]["label"],
+        key="wizard_model_select",
+    )
+    info = MODEL_CATALOG[sel]
+    st.caption(f"Speicherbedarf: ca. **{info['size_gb']} GB** — einmalig herunterladen, danach 100% lokal")
+    if st.button(f"⬇ {sel} herunterladen", type="primary", key="wizard_pull_btn"):
+        _run_ollama_pull(sel, config.ollama_host)
+
+
+def _ollama_setup_wizard(config: "ChatConfig") -> bool:  # type: ignore[name-defined]
+    """Show Ollama setup UI. Returns True if Ollama + model are ready."""
+    import platform
+    try:
+        from .chat import check_ollama_status
+    except ImportError:
+        from text_search.chat import check_ollama_status  # type: ignore[no-redef]
+
+    status = check_ollama_status(config.ollama_host, config.model)
+    if status.model_ready:
+        return True
+
+    st.info("**Ollama-Einrichtung erforderlich**", icon="🛠")
+
+    if not status.installed:
+        os_name = platform.system()
+        st.markdown("#### Schritt 1 — Ollama installieren")
+        if os_name == "Windows":
+            st.markdown("Lade den Installer herunter und starte ihn:")
+            st.code("https://ollama.com/download/windows", language="text")
+        elif os_name == "Darwin":
+            st.markdown("Lade die macOS App herunter:")
+            st.code("https://ollama.com/download/mac", language="text")
+        else:
+            st.markdown("Linux — im Terminal ausführen:")
+            st.code("curl -fsSL https://ollama.com/install.sh | sh", language="bash")
+        st.markdown("#### Schritt 2 — Ollama starten")
+        st.code("ollama serve", language="bash")
+        st.markdown("#### Schritt 3 — Modell laden")
+        _show_model_picker(config)
+        return False
+
+    if not status.running:
+        st.warning("Ollama ist installiert, aber nicht gestartet.")
+        st.markdown("**Terminal öffnen und eingeben:**")
+        st.code("ollama serve", language="bash")
+        st.markdown("Danach diese Seite neu laden (F5).")
+        return False
+
+    # Ollama running, model missing
+    st.success("Ollama läuft", icon="✅")
+    if status.available_models:
+        st.caption("Bereits installierte Modelle: " + ", ".join(status.available_models))
+    _show_model_picker(config)
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -269,7 +370,7 @@ def main() -> None:
         )
         provider = _provider_keys[_provider_labels.index(provider_label)]
 
-        _default_models = {"ollama": "llama3.2", "claude": "claude-3-5-haiku-20241022", "openai": "gpt-4o-mini"}
+        _default_models = {"ollama": DEFAULT_SMALL_MODEL, "claude": "claude-3-5-haiku-20241022", "openai": "gpt-4o-mini"}
         chat_model = st.sidebar.text_input(
             "Modell",
             value=_default_models[provider],
@@ -396,12 +497,20 @@ def main() -> None:
                 del st.session_state["file_bytes_map"]
             st.rerun()
 
+        # Ollama setup wizard — shown whenever chat mode is active and Ollama not ready
+        _ollama_ready = True
+        if mode == "chat" and chat_config.provider == "ollama":
+            _ollama_ready = _ollama_setup_wizard(chat_config)
+
         # Results
         if submitted and query.strip():
             all_chunks = search_index.keyword_index.chunks
 
             if mode == "chat":
-                # API-Key validation
+                # Block submission if Ollama wizard is not yet done
+                if chat_config.provider == "ollama" and not _ollama_ready:
+                    st.stop()
+                # API-Key validation for cloud providers
                 if chat_config.provider in ("claude", "openai") and not chat_config.api_key.strip():
                     st.warning(
                         f"Bitte einen API-Key für {chat_config.provider.capitalize()} eingeben."

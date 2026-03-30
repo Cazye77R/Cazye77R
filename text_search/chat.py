@@ -17,16 +17,59 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 PROVIDER_DEFAULTS: dict[str, str] = {
-    "ollama": "llama3.2",
+    "ollama": "llama3.2:1b",
     "claude": "claude-3-5-haiku-20241022",
     "openai": "gpt-4o-mini",
 }
+
+# Small models recommended for local use — ordered by size ascending
+MODEL_CATALOG: dict[str, dict] = {
+    "qwen2.5:0.5b": {"size_gb": 0.4, "label": "Ultra-kompakt (~400 MB) — sehr schnell"},
+    "llama3.2:1b":  {"size_gb": 1.3, "label": "Klein & schnell (~1,3 GB) — empfohlen"},
+    "llama3.2:3b":  {"size_gb": 2.0, "label": "Ausgewogen (~2,0 GB) — gute Qualität"},
+    "phi3-mini":    {"size_gb": 2.2, "label": "Phi-3 Mini (~2,2 GB) — Microsoft"},
+}
+DEFAULT_SMALL_MODEL = "llama3.2:1b"
+
+
+@dataclass
+class OllamaStatus:
+    installed: bool          # ollama binary found on PATH
+    running: bool            # /api/tags reachable
+    model_ready: bool        # requested model already pulled
+    available_models: list   # all pulled model names
+
+
+def check_ollama_status(host: str, model: str) -> OllamaStatus:
+    """Fast check of Ollama availability and whether *model* is pulled."""
+    import shutil
+    installed = shutil.which("ollama") is not None
+    if not installed:
+        return OllamaStatus(installed=False, running=False, model_ready=False, available_models=[])
+    try:
+        import requests as _req
+        resp = _req.get(f"{host}/api/tags", timeout=3)
+        resp.raise_for_status()
+        raw_models = [m["name"] for m in resp.json().get("models", [])]
+        # Accept "llama3.2:1b", "llama3.2:1b:latest" or bare name matching ":latest" suffix
+        def _matches(name: str, target: str) -> bool:
+            if name == target:
+                return True
+            if name == f"{target}:latest":
+                return True
+            if target.endswith(":latest") and name == target[:-7]:
+                return True
+            return False
+        ready = any(_matches(m, model) for m in raw_models)
+        return OllamaStatus(installed=True, running=True, model_ready=ready, available_models=raw_models)
+    except Exception:
+        return OllamaStatus(installed=True, running=False, model_ready=False, available_models=[])
 
 
 @dataclass
 class ChatConfig:
     provider: str = "ollama"          # "ollama" | "claude" | "openai"
-    model: str = "llama3.2"
+    model: str = DEFAULT_SMALL_MODEL
     api_key: str = ""
     ollama_host: str = "http://localhost:11434"
     context_chunks: int = 3           # fewer = faster
@@ -137,6 +180,13 @@ def _stream_ollama(prompt: str, config: ChatConfig) -> Generator[str, None, None
             "Ollama läuft nicht. Bitte Ollama starten (ollama serve) und das gewünschte "
             f"Modell laden (ollama pull {config.model})."
         )
+    except requests.exceptions.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            raise RuntimeError(
+                f"Das Modell '{config.model}' ist in Ollama nicht installiert.\n"
+                f"Bitte installieren mit:  ollama pull {config.model}"
+            )
+        raise
 
     for line in resp.iter_lines():
         if not line:
