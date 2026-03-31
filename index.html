@@ -623,7 +623,8 @@
             </div>
 
           </div><!-- /.form-grid -->
-          <div style="display:flex;justify-content:flex-end;margin-top:1rem;">
+          <div style="display:flex;justify-content:flex-end;gap:.5rem;margin-top:1rem;">
+            <button type="button" class="btn btn-neutral" id="btn-save-repeat">Speichern &amp; Wiederholen</button>
             <button type="submit" class="btn btn-primary">Buchung speichern</button>
           </div>
         </form>
@@ -1071,6 +1072,60 @@
       showToast('Buchung erfolgreich gespeichert.', 'success');
     }
 
+    function addBookingAndRepeat() {
+      // Build booking from current form — identical logic to addBooking()
+      const settings = loadSettings();
+      const profileSel = document.getElementById('f-filament-profile').value;
+      let filamentPrice = settings.filamentPricePerKg;
+      let filamentProfileName = '';
+      if (profileSel) {
+        const prof = (settings.filaments || []).find(f => f.id === profileSel);
+        if (prof) { filamentPrice = prof.pricePerKg; filamentProfileName = prof.name; }
+      }
+      const desc    = document.getElementById('f-desc').value.trim();
+      const grams   = parseFloat(document.getElementById('f-filament').value) || 0;
+      const powerKw = parseFloat(document.getElementById('f-kwh').value)      || 0;
+      const hours   = parseInt(document.getElementById('f-hours').value)      || 0;
+      const minutes = parseInt(document.getElementById('f-minutes').value)    || 0;
+      const selling = parseFloat(document.getElementById('f-selling').value)  || 0;
+
+      if (!desc || grams <= 0 || selling < 0) {
+        showToast('Bitte Beschreibung, Filament (> 0) und Verkaufspreis ausfüllen.', 'error');
+        return;
+      }
+
+      const { filamentCost, electricityCost, totalCost, profit, totalKwh, margin } =
+        calculateCosts(grams, filamentPrice, powerKw, hours, minutes, settings.electricityPricePerKwh, selling);
+
+      const booking = {
+        id:                     generateId(),
+        date:                   document.getElementById('f-date').value,
+        description:            desc,
+        invoiceNumbers:         getInvoiceNumbers('invoice-list'),
+        comment:                document.getElementById('f-comment').value.trim(),
+        durationHours:          hours,
+        durationMinutes:        minutes,
+        filamentProfileName,
+        filamentGrams:          grams,
+        filamentPricePerKg:     filamentPrice,
+        electricityKwPerHour:   powerKw,
+        electricityKwhTotal:    totalKwh,
+        electricityPricePerKwh: settings.electricityPricePerKwh,
+        sellingPrice:           selling,
+        filamentCost, electricityCost, totalCost, profit, margin
+      };
+
+      const bookings = loadFromStorage();
+      bookings.push(booking);
+      saveToStorage(bookings);
+
+      // Only reset date — keep everything else for next booking
+      document.getElementById('f-date').value = todayISO();
+      clearInvoiceTags('invoice-list');
+      renderBookingsTable();
+      showToast('Buchung gespeichert – Formular bereit für nächste Eingabe.', 'success');
+    }
+
     function resetPreview() {
       ['prev-filament','prev-elec','prev-total'].forEach(id => {
         const el = document.getElementById(id);
@@ -1085,6 +1140,17 @@
     /* ─────────────────────────────────────────────
        DELETE BOOKING
     ───────────────────────────────────────────── */
+    function copyBooking(id) {
+      const bookings = loadFromStorage();
+      const src = bookings.find(x => x.id === id);
+      if (!src) return;
+      const copy = { ...src, id: generateId(), date: todayISO() };
+      bookings.push(copy);
+      saveToStorage(bookings);
+      renderBookingsTable();
+      showToast('Buchung kopiert (Datum: heute).', 'success');
+    }
+
     function deleteBooking(id) {
       if (!confirm('Buchung wirklich löschen?')) return;
       const bookings = loadFromStorage().filter(b => b.id !== id);
@@ -1131,6 +1197,7 @@
           <td title="${escapeHtml(comment)}">${shortComment}</td>
           <td style="white-space:nowrap;">
             <button class="btn-icon" title="Bearbeiten" onclick="openEditModal('${b.id}')">&#9998;</button>
+            <button class="btn-icon" title="Kopieren" onclick="copyBooking('${b.id}')">&#128203;</button>
             <button class="btn-icon" title="Löschen" onclick="deleteBooking('${b.id}')">&#128465;</button>
           </td>
         </tr>`;
@@ -1566,12 +1633,41 @@
         return;
       }
       container.innerHTML = list.map(f =>
-        `<div style="display:flex;align-items:center;gap:.5rem;background:var(--bg-input);padding:.4rem .7rem;border-radius:6px;">
+        `<div id="fp-row-${f.id}" style="display:flex;align-items:center;gap:.5rem;background:var(--bg-input);padding:.4rem .7rem;border-radius:6px;">
           <span style="flex:1;">${escapeHtml(f.name)}</span>
           <span style="color:var(--text-muted);font-size:.85rem;">${formatEur(f.pricePerKg)}/kg</span>
+          <button class="btn-icon" title="Bearbeiten" onclick="startEditFilamentProfile('${f.id}')">&#9998;</button>
           <button class="btn-icon" title="Entfernen" onclick="removeFilamentProfile('${f.id}')">&#128465;</button>
         </div>`
       ).join('');
+    }
+
+    function startEditFilamentProfile(id) {
+      const settings = loadSettings();
+      const f = (settings.filaments || []).find(x => x.id === id);
+      if (!f) return;
+      const row = document.getElementById('fp-row-' + id);
+      const inputStyle = 'background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:.3rem .5rem;font-size:.9rem;';
+      row.innerHTML =
+        `<input type="text" id="fp-edit-name-${id}" value="${escapeHtml(f.name)}" style="flex:2;min-width:100px;${inputStyle}" />` +
+        `<input type="number" id="fp-edit-price-${id}" value="${f.pricePerKg}" step="0.01" min="0" style="flex:1;min-width:70px;${inputStyle}" />` +
+        `<button class="btn-icon" title="Speichern" onclick="saveEditFilamentProfile('${id}')">&#10003;</button>` +
+        `<button class="btn-icon" title="Abbrechen" onclick="renderFilamentProfiles()">&#10005;</button>`;
+    }
+
+    function saveEditFilamentProfile(id) {
+      const name  = (document.getElementById('fp-edit-name-'  + id).value || '').trim();
+      const price = parseFloat(document.getElementById('fp-edit-price-' + id).value) || 0;
+      if (!name || price <= 0) { showToast('Bitte Name und Preis angeben.', 'error'); return; }
+      const settings = loadSettings();
+      const idx = (settings.filaments || []).findIndex(f => f.id === id);
+      if (idx === -1) return;
+      settings.filaments[idx] = { id, name, pricePerKg: price };
+      saveSettings(settings);
+      renderFilamentProfiles();
+      populateFilamentDropdown('f-filament-profile');
+      populateFilamentDropdown('e-filament-profile');
+      showToast('Filament-Profil aktualisiert (gilt nur für neue Buchungen).', 'success');
     }
 
     function populateFilamentDropdown(selectId) {
@@ -1704,6 +1800,7 @@
 
       /* Booking form submit */
       document.getElementById('booking-form').addEventListener('submit', addBooking);
+      document.getElementById('btn-save-repeat').addEventListener('click', addBookingAndRepeat);
 
       /* Settings form submit */
       document.getElementById('settings-form').addEventListener('submit', saveSettingsForm);
