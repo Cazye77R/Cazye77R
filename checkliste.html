@@ -311,6 +311,53 @@ input  { font-family: inherit; }
 .item-note:focus { border-bottom-color: #4a90d9; }
 .item-note::placeholder { color: #c4c9d4; }
 
+
+/* ── Eigene Punkte hinzufügen ─────────────────────────────────── */
+.add-item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 10px 20px;
+  border-top: 1px dashed #e5e7eb;
+  background: #fafbfc;
+}
+.add-item-input {
+  flex: 1;
+  height: 30px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+  background: #fff;
+}
+.add-item-input:focus { border-color: #4a90d9; box-shadow: 0 0 0 2px rgba(74,144,217,.15); }
+.add-item-btn {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.add-item-btn:hover { background: #eff6ff; border-color: #4a90d9; color: #4a90d9; }
+.item-delete-btn {
+  width: 22px; height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #d1d5db;
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.item-delete-btn:hover { background: #fee2e2; color: #dc2626; }
+
 /* ── Print styles ────────────────────────────────────────────── */
 @media print {
   #sidebar, .section-reset-btn, #reset-all-btn,
@@ -466,7 +513,7 @@ let storageAvailable = false;
 function defaultState(year) {
   const s = { year, sections: {} };
   SECTIONS.forEach(sec => {
-    s.sections[sec.id] = { collapsed: false, items: {} };
+    s.sections[sec.id] = { collapsed: false, items: {}, customItems: [] };
     sec.items.forEach(it => {
       s.sections[sec.id].items[it.id] = { checked: false, note: '' };
     });
@@ -491,6 +538,9 @@ function loadState(year) {
             saved.sections[sec.id].items[it.id] = { checked: false, note: '' };
           }
         });
+        if (!saved.sections[sec.id].customItems) {
+          saved.sections[sec.id].customItems = [];
+        }
       }
     });
     return saved;
@@ -655,6 +705,14 @@ function buildSections() {
       body.appendChild(row);
     });
 
+    // Render existing custom items
+    (secState.customItems || []).forEach(customIt => {
+      body.appendChild(buildCustomItemRow(sec.id, customIt));
+    });
+
+    // "Punkt hinzufügen" row
+    body.appendChild(buildAddItemRow(sec.id, body, sec.accent));
+
     // Section collapse toggle
     header.addEventListener('click', e => {
       if (e.target.closest('.section-reset-btn')) return;
@@ -676,6 +734,111 @@ function buildSections() {
     container.appendChild(section);
     updateSectionProgress(sec.id);
   });
+}
+
+// ── Custom item helpers ───────────────────────────────────────────
+function buildCustomItemRow(secId, customIt) {
+  const row = document.createElement('div');
+  row.className = 'checklist-item' + (customIt.checked ? ' item-checked' : '');
+  row.dataset.customId = customIt.id;
+
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.className = 'item-checkbox';
+  cb.checked = customIt.checked;
+  cb.id = 'cb-custom-' + customIt.id;
+
+  const lbl = document.createElement('label');
+  lbl.className = 'item-label';
+  lbl.htmlFor = cb.id;
+  const span = document.createElement('span');
+  span.className = 'item-text';
+  span.textContent = customIt.label;
+  lbl.appendChild(span);
+
+  const note = document.createElement('input');
+  note.type = 'text';
+  note.className = 'item-note';
+  note.placeholder = 'Notiz…';
+  note.value = customIt.note;
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'item-delete-btn';
+  delBtn.title = 'Punkt löschen';
+  delBtn.textContent = '×';
+
+  cb.addEventListener('change', () => {
+    customIt.checked = cb.checked;
+    row.classList.toggle('item-checked', cb.checked);
+    saveState();
+    updateSectionProgress(secId);
+    updateGlobalProgress();
+  });
+
+  note.addEventListener('input', debounce(() => {
+    customIt.note = note.value.trim();
+    saveState();
+  }, 500));
+
+  delBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    const idx = state.sections[secId].customItems.findIndex(c => c.id === customIt.id);
+    if (idx !== -1) state.sections[secId].customItems.splice(idx, 1);
+    saveState();
+    row.remove();
+    updateSectionProgress(secId);
+    updateGlobalProgress();
+  });
+
+  row.appendChild(cb);
+  row.appendChild(lbl);
+  row.appendChild(note);
+  row.appendChild(delBtn);
+  return row;
+}
+
+function buildAddItemRow(secId, body, accent) {
+  const addRow = document.createElement('div');
+  addRow.className = 'add-item-row';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'add-item-input';
+  input.placeholder = '+ Eigenen Punkt hinzufügen…';
+  input.setAttribute('aria-label', 'Neuen Punkt hinzufügen');
+
+  const btn = document.createElement('button');
+  btn.className = 'add-item-btn';
+  btn.textContent = 'Hinzufügen';
+  btn.style.borderColor = accent;
+  btn.style.color = accent;
+
+  function addItem() {
+    const label = input.value.trim();
+    if (!label) return;
+    const customIt = {
+      id: 'custom_' + Date.now(),
+      label,
+      checked: false,
+      note: ''
+    };
+    state.sections[secId].customItems.push(customIt);
+    saveState();
+    // Insert new row before the add row
+    body.insertBefore(buildCustomItemRow(secId, customIt), addRow);
+    input.value = '';
+    updateSectionProgress(secId);
+    updateGlobalProgress();
+  }
+
+  btn.addEventListener('click', e => { e.stopPropagation(); addItem(); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.stopPropagation(); addItem(); }
+  });
+
+  addRow.appendChild(input);
+  addRow.appendChild(btn);
+  return addRow;
 }
 
 function debouncedSaveNote(secId, itemId, noteEl) {
@@ -700,11 +863,13 @@ function setupIntersectionObserver() {
 
 // ── 4. PROGRESS ──────────────────────────────────────────────────
 function updateSectionProgress(sectionId) {
-  const sec     = SECTIONS.find(s => s.id === sectionId);
+  const sec      = SECTIONS.find(s => s.id === sectionId);
   const secState = state.sections[sectionId];
-  const total   = sec.items.length;
-  const done    = sec.items.filter(it => secState.items[it.id].checked).length;
-  const pct     = total ? (done / total * 100) : 0;
+  const customItems = secState.customItems || [];
+  const total    = sec.items.length + customItems.length;
+  const done     = sec.items.filter(it => secState.items[it.id].checked).length
+                 + customItems.filter(it => it.checked).length;
+  const pct      = total ? (done / total * 100) : 0;
 
   const card = document.querySelector(`.checklist-section[data-section-id="${sectionId}"]`);
   if (!card) return;
@@ -715,8 +880,10 @@ function updateSectionProgress(sectionId) {
 function updateGlobalProgress() {
   let total = 0, done = 0;
   SECTIONS.forEach(sec => {
-    total += sec.items.length;
-    done  += sec.items.filter(it => state.sections[sec.id].items[it.id].checked).length;
+    const custom = state.sections[sec.id].customItems || [];
+    total += sec.items.length + custom.length;
+    done  += sec.items.filter(it => state.sections[sec.id].items[it.id].checked).length
+           + custom.filter(it => it.checked).length;
   });
   const pct = total ? (done / total * 100) : 0;
   document.getElementById('global-progress-fill').style.width = pct + '%';
@@ -728,6 +895,11 @@ function resetSection(sectionId) {
   const sec = SECTIONS.find(s => s.id === sectionId);
   sec.items.forEach(it => {
     state.sections[sectionId].items[it.id] = { checked: false, note: '' };
+  });
+  // Reset custom items (keep label, clear checked+note)
+  (state.sections[sectionId].customItems || []).forEach(it => {
+    it.checked = false;
+    it.note = '';
   });
   saveState();
   // Update DOM
@@ -791,9 +963,16 @@ function changeYear(year) {
       if (note) { note.value  = itState.note; }
       row.classList.toggle('item-checked', itState.checked);
     });
-    // Collapse state
+    // Re-render custom items (remove old, insert fresh before add-row)
     const secState = state.sections[sec.id];
     const body     = card.querySelector('.section-body');
+    const addRow   = body.querySelector('.add-item-row');
+    body.querySelectorAll('[data-custom-id]').forEach(el => el.remove());
+    (secState.customItems || []).forEach(customIt => {
+      body.insertBefore(buildCustomItemRow(sec.id, customIt), addRow);
+    });
+
+    // Collapse state
     const chevron  = card.querySelector('.section-chevron');
     body.classList.toggle('collapsed', secState.collapsed);
     chevron.classList.toggle('open', !secState.collapsed);
