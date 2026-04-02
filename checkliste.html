@@ -948,36 +948,7 @@ function changeYear(year) {
   saveState();
   currentYear = year;
   state = loadState(year);
-  document.getElementById('year-select').value = year;
-  // Update all checkboxes, notes, progress bars without full rebuild
-  SECTIONS.forEach(sec => {
-    const card = document.querySelector(`.checklist-section[data-section-id="${sec.id}"]`);
-    if (!card) return;
-    sec.items.forEach(it => {
-      const itState = state.sections[sec.id].items[it.id];
-      const row = card.querySelector(`.checklist-item[data-item-id="${it.id}"]`);
-      if (!row) return;
-      const cb   = row.querySelector('.item-checkbox');
-      const note = row.querySelector('.item-note');
-      if (cb)   { cb.checked = itState.checked; }
-      if (note) { note.value  = itState.note; }
-      row.classList.toggle('item-checked', itState.checked);
-    });
-    // Re-render custom items (remove old, insert fresh before add-row)
-    const secState = state.sections[sec.id];
-    const body     = card.querySelector('.section-body');
-    const addRow   = body.querySelector('.add-item-row');
-    body.querySelectorAll('[data-custom-id]').forEach(el => el.remove());
-    (secState.customItems || []).forEach(customIt => {
-      body.insertBefore(buildCustomItemRow(sec.id, customIt), addRow);
-    });
-
-    // Collapse state
-    const chevron  = card.querySelector('.section-chevron');
-    body.classList.toggle('collapsed', secState.collapsed);
-    chevron.classList.toggle('open', !secState.collapsed);
-    updateSectionProgress(sec.id);
-  });
+  renderApp();
   updateGlobalProgress();
 }
 
