@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jährliche Steuer-Checkliste</title>
+<style>
+/* ── Design Tokens ────────────────────────────────────────── */
+:root {
+  --sidebar-bg:   #1a2332;
+  --sidebar-width: 64px;
+  --bg-page:      #f0f2f5;
+  --bg-card:      #ffffff;
+  --bg-topbar:    #ffffff;
+  --text-primary: #1a2332;
+  --text-secondary: #6b7280;
+  --border-color: #e5e7eb;
+  --border-radius: 8px;
+  --progress-track: #e5e7eb;
+  --shadow-card:  0 1px 3px rgba(0,0,0,.10), 0 1px 2px rgba(0,0,0,.06);
+  --transition:   0.2s ease;
+
+  --accent-immobilie:     #4a90d9;
+  --accent-kapitalertraege: #27ae60;
+  --accent-spenden:       #e74c3c;
+  --accent-gewerbe:       #f39c12;
+  --accent-nselbst:       #8e44ad;
+  --accent-sonstiges:     #16a085;
+}
+
+/* ── Reset ──────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+       font-size: 14px; background: var(--bg-page); color: var(--text-primary); }
+button { cursor: pointer; font-family: inherit; }
+input  { font-family: inherit; }
+
+/* ── App Layout ─────────────────────────────────────────────── */
+#app {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  min-height: 100vh;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────── */
+#sidebar {
+  position: fixed;
+  top: 0; left: 0;
+  width: var(--sidebar-width);
+  height: 100vh;
+  background: var(--sidebar-bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 20px;
+  gap: 12px;
+  z-index: 200;
+  overflow-y: auto;
+}
+.nav-dot {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background: rgba(255,255,255,.1);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  transition: var(--transition);
+  title: attr(data-title);
+}
+.nav-dot:hover  { background: rgba(255,255,255,.2); transform: scale(1.08); }
+.nav-dot.active { border-color: #fff; background: rgba(255,255,255,.25); }
+
+/* ── Main content ────────────────────────────────────────────── */
+#content {
+  margin-left: var(--sidebar-width);
+  min-width: 0;
+}
+
+/* ── Topbar ──────────────────────────────────────────────────── */
+#topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--bg-topbar);
+  border-bottom: 1px solid var(--border-color);
+  box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+#topbar h1 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+#year-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+#year-controls button {
+  width: 28px; height: 28px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-primary);
+}
+#year-controls button:hover { background: var(--bg-page); }
+#year-select {
+  height: 28px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0 8px;
+  background: #fff;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+#global-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 160px;
+}
+#global-progress-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--progress-track);
+  overflow: hidden;
+}
+#global-progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #4a90d9, #27ae60);
+  transition: width .4s ease;
+  width: 0%;
+}
+#global-progress-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+#reset-all-btn {
+  padding: 5px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+#reset-all-btn:hover { background: #fee2e2; border-color: #fca5a5; color: #dc2626; }
+
+/* ── No-storage banner ───────────────────────────────────────── */
+#no-storage-banner {
+  background: #fef3c7;
+  border-left: 4px solid #f59e0b;
+  padding: 8px 24px;
+  font-size: 13px;
+  color: #92400e;
+}
+
+/* ── Sections container ──────────────────────────────────────── */
+#sections-container {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Section card ────────────────────────────────────────────── */
+.checklist-section {
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  user-select: none;
+  border-left: 4px solid transparent;
+  transition: background var(--transition);
+}
+.section-header:hover { background: #f9fafb; }
+
+.checklist-section[data-section-id="immobilie"]      .section-header { border-left-color: var(--accent-immobilie); }
+.checklist-section[data-section-id="kapitalertraege"] .section-header { border-left-color: var(--accent-kapitalertraege); }
+.checklist-section[data-section-id="spenden"]         .section-header { border-left-color: var(--accent-spenden); }
+.checklist-section[data-section-id="gewerbe"]         .section-header { border-left-color: var(--accent-gewerbe); }
+.checklist-section[data-section-id="nselbst"]         .section-header { border-left-color: var(--accent-nselbst); }
+.checklist-section[data-section-id="sonstiges"]       .section-header { border-left-color: var(--accent-sonstiges); }
+
+.section-icon  { font-size: 20px; flex-shrink: 0; }
+.section-title { font-size: 15px; font-weight: 600; flex: 1; }
+
+.section-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.section-progress-bar {
+  width: 80px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--progress-track);
+  overflow: hidden;
+}
+.section-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  width: 0%;
+  transition: width .3s ease;
+}
+.section-progress-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  min-width: 36px;
+  text-align: right;
+}
+.section-reset-btn {
+  width: 26px; height: 26px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: transparent;
+  font-size: 14px;
+  color: var(--text-secondary);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.section-reset-btn:hover { background: #fee2e2; border-color: #fca5a5; color: #dc2626; }
+
+.section-chevron {
+  font-size: 12px;
+  color: var(--text-secondary);
+  transition: transform .25s ease;
+  flex-shrink: 0;
+}
+.section-chevron.open { transform: rotate(180deg); }
+
+/* ── Section body (collapsible) ──────────────────────────────── */
+.section-body {
+  overflow: hidden;
+  max-height: 9999px;
+  opacity: 1;
+  transition: max-height .35s ease, opacity .25s ease;
+}
+.section-body.collapsed {
+  max-height: 0;
+  opacity: 0;
+}
+
+/* ── Checklist items ─────────────────────────────────────────── */
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px 9px 20px;
+  border-bottom: 1px solid #f3f4f6;
+}
+.checklist-item:last-child { border-bottom: none; }
+.checklist-item:hover { background: #fafafa; }
+
+.item-checkbox {
+  width: 16px; height: 16px;
+  flex-shrink: 0;
+  accent-color: #4a90d9;
+  cursor: pointer;
+}
+.item-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  cursor: pointer;
+  min-width: 0;
+}
+.item-text {
+  font-size: 13.5px;
+  color: var(--text-primary);
+  transition: color var(--transition);
+  line-height: 1.4;
+}
+.item-checkbox:checked ~ .item-text,
+.item-checked .item-text {
+  text-decoration: line-through;
+  color: var(--text-secondary);
+}
+.item-note {
+  flex: 0 1 220px;
+  font-size: 12px;
+  border: none;
+  border-bottom: 1px dashed #d1d5db;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 2px 4px;
+  min-width: 0;
+  outline: none;
+}
+.item-note:focus { border-bottom-color: #4a90d9; }
+.item-note::placeholder { color: #c4c9d4; }
+
+/* ── Print styles ────────────────────────────────────────────── */
+@media print {
+  #sidebar, .section-reset-btn, #reset-all-btn,
+  #year-controls, .item-note, #no-storage-banner { display: none !important; }
+  #content { margin-left: 0 !important; }
+  #topbar { position: static; box-shadow: none; border-bottom: 1px solid #ccc; }
+  .section-body.collapsed {
+    max-height: unset !important;
+    opacity: 1 !important;
+  }
+  .checklist-section { break-inside: avoid; box-shadow: none; border: 1px solid #ddd; }
+  body { font-size: 11pt; }
+}
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  #app { grid-template-columns: 1fr; }
+  #sidebar { display: none; }
+  #content { margin-left: 0; }
+  #sections-container { padding: 12px; }
+  .section-progress-bar { width: 50px; }
+  .item-note { display: none; }
+}
+</style>
+</head>
+<body>
+<!-- APP SHELL: wird per JS gefüllt -->
+<div id="app">
+  <aside id="sidebar"></aside>
+  <main id="content">
+    <header id="topbar"></header>
+    <div id="no-storage-banner" style="display:none"></div>
+    <div id="sections-container"></div>
+  </main>
+</div>
+<script>
+(function () {
+'use strict';
+
+// ── 1. SECTIONS DATA ─────────────────────────────────────────────
+const SECTIONS = [
+  {
+    id: 'immobilie', title: 'Immobilie', icon: '🏠', accent: '#4a90d9',
+    items: [
+      { id: 'kaufvertrag',         label: 'Kaufvertrag / Grundbuchauszug vorhanden' },
+      { id: 'grundsteuer',         label: 'Grundsteuerbescheid geprüft und bezahlt' },
+      { id: 'wohnungseigentum',    label: 'WEG-Protokoll & Hausgeldabrechnung' },
+      { id: 'instandhaltung',      label: 'Instandhaltungs- und Reparaturkosten belegt' },
+      { id: 'mieteinnahmen',       label: 'Mieteinnahmen vollständig erfasst' },
+      { id: 'afa',                 label: 'AfA-Tabelle aktualisiert (Abschreibung auf Gebäude)' },
+      { id: 'schuldzinsen',        label: 'Schuldzinsen-Bescheinigung der Bank' },
+      { id: 'nebenkosten',         label: 'Nebenkostenabrechnung erstellt / erhalten' },
+      { id: 'verwaltungskosten',   label: 'Hausverwaltungskosten belegt' },
+      { id: 'versicherungen_immo', label: 'Gebäudeversicherung & Haftpflicht belegt' },
+      { id: 'leerstand',           label: 'Leerstandszeiten dokumentiert' },
+      { id: 'grunderwerbsteuer',   label: 'Grunderwerbsteuer / Notarkosten (bei Neukauf)' },
+    ]
+  },
+  {
+    id: 'kapitalertraege', title: 'Kapitalerträge', icon: '📈', accent: '#27ae60',
+    items: [
+      { id: 'jahressteuerbescheinigung', label: 'Jahressteuerbescheinigung aller Depots / Konten' },
+      { id: 'freistellungsauftrag',      label: 'Freistellungsauftrag geprüft (max. 1.000 € / 2.000 € zusammen)' },
+      { id: 'auslaendische_ertraege',    label: 'Ausländische Kapitalerträge & Quellensteuer-Nachweise' },
+      { id: 'verlustverrechnungstopf',   label: 'Verlustverrechnungstöpfe geprüft (allgemein & Aktien)' },
+      { id: 'dividenden',                label: 'Dividendenerträge aus Einzelaktien dokumentiert' },
+      { id: 'etf_ertraege',              label: 'ETF-Erträge (ausschüttungsgleiche Erträge bei Thesaurierern)' },
+      { id: 'vorabpauschale',            label: 'Vorabpauschale für thesaurierende Fonds ermittelt' },
+      { id: 'zinsen',                    label: 'Zinserträge aus Tages-/Festgeld' },
+      { id: 'crypto',                    label: 'Krypto-Gewinne/-Verluste dokumentiert (Haltefristen)' },
+      { id: 'guenstiger_tarifoption',    label: 'Günstigerprüfung: Abgeltungsteuer vs. persönlicher Steuersatz' },
+      { id: 'nv_bescheinigung',          label: 'NV-Bescheinigung vorhanden (falls zutreffend)' },
+    ]
+  },
+  {
+    id: 'spenden', title: 'Spenden', icon: '🤝', accent: '#e74c3c',
+    items: [
+      { id: 'spendenquittungen',       label: 'Spendenquittungen / Zuwendungsbestätigungen gesammelt' },
+      { id: 'kirchensteuer',           label: 'Kirchensteuer-Bescheinigung vom Finanzamt / Arbeitgeber' },
+      { id: 'mitgliedsbeitraege',      label: 'Mitgliedsbeiträge (Vereine, Berufsverbände) belegt' },
+      { id: 'parteispenden',           label: 'Parteispenden dokumentiert (direkte Steuerermäßigung!)' },
+      { id: 'online_kleinspenden',     label: 'Online-Kleinspenden bis 300 € (vereinfachter Nachweis)' },
+      { id: 'sachspenden',             label: 'Sachspenden bewertet und quittiert' },
+      { id: 'auslaendische_hilfswerke',label: 'Spenden an ausländische EU-Hilfswerke belegt' },
+      { id: 'foerderverein',           label: 'Fördervereins-Beiträge nachgewiesen' },
+      { id: 'katastrophenhilfe',       label: 'Sonderregelungen Katastrophenhilfe geprüft' },
+      { id: 'spendengrenze',           label: '20%-Spendengrenze vom Gesamtbetrag der Einkünfte beachtet' },
+    ]
+  },
+  {
+    id: 'gewerbe', title: 'Gewerbe', icon: '🏢', accent: '#f39c12',
+    items: [
+      { id: 'eur',               label: 'Einnahmen-Überschuss-Rechnung (EÜR) vollständig' },
+      { id: 'betriebsausgaben',  label: 'Alle Betriebsausgaben mit Belegen erfasst' },
+      { id: 'fahrtenbuch',       label: 'Fahrtenbuch vollständig oder 1%-Regelung angewendet' },
+      { id: 'gewerbesteuer_vz',  label: 'Gewerbesteuervorauszahlungen bezahlt & Bescheide abgelegt' },
+      { id: 'ust_voranmeldung',  label: 'Umsatzsteuervoranmeldungen eingereicht und abgestimmt' },
+      { id: 'anlage_g',          label: 'Anlage G / Anlage S für Steuererklärung vorbereitet' },
+      { id: 'anlagevermoegen',   label: 'Anlagevermögensverzeichnis aktualisiert' },
+      { id: 'geringwertige_wg',  label: 'GWG (bis 800 €) vollständig abgeschrieben' },
+      { id: 'investitionsabzug', label: 'Investitionsabzugsbetrag (IAB) geprüft' },
+      { id: 'betriebsstaette',   label: 'Betriebsstättenaufwendungen (Miete, Nebenkosten) belegt' },
+      { id: 'rechnungsstellung', label: 'Ausgangsrechnungen vollständig und korrekt' },
+      { id: 'geschaeftskonto',   label: 'Geschäftskonto-Kontoauszüge vollständig' },
+      { id: 'gewerbeummeldung',  label: 'Gewerbeummeldungen / Änderungen dokumentiert' },
+    ]
+  },
+  {
+    id: 'nselbst', title: 'Nicht selbständige Arbeit', icon: '💼', accent: '#8e44ad',
+    items: [
+      { id: 'lohnsteuerbescheinigung',    label: 'Lohnsteuerbescheinigung(en) vorhanden' },
+      { id: 'werbungskosten',             label: 'Werbungskosten über 1.230 € Pauschale geprüft' },
+      { id: 'homeoffice',                 label: 'Homeoffice-Tagepauschale (6 €/Tag, max. 1.260 €) dokumentiert' },
+      { id: 'arbeitsmittel',              label: 'Arbeitsmittel-Belege gesammelt (PC, Schreibtisch, Fachliteratur)' },
+      { id: 'pendlerpauschale',           label: 'Pendlerpauschale (Entfernungskilometer und Arbeitstage)' },
+      { id: 'fortbildungskosten',         label: 'Fortbildungs- und Weiterbildungskosten belegt' },
+      { id: 'gewerkschaftsbeitrag',       label: 'Gewerkschaftsbeiträge nachgewiesen' },
+      { id: 'bewerbungskosten',           label: 'Bewerbungskosten dokumentiert (falls angefallen)' },
+      { id: 'doppelte_haushaltsfuehrung', label: 'Doppelte Haushaltsführung belegt (falls zutreffend)' },
+      { id: 'umzugskosten',               label: 'Beruflich bedingte Umzugskosten' },
+      { id: 'dienstgaenge',               label: 'Dienstreise-Reisekosten / Verpflegungsmehraufwand' },
+      { id: 'steuerklasse',               label: 'Steuerklasse und Freibeträge geprüft' },
+      { id: 'kurzarbeit',                 label: 'Kurzarbeitergeld erhalten → Progressionsvorbehalt beachten' },
+    ]
+  },
+  {
+    id: 'sonstiges', title: 'Sonstiges', icon: '📋', accent: '#16a085',
+    items: [
+      { id: 'krankenversicherung',        label: 'Beitragsbescheinigung Krankenversicherung' },
+      { id: 'pflegeversicherung',         label: 'Beitragsbescheinigung Pflegeversicherung' },
+      { id: 'rentenversicherung',         label: 'Rentenversicherungs-Beitragsnachweis (Anlage Vorsorgeaufwand)' },
+      { id: 'riester',                    label: 'Riester-Zulageantrag gestellt / Zulagenbescheid geprüft' },
+      { id: 'ruerup',                     label: 'Rürup-Beitragsnachweis vorhanden' },
+      { id: 'handwerkerleistungen',       label: 'Handwerkerleistungen belegt (20% von max. 6.000 € = 1.200 €)' },
+      { id: 'haushaltsnahe_dl',           label: 'Haushaltsnahe Dienstleistungen belegt (Minijob, Reinigung etc.)' },
+      { id: 'aussergewoehnliche_belast',  label: 'Außergewöhnliche Belastungen dokumentiert (Krankheitskosten etc.)' },
+      { id: 'steuerberatungskosten',      label: 'Steuerberatungs- / Steuer-Software-Kosten belegt' },
+      { id: 'unterhalt',                  label: 'Unterhaltszahlungen nachgewiesen (§ 33a EStG)' },
+      { id: 'kinderfreibetrag',           label: 'Kinderfreibetrag vs. Kindergeld Günstigerprüfung' },
+      { id: 'bescheinigung_fa',           label: 'Vorauszahlungsbescheid Finanzamt für nächstes Jahr geprüft' },
+      { id: 'elster',                     label: 'ELSTER-Zertifikat gültig und Abgabefrist notiert' },
+    ]
+  },
+];
+
+// ── 2. STATE ─────────────────────────────────────────────────────
+const LS_PREFIX = 'steuer-checkliste::';
+const CUR_YEAR  = new Date().getFullYear();
+let currentYear = CUR_YEAR;
+let state;
+let storageAvailable = false;
+
+function defaultState(year) {
+  const s = { year, sections: {} };
+  SECTIONS.forEach(sec => {
+    s.sections[sec.id] = { collapsed: false, items: {} };
+    sec.items.forEach(it => {
+      s.sections[sec.id].items[it.id] = { checked: false, note: '' };
+    });
+  });
+  return s;
+}
+
+function loadState(year) {
+  if (!storageAvailable) return defaultState(year);
+  try {
+    const raw = localStorage.getItem(LS_PREFIX + year);
+    if (!raw) return defaultState(year);
+    const saved = JSON.parse(raw);
+    // Forward-compatible merge: add missing items
+    const def = defaultState(year);
+    SECTIONS.forEach(sec => {
+      if (!saved.sections[sec.id]) {
+        saved.sections[sec.id] = def.sections[sec.id];
+      } else {
+        sec.items.forEach(it => {
+          if (!saved.sections[sec.id].items[it.id]) {
+            saved.sections[sec.id].items[it.id] = { checked: false, note: '' };
+          }
+        });
+      }
+    });
+    return saved;
+  } catch(e) {
+    return defaultState(year);
+  }
+}
+
+function saveState() {
+  if (!storageAvailable) return;
+  try {
+    localStorage.setItem(LS_PREFIX + currentYear, JSON.stringify(state));
+  } catch(e) { /* quota exceeded – ignore */ }
+}
+
+function debounce(fn, ms) {
+  let t;
+  return function(...args) {
+    clearTimeout(t);
+    t = setTimeout(() => fn.apply(this, args), ms);
+  };
+}
+
+
+// ── 3. RENDER ────────────────────────────────────────────────────
+function renderApp() {
+  buildSidebar();
+  buildTopbar();
+  buildSections();
+  setupIntersectionObserver();
+}
+
+function buildSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  sidebar.innerHTML = '';
+  SECTIONS.forEach(sec => {
+    const dot = document.createElement('div');
+    dot.className = 'nav-dot';
+    dot.dataset.secId = sec.id;
+    dot.title = sec.title;
+    dot.textContent = sec.icon;
+    dot.style.setProperty('--dot-accent', sec.accent);
+    dot.addEventListener('click', () => {
+      document.querySelector(`.checklist-section[data-section-id="${sec.id}"]`)
+        .scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    sidebar.appendChild(dot);
+  });
+}
+
+function buildTopbar() {
+  const topbar = document.getElementById('topbar');
+  topbar.innerHTML = `
+    <h1>Jährliche Steuer-Checkliste</h1>
+    <div id="year-controls">
+      <button id="prev-year" title="Vorjahr">&#8249;</button>
+      <select id="year-select"></select>
+      <button id="next-year" title="Nächstes Jahr">&#8250;</button>
+    </div>
+    <div id="global-progress">
+      <div id="global-progress-bar"><div id="global-progress-fill"></div></div>
+      <span id="global-progress-label">0 / 0 erledigt</span>
+    </div>
+    <button id="reset-all-btn">Alle zurücksetzen</button>
+  `;
+
+  // Year selector
+  const sel = document.getElementById('year-select');
+  for (let y = CUR_YEAR - 4; y <= CUR_YEAR + 1; y++) {
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y;
+    if (y === currentYear) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', () => changeYear(parseInt(sel.value)));
+  document.getElementById('prev-year').addEventListener('click', () => {
+    if (currentYear > CUR_YEAR - 4) changeYear(currentYear - 1);
+  });
+  document.getElementById('next-year').addEventListener('click', () => {
+    if (currentYear < CUR_YEAR + 1) changeYear(currentYear + 1);
+  });
+
+  // Reset all
+  setupResetBtn(document.getElementById('reset-all-btn'), () => {
+    SECTIONS.forEach(sec => resetSection(sec.id));
+    updateGlobalProgress();
+  });
+}
+
+function buildSections() {
+  const container = document.getElementById('sections-container');
+  container.innerHTML = '';
+  SECTIONS.forEach(sec => {
+    const secState = state.sections[sec.id];
+    const section = document.createElement('section');
+    section.className = 'checklist-section';
+    section.dataset.sectionId = sec.id;
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'section-header';
+    header.setAttribute('role', 'button');
+    header.setAttribute('aria-expanded', !secState.collapsed);
+    header.innerHTML = `
+      <span class="section-icon">${sec.icon}</span>
+      <h2 class="section-title">${sec.title}</h2>
+      <div class="section-progress">
+        <div class="section-progress-bar">
+          <div class="section-progress-fill" style="background:${sec.accent}"></div>
+        </div>
+        <span class="section-progress-label">0 / ${sec.items.length}</span>
+      </div>
+      <button class="section-reset-btn" title="Abschnitt zurücksetzen">&#8635;</button>
+      <span class="section-chevron ${secState.collapsed ? '' : 'open'}">&#9660;</span>
+    `;
+
+    // Body
+    const body = document.createElement('div');
+    body.className = 'section-body' + (secState.collapsed ? ' collapsed' : '');
+
+    sec.items.forEach(item => {
+      const itemState = secState.items[item.id];
+      const row = document.createElement('div');
+      row.className = 'checklist-item' + (itemState.checked ? ' item-checked' : '');
+      row.dataset.itemId = item.id;
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'item-checkbox';
+      cb.checked = itemState.checked;
+      cb.id = `cb-${sec.id}-${item.id}`;
+
+      const lbl = document.createElement('label');
+      lbl.className = 'item-label';
+      lbl.htmlFor = cb.id;
+      const span = document.createElement('span');
+      span.className = 'item-text';
+      span.textContent = item.label;
+      lbl.appendChild(span);
+
+      const note = document.createElement('input');
+      note.type = 'text';
+      note.className = 'item-note';
+      note.placeholder = 'Notiz…';
+      note.value = itemState.note;
+      note.setAttribute('aria-label', 'Notiz: ' + item.label);
+
+      cb.addEventListener('change', () => {
+        state.sections[sec.id].items[item.id].checked = cb.checked;
+        row.classList.toggle('item-checked', cb.checked);
+        saveState();
+        updateSectionProgress(sec.id);
+        updateGlobalProgress();
+      });
+
+      note.addEventListener('input', debouncedSaveNote(sec.id, item.id, note));
+
+      row.appendChild(cb);
+      row.appendChild(lbl);
+      row.appendChild(note);
+      body.appendChild(row);
+    });
+
+    // Section collapse toggle
+    header.addEventListener('click', e => {
+      if (e.target.closest('.section-reset-btn')) return;
+      const collapsed = !state.sections[sec.id].collapsed;
+      state.sections[sec.id].collapsed = collapsed;
+      saveState();
+      body.classList.toggle('collapsed', collapsed);
+      header.querySelector('.section-chevron').classList.toggle('open', !collapsed);
+      header.setAttribute('aria-expanded', !collapsed);
+    });
+
+    // Section reset
+    setupResetBtn(header.querySelector('.section-reset-btn'), () => {
+      resetSection(sec.id);
+    });
+
+    section.appendChild(header);
+    section.appendChild(body);
+    container.appendChild(section);
+    updateSectionProgress(sec.id);
+  });
+}
+
+function debouncedSaveNote(secId, itemId, noteEl) {
+  return debounce(() => {
+    state.sections[secId].items[itemId].note = noteEl.value.trim();
+    saveState();
+  }, 500);
+}
+
+function setupIntersectionObserver() {
+  const dots = {};
+  document.querySelectorAll('.nav-dot').forEach(d => dots[d.dataset.secId] = d);
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      const id = entry.target.dataset.sectionId;
+      if (dots[id]) dots[id].classList.toggle('active', entry.isIntersecting);
+    });
+  }, { rootMargin: '-20% 0px -60% 0px' });
+  document.querySelectorAll('.checklist-section').forEach(s => observer.observe(s));
+}
+
+
+// ── 4. PROGRESS ──────────────────────────────────────────────────
+function updateSectionProgress(sectionId) {
+  const sec     = SECTIONS.find(s => s.id === sectionId);
+  const secState = state.sections[sectionId];
+  const total   = sec.items.length;
+  const done    = sec.items.filter(it => secState.items[it.id].checked).length;
+  const pct     = total ? (done / total * 100) : 0;
+
+  const card = document.querySelector(`.checklist-section[data-section-id="${sectionId}"]`);
+  if (!card) return;
+  card.querySelector('.section-progress-fill').style.width = pct + '%';
+  card.querySelector('.section-progress-label').textContent = done + ' / ' + total;
+}
+
+function updateGlobalProgress() {
+  let total = 0, done = 0;
+  SECTIONS.forEach(sec => {
+    total += sec.items.length;
+    done  += sec.items.filter(it => state.sections[sec.id].items[it.id].checked).length;
+  });
+  const pct = total ? (done / total * 100) : 0;
+  document.getElementById('global-progress-fill').style.width = pct + '%';
+  document.getElementById('global-progress-label').textContent = done + ' / ' + total + ' erledigt';
+}
+
+// ── 5. RESET ─────────────────────────────────────────────────────
+function resetSection(sectionId) {
+  const sec = SECTIONS.find(s => s.id === sectionId);
+  sec.items.forEach(it => {
+    state.sections[sectionId].items[it.id] = { checked: false, note: '' };
+  });
+  saveState();
+  // Update DOM
+  const card = document.querySelector(`.checklist-section[data-section-id="${sectionId}"]`);
+  if (!card) return;
+  card.querySelectorAll('.checklist-item').forEach(row => {
+    const cb = row.querySelector('.item-checkbox');
+    const note = row.querySelector('.item-note');
+    if (cb)   { cb.checked = false; }
+    if (note) { note.value = ''; }
+    row.classList.remove('item-checked');
+  });
+  updateSectionProgress(sectionId);
+}
+
+function setupResetBtn(btn, action) {
+  let confirmTimeout = null;
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (confirmTimeout) {
+      // Second click within 2s → execute
+      clearTimeout(confirmTimeout);
+      confirmTimeout = null;
+      btn.textContent = btn.dataset.origText || '↺';
+      action();
+    } else {
+      // First click → ask
+      btn.dataset.origText = btn.textContent;
+      btn.textContent = 'Sicher?';
+      btn.style.background = '#fef3c7';
+      btn.style.borderColor = '#f59e0b';
+      btn.style.color = '#92400e';
+      confirmTimeout = setTimeout(() => {
+        btn.textContent = btn.dataset.origText;
+        btn.style.background = '';
+        btn.style.borderColor = '';
+        btn.style.color = '';
+        confirmTimeout = null;
+      }, 2000);
+    }
+  });
+}
+
+// ── 6. YEAR CHANGE ────────────────────────────────────────────────
+function changeYear(year) {
+  saveState();
+  currentYear = year;
+  state = loadState(year);
+  document.getElementById('year-select').value = year;
+  // Update all checkboxes, notes, progress bars without full rebuild
+  SECTIONS.forEach(sec => {
+    const card = document.querySelector(`.checklist-section[data-section-id="${sec.id}"]`);
+    if (!card) return;
+    sec.items.forEach(it => {
+      const itState = state.sections[sec.id].items[it.id];
+      const row = card.querySelector(`.checklist-item[data-item-id="${it.id}"]`);
+      if (!row) return;
+      const cb   = row.querySelector('.item-checkbox');
+      const note = row.querySelector('.item-note');
+      if (cb)   { cb.checked = itState.checked; }
+      if (note) { note.value  = itState.note; }
+      row.classList.toggle('item-checked', itState.checked);
+    });
+    // Collapse state
+    const secState = state.sections[sec.id];
+    const body     = card.querySelector('.section-body');
+    const chevron  = card.querySelector('.section-chevron');
+    body.classList.toggle('collapsed', secState.collapsed);
+    chevron.classList.toggle('open', !secState.collapsed);
+    updateSectionProgress(sec.id);
+  });
+  updateGlobalProgress();
+}
+
+// ── 7. INIT ──────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  // Check localStorage availability
+  try {
+    localStorage.setItem('__sc_test__', '1');
+    localStorage.removeItem('__sc_test__');
+    storageAvailable = true;
+  } catch(e) {
+    storageAvailable = false;
+    const banner = document.getElementById('no-storage-banner');
+    banner.style.display = 'block';
+    banner.textContent = '⚠ Speicherung nicht verfügbar – Ihre Daten werden nicht gespeichert (privates Fenster oder Cookies blockiert).';
+  }
+
+  state = loadState(currentYear);
+  renderApp();
+  updateGlobalProgress();
+});
+
+})(); // end IIFE
+
+
+
+</script>
+</body>
+</html>
