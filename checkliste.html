@@ -201,8 +201,21 @@
         
         const progress = document.createElement('div');
         progress.className = 'progress';
-        const done = sec.items.filter(it => secState.items[it.id].checked).length;
-        const total = sec.items.length;
+        let done = 0, total = 0;
+        // Count fixed items (not deleted)
+        sec.items.forEach(it => {
+          const state = secState.items[it.id];
+          if (state && !state.deleted) {
+            total++;
+            if (state.checked) done++;
+          }
+        });
+        // Count custom items
+        Object.entries(secState.items).forEach(([id, it]) => {
+          if (!id.startsWith('custom_')) return;  // Only custom items
+          total++;
+          if (it.checked) done++;
+        });
         const pct = total ? (done / total * 100) : 0;
         progress.innerHTML = `
           <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${sec.color}"></div></div>
@@ -221,8 +234,11 @@
         const items = document.createElement('div');
         items.className = 'items' + (secState.collapsed ? ' hidden' : '');
         
+        // Render fixed items
         sec.items.forEach(it => {
           const itState = secState.items[it.id];
+          if (!itState || itState.deleted) return;  // Skip if deleted or undefined
+
           const row = document.createElement('div');
           row.className = 'item';
           row.innerHTML = `
@@ -231,27 +247,63 @@
             <input type="text" class="note" placeholder="Notiz" value="${itState.note}">
             <button class="delete" title="Löschen">×</button>
           `;
-          
+
           const cb = row.querySelector('input[type="checkbox"]');
           cb.addEventListener('change', () => {
             itState.checked = cb.checked;
             saveState();
             render();
           });
-          
+
           const note = row.querySelector('.note');
           note.addEventListener('input', () => {
             itState.note = note.value;
             saveState();
           });
-          
+
           const btn = row.querySelector('.delete');
           btn.addEventListener('click', () => {
-            delete secState.items[it.id];
+            itState.deleted = true;  // Mark as deleted instead of removing
             saveState();
             render();
           });
-          
+
+          items.appendChild(row);
+        });
+
+        // Render custom items (can be fully deleted)
+        Object.entries(secState.items).forEach(([id, itState]) => {
+          if (!id.startsWith('custom_')) return;  // Only custom items
+
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML = `
+            <input type="checkbox" ${itState.checked ? 'checked' : ''}>
+            <label>${itState.label}</label>
+            <input type="text" class="note" placeholder="Notiz" value="${itState.note}">
+            <button class="delete" title="Löschen">×</button>
+          `;
+
+          const cb = row.querySelector('input[type="checkbox"]');
+          cb.addEventListener('change', () => {
+            itState.checked = cb.checked;
+            saveState();
+            render();
+          });
+
+          const note = row.querySelector('.note');
+          note.addEventListener('input', () => {
+            itState.note = note.value;
+            saveState();
+          });
+
+          const btn = row.querySelector('.delete');
+          btn.addEventListener('click', () => {
+            delete secState.items[id];  // Delete custom items completely
+            saveState();
+            render();
+          });
+
           items.appendChild(row);
         });
         
