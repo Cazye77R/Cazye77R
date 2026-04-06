@@ -1,0 +1,10 @@
+streamlit
+ollama
+yfinance
+pandas
+numpy
+plotly
+scikit-learn
+ta
+requests
+pydantic

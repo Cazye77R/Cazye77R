@@ -1,0 +1,1 @@
+# StockMind modules package
