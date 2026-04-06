@@ -16,7 +16,13 @@ from config import (
     DEFAULT_BUDGET_EUR, DEFAULT_PERIOD, LAMBO_PRICE_EUR,
 )
 from modules.data_fetcher import fetch_ohlcv, fetch_info, is_valid_ticker
-from modules.model_manager import analyze_stock, list_local_models
+from modules.model_manager import (
+    analyze_stock,
+    get_available_models,
+    get_available_models_with_info,
+    get_ollama_status,
+    list_local_models,                   # Compat für ui_components
+)
 from modules.trainer import train, load_state, list_trained_stocks
 from modules.predictor import predict, build_context_string
 from modules.backtester import (
@@ -216,9 +222,14 @@ if page == "Dashboard":
 
     with col_right:
         st.markdown("### KI-Analyse")
-        ollama_ok = len(list_local_models()) > 0
-        if not ollama_ok:
-            st.warning("Ollama nicht erreichbar oder kein Modell installiert.")
+        _ollama = get_ollama_status()
+        ollama_ok = _ollama["running"] and _ollama["model_count"] > 0
+        if not _ollama["running"]:
+            st.warning(_ollama["error"])
+            with st.expander("Installationsanleitung"):
+                st.markdown(_ollama["install_guide"])
+        elif not ollama_ok:
+            st.warning("Ollama läuft, aber kein Modell installiert. Sidebar → Modell herunterladen.")
         else:
             if st.button(
                 f"🤖 Analysieren mit {st.session_state.model}",
@@ -509,14 +520,21 @@ elif page == "Einstellungen":
     st.title("⚙️ Einstellungen")
 
     st.markdown("### Ollama Status")
-    local_models = list_local_models()
-    if local_models:
-        st.success(f"✅ Ollama erreichbar. Installierte Modelle: {', '.join(local_models)}")
+    _status = get_ollama_status()
+    if _status["running"]:
+        models_detail = get_available_models_with_info() if _status["model_count"] else []
+        st.success(f"✅ Ollama erreichbar unter {_status['url']} | {_status['model_count']} Modell(e) installiert")
+        if models_detail:
+            st.dataframe(
+                pd.DataFrame(models_detail)[["name", "size_gb", "modified", "description"]],
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("Noch kein Modell installiert. Sidebar → Modell auswählen → herunterladen.")
     else:
-        st.error("❌ Ollama nicht erreichbar oder keine Modelle installiert.")
-        st.code("ollama serve", language="bash")
-        st.markdown("Danach gewünschtes Modell laden:")
-        st.code("ollama pull llama3", language="bash")
+        st.error(f"❌ {_status['error']}")
+        st.markdown(_status["install_guide"])
 
     st.divider()
     st.markdown("### Über StockMind")

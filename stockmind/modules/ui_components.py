@@ -181,35 +181,62 @@ def lambo_widget(portfolio_value: float) -> None:
 # ---------------------------------------------------------------------------
 
 def sidebar_model_selector() -> str:
-    """Modell-Auswahl in der Sidebar mit Status-Anzeige."""
-    from modules.model_manager import list_local_models, pull_model
-
-    st.sidebar.markdown("### 🤖 KI-Modell")
-    local_models = list_local_models()
-
-    available = [m for m in AVAILABLE_MODELS if m in local_models]
-    not_available = [m for m in AVAILABLE_MODELS if m not in local_models]
-
-    options = available + [f"{m} (nicht installiert)" for m in not_available]
-    choice = st.sidebar.selectbox(
-        "Modell wählen",
-        options,
-        index=0 if available else 0,
-        help="Nur lokal installierte Modelle können verwendet werden.",
+    """
+    Modell-Auswahl in der Sidebar.
+    Zeigt installierte Modelle mit Beschreibung; bietet Download-Button für
+    nicht installierte Modelle via subprocess-Streaming.
+    """
+    from modules.model_manager import (
+        MODEL_DESCRIPTIONS,
+        download_model,
+        get_available_models,
+        is_ollama_running,
     )
 
-    selected = choice.split(" (")[0]
+    st.sidebar.markdown("### 🤖 KI-Modell")
+
+    if not is_ollama_running():
+        st.sidebar.error("Ollama nicht erreichbar.")
+        st.sidebar.caption("Starte Ollama mit `ollama serve`")
+        return DEFAULT_MODEL
+
+    local_models = get_available_models()
+    available     = [m for m in AVAILABLE_MODELS if m in local_models]
+    not_available = [m for m in AVAILABLE_MODELS if m not in local_models]
+
+    def _option_label(name: str, installed: bool) -> str:
+        desc = MODEL_DESCRIPTIONS.get(name, "")
+        suffix = "" if installed else " ⬇️"
+        return f"{name}{suffix}  –  {desc}" if desc else f"{name}{suffix}"
+
+    options_installed    = [_option_label(m, True)  for m in available]
+    options_not_installed = [_option_label(m, False) for m in not_available]
+    all_options = options_installed + options_not_installed
+
+    if not all_options:
+        st.sidebar.warning("Keine konfigurierten Modelle gefunden.")
+        return DEFAULT_MODEL
+
+    choice = st.sidebar.selectbox(
+        "Modell wählen",
+        all_options,
+        index=0,
+        help="Modelle mit ⬇️ sind noch nicht installiert.",
+    )
+    # Modellname ist der Teil vor dem ersten Leerzeichen/Sonderzeichen
+    selected = choice.split("  –")[0].replace(" ⬇️", "").strip()
 
     if selected in not_available:
-        if st.sidebar.button(f"⬇️ {selected} herunterladen"):
-            with st.sidebar.status(f"Lade {selected}...") as status:
-                try:
-                    for progress in pull_model(selected):
-                        st.sidebar.write(progress)
-                    status.update(label=f"✅ {selected} installiert!", state="complete")
-                    st.rerun()
-                except ConnectionError as e:
-                    st.sidebar.error(str(e))
+        if st.sidebar.button(f"⬇️ {selected} herunterladen", use_container_width=True):
+            progress_slot = st.sidebar.empty()
+            try:
+                for line in download_model(selected):
+                    progress_slot.caption(line)
+                progress_slot.success(f"✅ {selected} bereit")
+                st.rerun()
+            except (ConnectionError, RuntimeError) as exc:
+                progress_slot.empty()
+                st.sidebar.error(str(exc))
         return DEFAULT_MODEL
 
     return selected
