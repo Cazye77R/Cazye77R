@@ -3,3 +3,10 @@ numpy>=1.24
 torch>=2.0
 streamlit>=1.33
 plotly>=5.20
+
+# Camera detection & tracking
+opencv-python-headless>=4.8
+ultralytics>=8.0
+mediapipe>=0.10
+streamlit-webrtc>=0.47
+av>=10.0

@@ -1,0 +1,204 @@
+"""
+Live Camera Detection & Body Tracking — Streamlit App
+
+Modes:
+  - Objekterkennung  : Alle COCO-Objekte (kein Person-Filter)
+  - Personenerkennung: Nur Personen + Körper-Skeleton
+  - Beides           : Objekte + Personen + optional Skeleton
+
+Start: streamlit run camera_detection/app.py
+"""
+from __future__ import annotations
+
+import threading
+
+import av
+import streamlit as st
+from streamlit_webrtc import VideoProcessorBase, webrtc_streamer, WebRtcMode
+
+from camera_detection.detector import CameraDetector
+
+# ---------------------------------------------------------------------------
+# Page config
+# ---------------------------------------------------------------------------
+st.set_page_config(
+    page_title="Kamera-Erkennung",
+    page_icon="🎥",
+    layout="wide",
+)
+
+# ---------------------------------------------------------------------------
+# Custom CSS tweaks (matches existing dark theme)
+# ---------------------------------------------------------------------------
+st.markdown(
+    """
+    <style>
+    .block-container { padding-top: 1.5rem; }
+    .stats-box {
+        background: #0f172a;
+        border: 1px solid #22d3ee44;
+        border-radius: 8px;
+        padding: 0.6rem 1rem;
+        margin-top: 0.5rem;
+        font-size: 1rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ---------------------------------------------------------------------------
+# Shared detector instance (created once per session)
+# ---------------------------------------------------------------------------
+@st.cache_resource
+def get_detector() -> CameraDetector:
+    return CameraDetector()
+
+
+detector = get_detector()
+
+# ---------------------------------------------------------------------------
+# Sidebar — settings
+# ---------------------------------------------------------------------------
+with st.sidebar:
+    st.title("Einstellungen")
+    st.markdown("---")
+
+    mode_label = st.radio(
+        "Erkennungsmodus",
+        options=["Objekterkennung", "Personenerkennung", "Beides"],
+        index=2,
+    )
+    mode_map = {
+        "Objekterkennung": "objects",
+        "Personenerkennung": "persons",
+        "Beides": "both",
+    }
+    mode = mode_map[mode_label]
+
+    st.markdown("---")
+    st.subheader("Anzeige")
+    show_boxes = st.toggle("Rahmen anzeigen", value=True)
+    show_labels = st.toggle("Beschriftung anzeigen", value=True)
+
+    pose_disabled = mode == "objects"
+    show_pose = st.toggle(
+        "Körper-Tracking (Skeleton)",
+        value=True,
+        disabled=pose_disabled,
+        help="Nur verfügbar bei Personenerkennung oder 'Beides'",
+    )
+    if pose_disabled:
+        show_pose = False
+
+    st.markdown("---")
+    st.subheader("Modell")
+    model_size = st.selectbox(
+        "Modellgröße",
+        options=["yolov8n", "yolov8s", "yolov8m"],
+        format_func=lambda x: {
+            "yolov8n": "YOLOv8n — schnell",
+            "yolov8s": "YOLOv8s — ausgewogen",
+            "yolov8m": "YOLOv8m — genau",
+        }[x],
+    )
+    confidence = st.slider(
+        "Konfidenzschwelle",
+        min_value=0.1,
+        max_value=0.95,
+        value=0.50,
+        step=0.05,
+        format="%.2f",
+    )
+
+    # Push settings to detector
+    detector.update_settings(
+        model_size=model_size,
+        mode=mode,
+        show_boxes=show_boxes,
+        show_labels=show_labels,
+        show_pose=show_pose,
+        confidence=confidence,
+    )
+
+    st.markdown("---")
+    st.caption(
+        "Erkannte Klassen: COCO (80 Kategorien).\n\n"
+        "Skeleton: MediaPipe Pose (33 Landmarken)."
+    )
+
+# ---------------------------------------------------------------------------
+# Main area
+# ---------------------------------------------------------------------------
+st.title("Live Kamera-Erkennung & Körper-Tracking")
+st.caption(
+    "Wähle links den Modus, schalte Rahmen/Beschriftung ein oder aus und starte die Kamera."
+)
+
+# Stats placeholder — updated by VideoProcessor via session state
+stats_placeholder = st.empty()
+
+# ---------------------------------------------------------------------------
+# WebRTC Video Processor
+# ---------------------------------------------------------------------------
+
+class VideoProcessor(VideoProcessorBase):
+    """Processes each video frame through the shared CameraDetector."""
+
+    def __init__(self) -> None:
+        self._stats_lock = threading.Lock()
+        self.latest_stats: dict = {"fps": 0.0, "person_count": 0, "object_count": 0}
+
+    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+        img = frame.to_ndarray(format="bgr24")
+        annotated, stats = detector.detect(img)
+
+        with self._stats_lock:
+            self.latest_stats = stats
+
+        return av.VideoFrame.from_ndarray(annotated, format="bgr24")
+
+
+# ---------------------------------------------------------------------------
+# Stream widget
+# ---------------------------------------------------------------------------
+ctx = webrtc_streamer(
+    key="camera-detection",
+    mode=WebRtcMode.SENDRECV,
+    video_processor_factory=VideoProcessor,
+    media_stream_constraints={"video": True, "audio": False},
+    async_processing=True,
+    rtc_configuration={
+        "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+    },
+)
+
+# ---------------------------------------------------------------------------
+# Live stats display
+# ---------------------------------------------------------------------------
+if ctx.state.playing and ctx.video_processor:
+    with ctx.video_processor._stats_lock:
+        stats = dict(ctx.video_processor.latest_stats)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("FPS", stats.get("fps", 0))
+    with col2:
+        st.metric("Personen", stats.get("person_count", 0))
+    with col3:
+        st.metric("Objekte", stats.get("object_count", 0))
+else:
+    st.info("Kamera starten, um die Erkennung zu aktivieren.")
+
+# ---------------------------------------------------------------------------
+# Legend
+# ---------------------------------------------------------------------------
+st.markdown("---")
+st.markdown(
+    """
+    **Legende:**
+    - 🟡 Gelber Rahmen → Objekte (Nicht-Personen)
+    - 🔵 Cyan-Rahmen → Personen
+    - 🟢 Grünes Skeleton → Körper-Tracking (MediaPipe Pose)
+    """
+)
