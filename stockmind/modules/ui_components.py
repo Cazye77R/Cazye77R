@@ -225,17 +225,22 @@ def sidebar_analysis_method() -> str:
 
 
 def sidebar_ticker_search() -> Optional[str]:
-    """Ticker-Suche mit Autocomplete-ähnlicher Funktionalität."""
-    from modules.data_fetcher import search_ticker
+    """Ticker-Suche mit Autocomplete-ähnlicher Funktionalität. Unterstützt WKN, Name und Ticker."""
+    from modules.data_fetcher import search_stocks, is_wkn
 
     st.sidebar.markdown("### 🔍 Aktie suchen")
-    query = st.sidebar.text_input("Ticker, Name oder WKN", placeholder="z.B. Apple, AAPL, SAP")
+    query = st.sidebar.text_input("Ticker, Name oder WKN", placeholder="z.B. Apple, AAPL, 716460")
 
     if query and len(query) >= 2:
-        results = search_ticker(query)
+        if is_wkn(query):
+            st.sidebar.caption("🇩🇪 WKN erkannt – suche deutsches Wertpapier…")
+        results = search_stocks(query)
         valid = [r for r in results if "error" not in r]
         if valid:
-            options = {f"{r['symbol']} – {r['name']} ({r['exchange']})": r["symbol"] for r in valid}
+            def _label(r: dict) -> str:
+                wkn_part = f" | WKN {r['wkn']}" if r.get("wkn") else ""
+                return f"{r['symbol']} – {r['name']} ({r['exchange']}){wkn_part}"
+            options = {_label(r): r["symbol"] for r in valid}
             chosen = st.sidebar.selectbox("Treffer", list(options.keys()))
             return options[chosen]
         elif results and "error" in results[0]:

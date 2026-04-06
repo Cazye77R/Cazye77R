@@ -116,14 +116,15 @@ with st.sidebar:
             st.error("Ungültiges Ticker-Format.")
         else:
             with st.spinner(f"Lade {st.session_state.ticker}..."):
-                try:
-                    st.session_state.df = fetch_ohlcv(st.session_state.ticker, period=period)
+                df_loaded = fetch_ohlcv(st.session_state.ticker, period=period)
+                if df_loaded.empty:
+                    st.error(df_loaded.attrs.get("error", "Unbekannter Fehler beim Laden."))
+                else:
+                    st.session_state.df = df_loaded
                     st.session_state.info = fetch_info(st.session_state.ticker)
                     st.session_state.prediction = None
                     st.session_state.analysis_text = ""
-                    st.success(f"✅ {len(st.session_state.df)} Datenpunkte geladen.")
-                except ValueError as e:
-                    st.error(str(e))
+                    st.success(f"✅ {len(df_loaded)} Datenpunkte geladen.")
 
     st.divider()
     st.session_state.model = sidebar_model_selector()
@@ -330,10 +331,10 @@ elif page == "Paper-Trading":
     # Aktuelle Preise für offene Positionen holen
     current_prices: dict[str, float] = {}
     for t in pf.positions:
-        try:
-            d = fetch_ohlcv(t, period="5d")
+        d = fetch_ohlcv(t, period="5d")
+        if not d.empty:
             current_prices[t] = float(d["Close"].iloc[-1])
-        except Exception:
+        else:
             current_prices[t] = pf.positions[t]["avg_price"]
 
     summary = portfolio_summary(pf, current_prices)

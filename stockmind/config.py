@@ -37,6 +37,10 @@ ANALYSIS_METHODS: list[str] = [
 DATA_DIR: str = "data"
 TRAINING_STATE_DIR: str = "data/training_state"
 PORTFOLIO_DIR: str = "data/portfolio"
+CACHE_DIR: str = "data/cache"
+
+# --- Cache ---
+CACHE_TTL_HOURS: int = 24           # Lebensdauer des OHLCV-Cache in Stunden
 
 # --- Technische Indikatoren – Standardparameter ---
 SMA_SHORT: int = 20
