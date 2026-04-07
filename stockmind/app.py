@@ -36,6 +36,8 @@ from modules.backtester import (
 )
 from modules.easter_eggs import (
     check_triggers, random_motivation, format_lambo,
+    check_easter_egg, get_currency_display, get_trade_count_egg,
+    get_streak_egg, CURRENCIES, CURRENCY_UNLOCK_CLICKS, CONFETTI_MARKER,
 )
 from modules.ui_components import (
     candlestick_chart, indicator_chart, signal_badge,
@@ -72,6 +74,14 @@ def init_session() -> None:
         "method": "Auto (KI wählt)",
         "page": "Dashboard",
         "prev_portfolio_value": 0.0,
+        # Easter Egg: Klick-Counter für Währungsauswahl
+        "currency_clicks":   0,
+        "currency_unlocked": False,
+        "selected_currency": CURRENCIES[0],
+        # Easter Egg: Zyklen-Tracking
+        "prev_cycles": 0,
+        # Easter Egg: fired-Set (verhindert doppeltes Auslösen in einer Session)
+        "eggs_fired": set(),
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -333,6 +343,20 @@ elif page == "Training":
                         f"Methoden-Acc: {result['method_accuracy']:.1%}"
                     )
                     st.markdown(f"**Begründung:** {result['reasoning']}")
+                    # Easter Egg prüfen
+                    _egg_ctx = {
+                        "cycles":           result.get("cycle", 0),
+                        "previous_cycles":  st.session_state.prev_cycles,
+                        "accuracy":         result.get("overall_accuracy"),
+                        "total_return_pct": None,
+                    }
+                    _egg_text = check_easter_egg(_egg_ctx)
+                    if _egg_text:
+                        if CONFETTI_MARKER in _egg_text:
+                            st.balloons()
+                            _egg_text = _egg_text.replace(CONFETTI_MARKER, "")
+                        st.info(_egg_text)
+                    st.session_state.prev_cycles = result.get("cycle", 0)
                     st.rerun()
 
     with tab_auto:
@@ -501,15 +525,53 @@ elif page == "Paper-Trading":
         st.toast(f"{egg.emoji} {egg.title}", icon=egg.emoji)
         st.info(f"**{egg.title}**\n\n{egg.message}")
 
-    # ── KPIs ──────────────────────────────────────────────
+    # ── KPIs + versteckter Klick-Counter (Währungs-Easter-Egg) ───────────
     col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Gesamtwert",    f"{summary['total_value']:,.2f} €",
-                f"{summary['total_return_pct']:+.2f}%")
+
+    # Versteckter Button hinter dem Gesamtwert-Label
+    _currency = st.session_state.selected_currency
+    _display_val = get_currency_display(summary["total_value"], _currency)
+    with col1:
+        if st.button(
+            f"**Gesamtwert**\n{_display_val}",
+            key="btn_total_click",
+            help=f"Klick {st.session_state.currency_clicks + 1}/{CURRENCY_UNLOCK_CLICKS} "
+                 "bis zur Währungsauswahl 🤫",
+            use_container_width=True,
+        ):
+            st.session_state.currency_clicks += 1
+            if st.session_state.currency_clicks >= CURRENCY_UNLOCK_CLICKS:
+                st.session_state.currency_unlocked = True
+        st.caption(f"{summary['total_return_pct']:+.2f}%")
+
     col2.metric("Cash",          f"{summary['cash']:,.2f} €")
     col3.metric("Positionswert", f"{summary['position_value']:,.2f} €")
     col4.metric("Realisierter G/V", f"{summary['realized_pnl']:+,.2f} €")
     col5.metric("Win-Rate",      f"{summary['win_rate']:.0%}" if summary["num_sell_trades"] else "–",
                 f"{summary['num_sell_trades']} Trades")
+
+    # Währungsauswahl (erscheint nach CURRENCY_UNLOCK_CLICKS Klicks)
+    if st.session_state.currency_unlocked:
+        st.success(
+            "🎉 **Easter Egg freigeschaltet!** Du hast die geheime Währungsauswahl entdeckt."
+        )
+        st.session_state.selected_currency = st.selectbox(
+            "💱 Anzeigewährung",
+            CURRENCIES,
+            index=CURRENCIES.index(st.session_state.selected_currency),
+            key="currency_select",
+        )
+        if st.button("🔒 Zurücksetzen", key="btn_currency_reset"):
+            st.session_state.currency_clicks   = 0
+            st.session_state.currency_unlocked = False
+            st.session_state.selected_currency = CURRENCIES[0]
+            st.rerun()
+
+    # Trade-Count Easter Egg
+    trade_egg = get_trade_count_egg(summary["num_trades"])
+    if trade_egg and summary["num_trades"] not in st.session_state.eggs_fired:
+        st.session_state.eggs_fired.add(summary["num_trades"])
+        st.toast(trade_egg)
 
     # ── Lambo-Meter ───────────────────────────────────────
     st.divider()
