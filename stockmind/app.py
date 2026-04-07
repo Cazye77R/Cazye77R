@@ -23,7 +23,7 @@ from modules.model_manager import (
     get_ollama_status,
     list_local_models,                   # Compat für ui_components
 )
-from modules.trainer import train, load_state, list_trained_stocks
+from modules.trainer import train, load_state, list_trained_stocks, StockTrainer
 from modules.predictor import predict, build_context_string
 from modules.backtester import (
     load_portfolio, save_portfolio, reset_portfolio,
@@ -274,24 +274,96 @@ elif page == "Training":
         st.info("Bitte erst links eine Aktie laden.")
         st.stop()
 
-    df = st.session_state.df
+    df     = st.session_state.df
     ticker = st.session_state.ticker
-    state = load_state(ticker)
+    state  = load_state(ticker)
+    trainer = StockTrainer()
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown(f"### {ticker}")
-        if state["cycles"] > 0:
-            st.metric("Trainingszyklen", state["cycles"])
-            st.metric("Letzte Genauigkeit", f"{state['accuracy']:.1%}" if state["accuracy"] else "–")
-            st.caption(f"Zuletzt trainiert: {state['last_trained']}")
-        else:
-            st.info("Noch kein Modell trainiert.")
+    # ── Übersichts-KPIs ──────────────────────────────────────
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Trainingszyklen", state["cycles"])
+    acc = state.get("current_accuracy") or state.get("accuracy")
+    col2.metric("Gesamtgenauigkeit", f"{acc:.1%}" if acc else "–")
+    best = state.get("best_method") or "–"
+    best_score = state.get("method_scores", {}).get(best)
+    col3.metric(
+        "Beste Methode",
+        best,
+        f"{best_score:.1%}" if best_score else None,
+    )
+    if state.get("last_trained"):
+        st.caption(f"Zuletzt trainiert: {state['last_trained'][:19]} mit Modell: {state.get('model_used', '–')}")
 
-    with col2:
-        horizon = st.slider("Vorhersage-Horizont (Tage)", 1, 20, 5)
-        if st.button("🚀 Training starten", use_container_width=True):
-            with st.spinner("Trainiere..."):
+    st.divider()
+
+    # ── Trainings-Modi ────────────────────────────────────────
+    tab_llm, tab_auto, tab_sklearn = st.tabs(
+        ["🤖 LLM-Zyklus", "🔄 Auto-Modus", "📐 sklearn/GBM"]
+    )
+
+    with tab_llm:
+        st.markdown("**Einzelner LLM-Trainingszyklus** – wähle Methode und starte.")
+        t_method = st.selectbox(
+            "Analyse-Methode",
+            [m for m in ANALYSIS_METHODS if m != "Auto (KI wählt)"],
+            key="train_method",
+        )
+        if st.button("▶️ Zyklus starten", use_container_width=True, key="btn_llm"):
+            if not get_ollama_status()["running"]:
+                st.error("Ollama nicht erreichbar. Bitte `ollama serve` starten.")
+            else:
+                with st.spinner(f"Trainingszyklus läuft ({t_method})…"):
+                    result = trainer.run_training_cycle(
+                        ticker, t_method, st.session_state.model
+                    )
+                if result.get("error"):
+                    st.error(result["error"])
+                else:
+                    tick = "✅" if result["correct"] else "❌"
+                    st.success(
+                        f"{tick} Zyklus {result['cycle']} | "
+                        f"Vorhersage: **{result['prediction']}** "
+                        f"(Konfidenz {result['confidence']:.0%}) | "
+                        f"Tatsächlich: **{result['actual']}** | "
+                        f"Methoden-Acc: {result['method_accuracy']:.1%}"
+                    )
+                    st.markdown(f"**Begründung:** {result['reasoning']}")
+                    st.rerun()
+
+    with tab_auto:
+        st.markdown(
+            "**Auto-Modus** – testet alle Methoden reihum (UCB1-Auswahl), "
+            "priorisiert Methoden mit höchster bisheriger Genauigkeit."
+        )
+        n_auto = st.slider("Anzahl Zyklen", 1, 10, 3, key="auto_cycles")
+        if st.button("🔄 Auto-Training starten", use_container_width=True, key="btn_auto"):
+            if not get_ollama_status()["running"]:
+                st.error("Ollama nicht erreichbar.")
+            else:
+                prog = st.progress(0, text="Starte…")
+                last_result = None
+                for i in range(n_auto):
+                    prog.progress((i + 1) / n_auto, text=f"Zyklus {i+1}/{n_auto}…")
+                    last_result = trainer.auto_mode(ticker, st.session_state.model)
+                    if last_result.get("error"):
+                        st.error(last_result["error"])
+                        break
+                prog.empty()
+                if last_result and not last_result.get("error"):
+                    st.success(
+                        f"✅ {n_auto} Zyklen abgeschlossen | "
+                        f"Bevorzugte Methode: **{last_result.get('preferred_method', '–')}**"
+                    )
+                    st.rerun()
+
+    with tab_sklearn:
+        st.markdown(
+            "**sklearn GradientBoosting** – klassisches ML auf technischen Features "
+            "(kein LLM nötig, schneller)."
+        )
+        horizon = st.slider("Vorhersage-Horizont (Tage)", 1, 20, 5, key="sklearn_horizon")
+        if st.button("🚀 sklearn Training", use_container_width=True, key="btn_sklearn"):
+            with st.spinner("Trainiere GradientBoosting…"):
                 try:
                     new_state = train(ticker, df, horizon=horizon)
                     st.success(
@@ -303,26 +375,77 @@ elif page == "Training":
                 except ValueError as e:
                     st.error(str(e))
 
-    # Feature Importance
+    # ── Method Scores ─────────────────────────────────────────
+    if state.get("method_scores"):
+        st.divider()
+        st.markdown("### Methoden-Vergleich")
+        ms = state["method_scores"]
+        ms_df = pd.DataFrame(
+            [{"Methode": k, "Genauigkeit": v, "Balken": v} for k, v in sorted(
+                ms.items(), key=lambda x: x[1], reverse=True
+            )]
+        )
+        fig_ms = go.Figure(go.Bar(
+            x=list(ms.values()),
+            y=list(ms.keys()),
+            orientation="h",
+            marker_color=["#26a69a" if v >= 0.5 else "#ef5350" for v in ms.values()],
+            text=[f"{v:.1%}" for v in ms.values()],
+            textposition="outside",
+        ))
+        fig_ms.add_vline(x=0.5, line_dash="dash", line_color="#9e9e9e",
+                         annotation_text="Zufall (50%)")
+        fig_ms.update_layout(
+            template="plotly_dark", height=300,
+            xaxis=dict(range=[0, 1], tickformat=".0%"),
+            margin=dict(l=160),
+        )
+        st.plotly_chart(fig_ms, use_container_width=True)
+
+    # ── Accuracy-Verlauf ──────────────────────────────────────
+    if state.get("accuracy_history"):
+        st.divider()
+        st.markdown("### Accuracy-Verlauf")
+        ah = pd.DataFrame(state["accuracy_history"])
+        if "accuracy_snapshot" in ah.columns:
+            fig_acc = go.Figure(go.Scatter(
+                x=ah.index + 1,
+                y=ah["accuracy_snapshot"],
+                mode="lines+markers",
+                name="Gesamt-Accuracy",
+                line=dict(color="#2196f3"),
+            ))
+            fig_acc.add_hline(y=0.5, line_dash="dash", line_color="#9e9e9e",
+                              annotation_text="Zufallsniveau")
+            fig_acc.update_layout(
+                template="plotly_dark", height=280,
+                xaxis_title="Zyklus", yaxis=dict(tickformat=".0%", range=[0, 1]),
+            )
+            st.plotly_chart(fig_acc, use_container_width=True)
+        with st.expander("Accuracy-Tabelle"):
+            st.dataframe(ah, use_container_width=True)
+
+    # ── Insights ─────────────────────────────────────────────
+    if state.get("insights"):
+        st.divider()
+        st.markdown("### KI-Erkenntnisse (letzte Zyklen)")
+        for ins in reversed(state["insights"]):
+            st.caption(ins)
+
+    # ── Feature Importance (sklearn) ──────────────────────────
     if state.get("feature_importance"):
         st.divider()
-        st.markdown("### Feature Importance")
+        st.markdown("### Feature Importance (sklearn/GBM)")
         fi = pd.Series(state["feature_importance"]).sort_values(ascending=True)
-        fig = go.Figure(go.Bar(x=fi.values, y=fi.index, orientation="h",
-                                marker_color="#2196f3"))
+        fig = go.Figure(go.Bar(
+            x=fi.values, y=fi.index, orientation="h", marker_color="#ff9800"
+        ))
         fig.update_layout(template="plotly_dark", height=400, xaxis_title="Importance")
         st.plotly_chart(fig, use_container_width=True)
 
-    # Trainings-Log
-    if state.get("training_log"):
-        st.divider()
-        st.markdown("### Trainings-Historie")
-        log_df = pd.DataFrame(state["training_log"])
-        st.dataframe(log_df, use_container_width=True)
-
-    # Alle trainierten Aktien
+    # ── Alle trainierten Aktien ───────────────────────────────
     st.divider()
-    st.markdown("### Alle trainierten Aktien")
+    st.markdown("### Alle trainierten Symbole")
     trained = list_trained_stocks()
     if trained:
         st.write(", ".join(trained))
