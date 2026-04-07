@@ -13,7 +13,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from config import (
     APP_TITLE, APP_ICON, APP_VERSION,
-    DEFAULT_BUDGET_EUR, DEFAULT_PERIOD, LAMBO_PRICE_EUR,
+    ANALYSIS_METHODS, DEFAULT_BUDGET_EUR, DEFAULT_PERIOD,
+    LAMBO_PRICE_EUR, ORDER_COST_EUR, SPREAD_PERCENT,
 )
 from modules.data_fetcher import fetch_ohlcv, fetch_info, is_valid_ticker
 from modules.model_manager import (
@@ -26,8 +27,12 @@ from modules.model_manager import (
 from modules.trainer import train, load_state, list_trained_stocks, StockTrainer
 from modules.predictor import predict, build_context_string
 from modules.backtester import (
+    PaperTrader,
+    lambo_value, lambo_display, lambo_progress,
+    backtest_signals,
+    # Legacy-Compat (Paper-Trading-Seite Alt-Pfad)
     load_portfolio, save_portfolio, reset_portfolio,
-    execute_trade, portfolio_summary, backtest_signals,
+    execute_trade, portfolio_summary,
 )
 from modules.easter_eggs import (
     check_triggers, random_motivation, format_lambo,
@@ -459,21 +464,31 @@ elif page == "Training":
 elif page == "Paper-Trading":
     st.title("💼 Paper-Trading")
 
+    # ── Konfiguration ──────────────────────────────────────
+    with st.sidebar.expander("⚙️ Trading-Parameter"):
+        pt_budget    = st.number_input("Startkapital (€)",  value=DEFAULT_BUDGET_EUR, step=1000.0, key="pt_budget")
+        pt_ordercost = st.number_input("Ordergebühr (€)",   value=ORDER_COST_EUR,     step=0.5,    key="pt_ordercost")
+        pt_spread    = st.number_input("Spread (%)",         value=SPREAD_PERCENT,     step=0.05,   key="pt_spread",
+                                       format="%.3f")
+
     portfolio_name = st.session_state.portfolio_name
-    pf = load_portfolio(portfolio_name)
+    pt = PaperTrader(
+        name=portfolio_name,
+        start_budget=pt_budget,
+        order_cost=pt_ordercost,
+        spread_pct=pt_spread,
+    )
 
-    # Aktuelle Preise für offene Positionen holen
+    # Aktuelle Preise für offene Positionen
+    pt_state = pt.load()
     current_prices: dict[str, float] = {}
-    for t in pf.positions:
-        d = fetch_ohlcv(t, period="5d")
-        if not d.empty:
-            current_prices[t] = float(d["Close"].iloc[-1])
-        else:
-            current_prices[t] = pf.positions[t]["avg_price"]
+    for sym in pt_state.positions:
+        d = fetch_ohlcv(sym, period="5d")
+        current_prices[sym] = float(d["Close"].iloc[-1]) if not d.empty else pt_state.positions[sym]["avg_price"]
 
-    summary = portfolio_summary(pf, current_prices)
+    summary = pt.get_portfolio_summary(current_prices)
 
-    # Easter Eggs prüfen
+    # Easter Eggs
     eggs = check_triggers(
         summary["total_value"],
         summary["total_return_pct"],
@@ -486,83 +501,136 @@ elif page == "Paper-Trading":
         st.toast(f"{egg.emoji} {egg.title}", icon=egg.emoji)
         st.info(f"**{egg.title}**\n\n{egg.message}")
 
-    # KPIs
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Gesamtwert", f"{summary['total_value']:,.2f} €",
+    # ── KPIs ──────────────────────────────────────────────
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Gesamtwert",    f"{summary['total_value']:,.2f} €",
                 f"{summary['total_return_pct']:+.2f}%")
-    col2.metric("Cash", f"{summary['cash']:,.2f} €")
+    col2.metric("Cash",          f"{summary['cash']:,.2f} €")
     col3.metric("Positionswert", f"{summary['position_value']:,.2f} €")
-    col4.metric("Trades gesamt", summary["num_trades"])
+    col4.metric("Realisierter G/V", f"{summary['realized_pnl']:+,.2f} €")
+    col5.metric("Win-Rate",      f"{summary['win_rate']:.0%}" if summary["num_sell_trades"] else "–",
+                f"{summary['num_sell_trades']} Trades")
 
-    # Lambo-Meter
+    # ── Lambo-Meter ───────────────────────────────────────
     st.divider()
-    lambo_widget(summary["total_value"])
+    lv_pct, lv_msg = lambo_progress(summary["total_value"])
+    st.markdown(f"### 🏎️ Lambo-O-Meter  ·  {lambo_display(summary['total_value'])}")
+    st.progress(lv_pct / 100, text=lv_msg)
 
-    # Positionen
+    # ── Performance-Chart ─────────────────────────────────
+    perf_df = pt.get_performance_chart()
+    if len(perf_df) > 1:
+        fig_perf = go.Figure()
+        fig_perf.add_trace(go.Scatter(
+            x=perf_df["timestamp"], y=perf_df["value"],
+            mode="lines", name="Portfolio", line=dict(color="#2196f3", width=2),
+            fill="tozeroy", fillcolor="rgba(33,150,243,0.08)",
+        ))
+        fig_perf.add_hline(y=pt_state.start_budget, line_dash="dash",
+                           line_color="#9e9e9e", annotation_text="Start")
+        fig_perf.update_layout(template="plotly_dark", height=280,
+                               xaxis_title="Zeit", yaxis_title="Wert (€)")
+        st.plotly_chart(fig_perf, use_container_width=True)
+
+    # ── Positionen ────────────────────────────────────────
     st.divider()
     st.markdown("### Offene Positionen")
     if summary["positions"]:
-        pos_df = pd.DataFrame(summary["positions"])
-        st.dataframe(pos_df.set_index("ticker"), use_container_width=True)
+        st.dataframe(pd.DataFrame(summary["positions"]), use_container_width=True, hide_index=True)
     else:
         st.caption("Keine offenen Positionen.")
 
-    # Order-Panel
+    # ── Tabs: Manuell | Auto-Trade ────────────────────────
     st.divider()
-    st.markdown("### Order aufgeben")
-    if st.session_state.df is not None and st.session_state.ticker:
-        ticker = st.session_state.ticker
-        df = st.session_state.df
-        price = float(df["Close"].iloc[-1])
+    tab_manual, tab_auto = st.tabs(["🖱️ Manuelle Order", "🤖 Auto-Trade (KI)"])
 
-        col_a, col_b, col_c = st.columns(3)
-        with col_a:
-            action = st.selectbox("Aktion", ["BUY", "SELL"])
-        with col_b:
-            fraction = st.slider("Cash-Anteil investieren", 0.05, 1.0, 0.1, 0.05)
-        with col_c:
-            st.metric("Aktueller Kurs", f"{price:.2f}")
+    with tab_manual:
+        if st.session_state.df is not None and st.session_state.ticker:
+            ticker_pt = st.session_state.ticker
+            df_pt     = st.session_state.df
+            price_pt  = float(df_pt["Close"].iloc[-1])
 
-        pred = st.session_state.prediction
-        signal_str = pred.signal if pred else "MANUELL"
+            col_a, col_b, col_c, col_d = st.columns(4)
+            with col_a:
+                pt_dir = st.selectbox("Richtung", ["BUY", "SELL"], key="pt_dir")
+            with col_b:
+                pt_frac = st.slider("Cash-Anteil", 0.05, 1.0, 0.2, 0.05, key="pt_frac")
+            with col_c:
+                st.metric("Aktueller Kurs", f"{price_pt:.2f}")
+            with col_d:
+                invest_eur = pt_state.cash * pt_frac
+                qty_est    = invest_eur / price_pt if price_pt > 0 else 0
+                st.metric("Geschätzte Menge", f"{qty_est:.4f}")
 
-        if st.button(f"✅ Order ausführen: {action} {ticker}", use_container_width=True):
-            ok, msg = execute_trade(pf, ticker, action, price, signal=signal_str, fraction=fraction)
-            if ok:
-                save_portfolio(pf, portfolio_name)
-                st.success(msg)
-                st.rerun()
-            else:
-                st.error(msg)
-    else:
-        st.info("Bitte links eine Aktie laden um Orders aufzugeben.")
+            pred_pt    = st.session_state.prediction
+            sig_str    = pred_pt.signal if pred_pt else "MANUELL"
 
-    # Portfolio zurücksetzen
+            if st.button(f"✅ {pt_dir} {ticker_pt}", use_container_width=True, key="btn_pt_order"):
+                qty = (pt_state.cash * pt_frac) / (price_pt * (1 + pt_spread/100)) if pt_dir == "BUY" else \
+                      (pt_state.positions.get(ticker_pt, {}).get("quantity", 0))
+                res = pt.place_order(ticker_pt, pt_dir, qty, price_pt, signal=sig_str)
+                if res["ok"]:
+                    st.success(
+                        f"{pt_dir} {res['quantity']:.4f} × {ticker_pt} @ {res['exec_price']:.2f} € "
+                        f"| PnL: {res['pnl']:+.2f} €"
+                    )
+                    st.rerun()
+                else:
+                    st.error(res["error"])
+        else:
+            st.info("Bitte links eine Aktie laden.")
+
+    with tab_auto:
+        st.markdown(
+            "**Auto-Trade**: KI analysiert die Aktie und platziert automatisch "
+            "Paper-Orders basierend auf Vorhersagen."
+        )
+        if st.session_state.ticker:
+            col_x, col_y, col_z = st.columns(3)
+            with col_x:
+                at_cycles = st.slider("Anzahl Zyklen", 1, 10, 3, key="at_cycles")
+            with col_y:
+                at_invest = st.slider("Invest-Anteil je BUY", 0.05, 0.5, 0.2, 0.05, key="at_invest")
+            with col_z:
+                at_method = st.selectbox("Methode", ANALYSIS_METHODS, key="at_method",
+                                         index=ANALYSIS_METHODS.index("Auto (KI wählt)"))
+
+            if st.button("🚀 Auto-Trade starten", use_container_width=True, key="btn_auto_trade"):
+                if not get_ollama_status()["running"]:
+                    st.error("Ollama nicht erreichbar.")
+                else:
+                    with st.spinner(f"Führe {at_cycles} Auto-Trade-Zyklen aus…"):
+                        log = pt.auto_trade(
+                            st.session_state.ticker,
+                            st.session_state.model,
+                            cycles=at_cycles,
+                            method=at_method,
+                            invest_pct=at_invest,
+                        )
+                    st.success(f"✅ {len(log)} Zyklen abgeschlossen")
+                    st.dataframe(pd.DataFrame(log), use_container_width=True, hide_index=True)
+                    st.rerun()
+        else:
+            st.info("Bitte links eine Aktie laden.")
+
+    # ── Reset ─────────────────────────────────────────────
     st.divider()
     with st.expander("⚠️ Portfolio zurücksetzen"):
-        new_budget = st.number_input("Neues Startkapital (€)", value=DEFAULT_BUDGET_EUR, step=1000.0)
-        if st.button("🔄 Portfolio zurücksetzen", type="secondary"):
-            reset_portfolio(portfolio_name, budget=new_budget)
-            st.success(f"Portfolio zurückgesetzt auf {new_budget:,.0f} €.")
+        reset_budget = st.number_input("Neues Startkapital (€)", value=float(pt_state.start_budget), step=1000.0)
+        if st.button("🔄 Zurücksetzen", type="secondary"):
+            pt.reset(new_budget=reset_budget)
+            st.success(f"Portfolio zurückgesetzt auf {reset_budget:,.0f} €.")
             st.rerun()
 
-    # Trade-History
+    # ── Trade-Historie ────────────────────────────────────
     st.divider()
     st.markdown("### Trade-Historie")
-    if pf.trades:
-        trades_df = pd.DataFrame([
-            {
-                "Datum": t.date[:10],
-                "Ticker": t.ticker,
-                "Aktion": t.action,
-                "Stück": t.shares,
-                "Kurs": t.price,
-                "PnL": t.pnl,
-                "Signal": t.signal,
-            }
-            for t in reversed(pf.trades)
-        ])
-        st.dataframe(trades_df, use_container_width=True)
+    if pt_state.trades:
+        th_df = pd.DataFrame(pt_state.trades)
+        cols  = ["timestamp","symbol","direction","quantity","exec_price","pnl","pnl_pct","method","signal"]
+        show_cols = [c for c in cols if c in th_df.columns]
+        st.dataframe(th_df[show_cols].sort_values("timestamp", ascending=False),
+                     use_container_width=True, hide_index=True)
     else:
         st.caption("Noch keine Trades.")
 
