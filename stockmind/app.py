@@ -1,55 +1,46 @@
 """
-StockMind – Streamlit Einstiegspunkt
-Lokales KI-gestütztes Aktienanalyse-Tool
+StockMind – Streamlit Dashboard  (Bloomberg / Trading-Terminal Style)
 """
+from __future__ import annotations
 
-import streamlit as st
+import random
+import time
+from typing import Optional
+
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import streamlit as st
 
-import sys
-import os
+import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from config import (
     APP_TITLE, APP_ICON, APP_VERSION,
     ANALYSIS_METHODS, DEFAULT_BUDGET_EUR, DEFAULT_PERIOD,
-    LAMBO_PRICE_EUR, ORDER_COST_EUR, SPREAD_PERCENT,
+    LAMBO_PRICE_EUR, ORDER_COST_EUR, SPREAD_PERCENT, AVAILABLE_MODELS,
 )
-from modules.data_fetcher import fetch_ohlcv, fetch_info, is_valid_ticker
 from modules.model_manager import (
+    MODEL_DESCRIPTIONS, is_ollama_running, get_ollama_status,
+    get_available_models, get_available_models_with_info, download_model,
     analyze_stock,
-    get_available_models,
-    get_available_models_with_info,
-    get_ollama_status,
-    list_local_models,                   # Compat für ui_components
 )
-from modules.trainer import train, load_state, list_trained_stocks, StockTrainer
-from modules.predictor import predict, build_context_string
+from modules.data_fetcher import (
+    search_stocks, fetch_ohlcv, fetch_info, is_valid_ticker,
+)
+from modules.trainer import StockTrainer, load_state, train, list_trained_stocks
+from modules.predictor import predict, build_context_string, SIGNAL_FUNCTIONS
 from modules.backtester import (
-    PaperTrader,
-    lambo_value, lambo_display, lambo_progress,
-    backtest_signals,
-    # Legacy-Compat (Paper-Trading-Seite Alt-Pfad)
-    load_portfolio, save_portfolio, reset_portfolio,
-    execute_trade, portfolio_summary,
+    PaperTrader, lambo_value, lambo_display, lambo_progress, backtest_signals,
 )
 from modules.easter_eggs import (
-    check_triggers, random_motivation, format_lambo,
     check_easter_egg, get_currency_display, get_trade_count_egg,
-    get_streak_egg, CURRENCIES, CURRENCY_UNLOCK_CLICKS, CONFETTI_MARKER,
-)
-from modules.ui_components import (
-    candlestick_chart, indicator_chart, signal_badge,
-    lambo_widget, sidebar_model_selector, sidebar_analysis_method,
-    sidebar_ticker_search, metrics_row, equity_curve_chart,
+    CURRENCIES, CURRENCY_UNLOCK_CLICKS, CONFETTI_MARKER,
 )
 
-
-# ---------------------------------------------------------------------------
-# Seiten-Konfiguration
-# ---------------------------------------------------------------------------
-
+# ─────────────────────────────────────────────────────────────────────────────
+# Page config – MUSS als erster Streamlit-Aufruf stehen
+# ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title=APP_TITLE,
     page_icon=APP_ICON,
@@ -57,13 +48,233 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Bloomberg / Trading-Terminal CSS
+# ─────────────────────────────────────────────────────────────────────────────
+_CSS = """
+<style>
+/* ── Global ────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap');
 
-# ---------------------------------------------------------------------------
-# Session State initialisieren
-# ---------------------------------------------------------------------------
+html, body,
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"],
+.main .block-container          { background-color: #0d1117 !important; color: #c9d1d9; }
 
-def init_session() -> None:
-    defaults = {
+[data-testid="stSidebar"]       { background-color: #0a0e14 !important;
+                                   border-right: 1px solid #1c2128 !important; }
+
+/* ── Scrollbar ─────────────────────────────────────────────────── */
+::-webkit-scrollbar              { width: 6px; height: 6px; }
+::-webkit-scrollbar-track        { background: #0d1117; }
+::-webkit-scrollbar-thumb        { background: #30363d; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover  { background: #00ff88; }
+
+/* ── Tabs ──────────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] { background: #0a0e14 !important;
+                                     border-bottom: 1px solid #1c2128; gap: 2px; }
+.stTabs [data-baseweb="tab"]      { background: transparent !important;
+                                     color: #8b949e !important;
+                                     border-radius: 4px 4px 0 0;
+                                     font-family: 'IBM Plex Mono', monospace;
+                                     font-size: 13px; padding: 8px 16px; }
+.stTabs [aria-selected="true"]    { background: #161b22 !important;
+                                     color: #00ff88 !important;
+                                     border-top: 2px solid #00ff88 !important; }
+
+/* ── Buttons ───────────────────────────────────────────────────── */
+.stButton > button {
+    background: #161b22; color: #c9d1d9;
+    border: 1px solid #30363d; border-radius: 4px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+    transition: all 0.2s;
+}
+.stButton > button:hover {
+    border-color: #00ff88; color: #00ff88;
+    box-shadow: 0 0 8px rgba(0,255,136,0.3);
+}
+.stButton > button[kind="primary"] {
+    background: #00ff88; color: #0d1117; border-color: #00ff88;
+    font-weight: 700;
+}
+.stButton > button[kind="primary"]:hover {
+    background: #00cc6a; box-shadow: 0 0 12px rgba(0,255,136,0.5);
+}
+
+/* ── Inputs ────────────────────────────────────────────────────── */
+.stTextInput input, .stSelectbox select, .stNumberInput input {
+    background: #0d1117 !important; color: #c9d1d9 !important;
+    border: 1px solid #30363d !important; border-radius: 4px !important;
+    font-family: 'IBM Plex Mono', monospace;
+}
+.stTextInput input:focus { border-color: #00ff88 !important;
+                            box-shadow: 0 0 6px rgba(0,255,136,0.3) !important; }
+
+/* ── Metrics ───────────────────────────────────────────────────── */
+[data-testid="stMetric"]         { background: #161b22; border: 1px solid #1c2128;
+                                     border-radius: 6px; padding: 12px !important; }
+[data-testid="stMetricValue"]    { color: #c9d1d9 !important;
+                                     font-family: 'IBM Plex Mono', monospace; }
+[data-testid="stMetricDelta"]    { font-family: 'IBM Plex Mono', monospace; }
+
+/* ── Progress bar ──────────────────────────────────────────────── */
+.stProgress > div > div { background: #00ff88 !important; }
+
+/* ── Dataframe ─────────────────────────────────────────────────── */
+[data-testid="stDataFrame"]      { border: 1px solid #1c2128; border-radius: 4px; }
+
+/* ── Divider ───────────────────────────────────────────────────── */
+hr { border-color: #1c2128; }
+
+/* ── Custom components ─────────────────────────────────────────── */
+.sm-card {
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 6px; padding: 16px; margin: 4px 0;
+}
+.sm-card-accent {
+    background: #0d2b1a; border: 1px solid #00ff88;
+    border-radius: 6px; padding: 16px; margin: 4px 0;
+}
+.sm-header {
+    color: #00ff88; font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 2px; border-bottom: 1px solid #1c2128;
+    padding-bottom: 6px; margin-bottom: 12px;
+}
+.sm-big-num {
+    color: #00ff88; font-family: 'IBM Plex Mono', monospace;
+    font-size: 40px; font-weight: 700; line-height: 1;
+    text-shadow: 0 0 20px rgba(0,255,136,0.4);
+}
+.sm-label {
+    color: #8b949e; font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+}
+.sm-badge-up {
+    display: inline-block; background: #0d2b1a; color: #00ff88;
+    border: 1px solid #00ff88; border-radius: 3px;
+    padding: 2px 10px; font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px; font-weight: 700;
+}
+.sm-badge-down {
+    display: inline-block; background: #2a0d0d; color: #ff4444;
+    border: 1px solid #ff4444; border-radius: 3px;
+    padding: 2px 10px; font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px; font-weight: 700;
+}
+.sm-badge-neutral {
+    display: inline-block; background: #1c2128; color: #8b949e;
+    border: 1px solid #30363d; border-radius: 3px;
+    padding: 2px 10px; font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px; font-weight: 700;
+}
+.sm-online  { color: #00ff88; font-weight: 700; }
+.sm-offline { color: #ff4444; font-weight: 700; }
+.sm-quote {
+    background: #0a0e14; border-left: 3px solid #00ff88;
+    padding: 10px 14px; border-radius: 0 4px 4px 0;
+    color: #8b949e; font-style: italic; font-size: 14px;
+    margin: 8px 0;
+}
+.sm-model-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 0; border-bottom: 1px solid #1c2128;
+}
+.sm-active-badge {
+    background: #0d2b1a; color: #00ff88; border: 1px solid #00ff88;
+    border-radius: 3px; padding: 1px 6px; font-size: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+}
+
+/* ── Ticker tape animation ─────────────────────────────────────── */
+@keyframes ticker {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+}
+.sm-ticker {
+    overflow: hidden; background: #0a0e14;
+    border: 1px solid #1c2128; border-radius: 4px;
+    padding: 6px 0; white-space: nowrap;
+}
+.sm-ticker-inner {
+    display: inline-block;
+    animation: ticker 25s linear infinite;
+    color: #00ff88; font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px; letter-spacing: 1px;
+}
+
+/* ── Pulse animation (AI thinking) ────────────────────────────── */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.2; }
+}
+.sm-pulse {
+    animation: pulse 1.5s infinite;
+    color: #00ff88; font-family: 'IBM Plex Mono', monospace;
+}
+.sm-scan-line {
+    height: 2px; background: linear-gradient(90deg, transparent, #00ff88, transparent);
+    animation: scan 2s linear infinite;
+}
+@keyframes scan { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+</style>
+"""
+
+def _inject_css() -> None:
+    st.markdown(_CSS, unsafe_allow_html=True)
+
+_inject_css()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Finance-Zitate & Ticker-Tape
+# ─────────────────────────────────────────────────────────────────────────────
+_QUOTES = [
+    "Sei gierig, wenn andere ängstlich sind. – Warren Buffett",
+    "Die Börse ist ein Instrument um Geld von Ungeduldigen zu Geduldigen zu transferieren. – W. Buffett",
+    "Kurzfristig ist die Börse eine Abstimmungsmaschine, langfristig eine Waage. – Benjamin Graham",
+    "Der Markt kann länger irrational bleiben als du solvent. – J. M. Keynes",
+    "Kaufe, wenn alle verkaufen. Verkaufe, wenn alle kaufen. – J. Paul Getty",
+    "Risiko kommt daher, dass man nicht weiß, was man tut. – Warren Buffett",
+    "Der beste Zeitpunkt zu investieren war gestern. Der zweitbeste ist heute.",
+    "Diversifikation ist Schutz gegen Unwissenheit. – Warren Buffett",
+    "In der Investition ist das, was komfortabel ist, selten profitabel. – Robert Arnott",
+    "Zeit im Markt schlägt das Timing des Marktes.",
+    "Der Markt ist ein Ort, wo Wertpapiere von Aktiven zu Geduldigen wandern. – Nicolas Darvas",
+    "Vier Worte, die Investoren viel Geld gekostet haben: Diesmal ist es anders. – Sir John Templeton",
+]
+
+_TICKER_WORDS = (
+    "KAUFEN \u2022 HALTEN \u2022 VERKAUFEN \u2022 RSI \u2022 MACD \u2022 BOLLINGER \u2022 "
+    "KI ANALYSIERT \u2022 MUSTER ERKANNT \u2022 SIGNAL \u2022 TREND \u2022 VOLUMEN \u2022 "
+    "SUPPORT \u2022 RESISTANCE \u2022 MOMENTUM \u2022 DIVERGENZ \u2022 BREAKOUT \u2022 "
+)
+
+def _ticker_html() -> str:
+    tape = _TICKER_WORDS * 5
+    return (
+        f'<div class="sm-ticker"><span class="sm-ticker-inner">{tape}</span></div>'
+    )
+
+def _quote_html(quote: str) -> str:
+    return f'<div class="sm-quote">"{quote}"</div>'
+
+def _signal_badge_html(signal: str) -> str:
+    mapping = {
+        "UP": "sm-badge-up", "KAUFEN": "sm-badge-up", "BUY": "sm-badge-up",
+        "DOWN": "sm-badge-down", "VERKAUFEN": "sm-badge-down", "SELL": "sm-badge-down",
+        "NEUTRAL": "sm-badge-neutral", "HALTEN": "sm-badge-neutral", "HOLD": "sm-badge-neutral",
+    }
+    cls = mapping.get(signal.upper(), "sm-badge-neutral")
+    return f'<span class="{cls}">{signal}</span>'
+
+def _section(label: str) -> None:
+    st.markdown(f'<div class="sm-header">{label}</div>', unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Session State
+# ─────────────────────────────────────────────────────────────────────────────
+def _init_session() -> None:
+    defaults: dict = {
         "ticker": "",
         "df": None,
         "info": {},
@@ -72,596 +283,1017 @@ def init_session() -> None:
         "portfolio_name": "default",
         "model": "llama3",
         "method": "Auto (KI wählt)",
-        "page": "Dashboard",
-        "prev_portfolio_value": 0.0,
-        # Easter Egg: Klick-Counter für Währungsauswahl
-        "currency_clicks":   0,
+        "period": "1y",
+        # Search
+        "search_query": "",
+        "search_results": [],
+        "search_selected_idx": 0,
+        # Easter Egg: Währungs-Klick-Counter
+        "currency_clicks": 0,
         "currency_unlocked": False,
         "selected_currency": CURRENCIES[0],
-        # Easter Egg: Zyklen-Tracking
+        # Easter Egg: Zyklus-Tracking
         "prev_cycles": 0,
-        # Easter Egg: fired-Set (verhindert doppeltes Auslösen in einer Session)
         "eggs_fired": set(),
+        # Sidebar: Verlauf & letzte Vorhersage
+        "history": [],
+        "last_pred_ticker": "",
+        "last_pred_signal": "",
+        "last_pred_conf": 0.0,
+        "last_pred_time": "",
+        # Paper-Trading Parameter (Sidebar-Override)
+        "pt_budget": DEFAULT_BUDGET_EUR,
+        "pt_order_cost": ORDER_COST_EUR,
+        "pt_spread": SPREAD_PERCENT,
     }
-    for key, val in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = val
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+_init_session()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Chart-Hilfsfunktionen
+# ─────────────────────────────────────────────────────────────────────────────
+_DARK = dict(
+    template="plotly_dark",
+    paper_bgcolor="#0d1117",
+    plot_bgcolor="#0d1117",
+    font=dict(color="#c9d1d9", family="IBM Plex Mono, monospace"),
+    margin=dict(l=8, r=8, t=32, b=8),
+)
+_GREEN  = "#00ff88"
+_RED    = "#ff4444"
+_AMBER  = "#f0b429"
+_BLUE   = "#58a6ff"
+_PURPLE = "#bc8cff"
 
 
-init_session()
-
-
-# ---------------------------------------------------------------------------
-# Sidebar
-# ---------------------------------------------------------------------------
-
-with st.sidebar:
-    st.title(f"{APP_ICON} {APP_TITLE}")
-    st.caption(f"v{APP_VERSION} – Lokale KI-Aktienanalyse")
-    st.divider()
-
-    # Seitennavigation
-    st.session_state.page = st.radio(
-        "Navigation",
-        ["Dashboard", "Training", "Paper-Trading", "Backtesting", "Einstellungen"],
-        label_visibility="collapsed",
+def _candlestick_pro(
+    df: pd.DataFrame,
+    ticker: str,
+    show_volume: bool = True,
+    show_sma: bool = True,
+    show_ema: bool = False,
+) -> go.Figure:
+    rows = 2 if show_volume else 1
+    row_heights = [0.75, 0.25] if show_volume else [1.0]
+    fig = make_subplots(
+        rows=rows, cols=1,
+        shared_xaxes=True,
+        row_heights=row_heights,
+        vertical_spacing=0.02,
     )
-    st.divider()
-
-    # Ticker-Suche
-    found_ticker = sidebar_ticker_search()
-    if found_ticker:
-        st.session_state.ticker = found_ticker
-
-    # Manueller Ticker-Input als Fallback
-    manual = st.text_input(
-        "Oder Ticker direkt eingeben",
-        value=st.session_state.ticker,
-        placeholder="z.B. AAPL, SAP.DE",
-    ).strip().upper()
-    if manual:
-        st.session_state.ticker = manual
-
-    # Zeitraum
-    period = st.selectbox(
-        "Zeitraum",
-        ["1mo", "3mo", "6mo", "1y", "2y", "5y"],
-        index=3,
+    # Candlesticks
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df["Open"], high=df["High"],
+        low=df["Low"], close=df["Close"],
+        increasing_line_color=_GREEN, decreasing_line_color=_RED,
+        increasing_fillcolor=_GREEN, decreasing_fillcolor=_RED,
+        name=ticker, showlegend=False,
+    ), row=1, col=1)
+    # SMAs
+    if show_sma:
+        for col_name, color, label in [
+            ("SMA_20", _GREEN, "SMA 20"),
+            ("SMA_50", _AMBER, "SMA 50"),
+            ("SMA_200", _BLUE, "SMA 200"),
+        ]:
+            if col_name in df.columns:
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=df[col_name],
+                    mode="lines", name=label,
+                    line=dict(color=color, width=1.2),
+                ), row=1, col=1)
+    # EMAs
+    if show_ema:
+        for col_name, color, label in [
+            ("EMA_12", _PURPLE, "EMA 12"),
+            ("EMA_26", "#ff9f43", "EMA 26"),
+        ]:
+            if col_name in df.columns:
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=df[col_name],
+                    mode="lines", name=label,
+                    line=dict(color=color, width=1, dash="dot"),
+                ), row=1, col=1)
+    # Volume
+    if show_volume and "Volume" in df.columns:
+        colors = [_GREEN if c >= o else _RED
+                  for c, o in zip(df["Close"], df["Open"])]
+        fig.add_trace(go.Bar(
+            x=df.index, y=df["Volume"],
+            marker_color=colors, name="Volumen",
+            showlegend=False, opacity=0.7,
+        ), row=2, col=1)
+    fig.update_layout(
+        **_DARK,
+        height=460,
+        xaxis_rangeslider_visible=False,
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.01,
+            xanchor="right", x=1,
+            bgcolor="rgba(0,0,0,0)", font=dict(size=10),
+        ),
+        xaxis2_showgrid=False if show_volume else None,
     )
-
-    # Daten laden
-    if st.button("📥 Daten laden", use_container_width=True):
-        if not st.session_state.ticker:
-            st.error("Bitte einen Ticker eingeben.")
-        elif not is_valid_ticker(st.session_state.ticker):
-            st.error("Ungültiges Ticker-Format.")
-        else:
-            with st.spinner(f"Lade {st.session_state.ticker}..."):
-                df_loaded = fetch_ohlcv(st.session_state.ticker, period=period)
-                if df_loaded.empty:
-                    st.error(df_loaded.attrs.get("error", "Unbekannter Fehler beim Laden."))
-                else:
-                    st.session_state.df = df_loaded
-                    st.session_state.info = fetch_info(st.session_state.ticker)
-                    st.session_state.prediction = None
-                    st.session_state.analysis_text = ""
-                    st.success(f"✅ {len(df_loaded)} Datenpunkte geladen.")
-
-    st.divider()
-    st.session_state.model = sidebar_model_selector()
-    st.session_state.method = sidebar_analysis_method()
-    st.divider()
-    st.caption(random_motivation())
+    fig.update_xaxes(gridcolor="#1c2128", zeroline=False)
+    fig.update_yaxes(gridcolor="#1c2128", zeroline=False)
+    return fig
 
 
-# ---------------------------------------------------------------------------
-# Hauptbereich – Seiten
-# ---------------------------------------------------------------------------
+def _indicator_fig(df: pd.DataFrame, indicator: str) -> Optional[go.Figure]:
+    fig = go.Figure()
+    fig.update_layout(**_DARK, height=200)
+    fig.update_xaxes(gridcolor="#1c2128")
+    fig.update_yaxes(gridcolor="#1c2128")
 
-page = st.session_state.page
-
-# ============================================================
-# SEITE: DASHBOARD
-# ============================================================
-if page == "Dashboard":
-    st.title(f"{APP_ICON} {APP_TITLE} – Dashboard")
-
-    if st.session_state.df is None:
-        st.info("👈 Bitte links einen Ticker eingeben und **Daten laden** klicken.")
-
-        # Onboarding-Kacheln
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown("### 📈 Analyse")
-            st.write("KI-gestützte Aktienanalyse mit lokalen LLMs via Ollama.")
-        with col2:
-            st.markdown("### 🎓 Training")
-            st.write("Trainiere Vorhersagemodelle je Aktie mit historischen Daten.")
-        with col3:
-            st.markdown("### 🏎️ Paper-Trading")
-            st.write(f"Starte mit {DEFAULT_BUDGET_EUR:,.0f}€ virtuellem Kapital.\nZiel: 1 Lambo = {LAMBO_PRICE_EUR:,.0f}€")
-        st.stop()
-
-    df: pd.DataFrame = st.session_state.df
-    info: dict = st.session_state.info
-    ticker: str = st.session_state.ticker
-
-    # Aktien-Kopfzeile
-    name = info.get("name", ticker)
-    currency = info.get("currency", "")
-    st.markdown(f"## {name} `{ticker}` {currency}")
-
-    col_a, col_b, col_c, col_d = st.columns(4)
-    last = float(df["Close"].iloc[-1])
-    prev = float(df["Close"].iloc[-2])
-    change = (last - prev) / prev * 100
-    col_a.metric("Letzter Kurs", f"{last:.2f} {currency}", f"{change:+.2f}%")
-    col_b.metric("52W-Hoch", f"{df['Close'].rolling(252).max().iloc[-1]:.2f}")
-    col_c.metric("52W-Tief", f"{df['Close'].rolling(252).min().iloc[-1]:.2f}")
-    col_d.metric("Ø Volumen (20T)", f"{df['Volume'].rolling(20).mean().iloc[-1]:,.0f}")
-
-    st.divider()
-
-    # Candlestick
-    show_sma = st.checkbox("SMAs anzeigen", value=True)
-    show_vol = st.checkbox("Volumen anzeigen", value=True)
-    st.plotly_chart(
-        candlestick_chart(df, ticker, show_sma=show_sma, show_volume=show_vol),
-        use_container_width=True,
-    )
-
-    # Indikator-Auswahl
-    ind_choice = st.selectbox("Indikator-Chart", ["– keiner –", "RSI", "MACD", "Bollinger Bands"])
-    if ind_choice != "– keiner –":
-        fig_ind = indicator_chart(df, ind_choice)
-        if fig_ind:
-            st.plotly_chart(fig_ind, use_container_width=True)
-
-    st.divider()
-
-    # Signal & KI-Analyse
-    col_left, col_right = st.columns([1, 2])
-
-    with col_left:
-        st.markdown("### Signal")
-        if st.button("🔮 Signal berechnen", use_container_width=True):
-            pred = predict(ticker, df, method=st.session_state.method)
-            st.session_state.prediction = pred
-        if st.session_state.prediction:
-            pred = st.session_state.prediction
-            signal_badge(pred.signal, pred.confidence)
-            st.caption(pred.summary)
-            if pred.warnings:
-                for w in pred.warnings:
-                    st.warning(w)
-
-    with col_right:
-        st.markdown("### KI-Analyse")
-        _ollama = get_ollama_status()
-        ollama_ok = _ollama["running"] and _ollama["model_count"] > 0
-        if not _ollama["running"]:
-            st.warning(_ollama["error"])
-            with st.expander("Installationsanleitung"):
-                st.markdown(_ollama["install_guide"])
-        elif not ollama_ok:
-            st.warning("Ollama läuft, aber kein Modell installiert. Sidebar → Modell herunterladen.")
-        else:
-            if st.button(
-                f"🤖 Analysieren mit {st.session_state.model}",
-                use_container_width=True,
-                disabled=not ollama_ok,
-            ):
-                pred = st.session_state.prediction or predict(ticker, df, method=st.session_state.method)
-                st.session_state.prediction = pred
-                ctx = build_context_string(ticker, df, pred)
-                with st.spinner("KI analysiert..."):
-                    try:
-                        text = analyze_stock(
-                            st.session_state.model, ticker, ctx,
-                            method=st.session_state.method,
-                        )
-                        st.session_state.analysis_text = text
-                    except ConnectionError as e:
-                        st.error(str(e))
-
-            if st.session_state.analysis_text:
-                st.markdown(st.session_state.analysis_text)
-
-    # Einzelsignale
-    if st.session_state.prediction and st.session_state.prediction.indicator_signals:
-        st.divider()
-        st.markdown("### Indikatoren-Signale")
-        sig_df = pd.DataFrame(st.session_state.prediction.indicator_signals).T
-        st.dataframe(sig_df, use_container_width=True)
-
-    # Rohdaten
-    with st.expander("📋 Rohdaten anzeigen"):
-        st.dataframe(df.tail(50), use_container_width=True)
-
-
-# ============================================================
-# SEITE: TRAINING
-# ============================================================
-elif page == "Training":
-    st.title("🎓 Training")
-
-    if st.session_state.df is None:
-        st.info("Bitte erst links eine Aktie laden.")
-        st.stop()
-
-    df     = st.session_state.df
-    ticker = st.session_state.ticker
-    state  = load_state(ticker)
-    trainer = StockTrainer()
-
-    # ── Übersichts-KPIs ──────────────────────────────────────
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Trainingszyklen", state["cycles"])
-    acc = state.get("current_accuracy") or state.get("accuracy")
-    col2.metric("Gesamtgenauigkeit", f"{acc:.1%}" if acc else "–")
-    best = state.get("best_method") or "–"
-    best_score = state.get("method_scores", {}).get(best)
-    col3.metric(
-        "Beste Methode",
-        best,
-        f"{best_score:.1%}" if best_score else None,
-    )
-    if state.get("last_trained"):
-        st.caption(f"Zuletzt trainiert: {state['last_trained'][:19]} mit Modell: {state.get('model_used', '–')}")
-
-    st.divider()
-
-    # ── Trainings-Modi ────────────────────────────────────────
-    tab_llm, tab_auto, tab_sklearn = st.tabs(
-        ["🤖 LLM-Zyklus", "🔄 Auto-Modus", "📐 sklearn/GBM"]
-    )
-
-    with tab_llm:
-        st.markdown("**Einzelner LLM-Trainingszyklus** – wähle Methode und starte.")
-        t_method = st.selectbox(
-            "Analyse-Methode",
-            [m for m in ANALYSIS_METHODS if m != "Auto (KI wählt)"],
-            key="train_method",
-        )
-        if st.button("▶️ Zyklus starten", use_container_width=True, key="btn_llm"):
-            if not get_ollama_status()["running"]:
-                st.error("Ollama nicht erreichbar. Bitte `ollama serve` starten.")
-            else:
-                with st.spinner(f"Trainingszyklus läuft ({t_method})…"):
-                    result = trainer.run_training_cycle(
-                        ticker, t_method, st.session_state.model
-                    )
-                if result.get("error"):
-                    st.error(result["error"])
-                else:
-                    tick = "✅" if result["correct"] else "❌"
-                    st.success(
-                        f"{tick} Zyklus {result['cycle']} | "
-                        f"Vorhersage: **{result['prediction']}** "
-                        f"(Konfidenz {result['confidence']:.0%}) | "
-                        f"Tatsächlich: **{result['actual']}** | "
-                        f"Methoden-Acc: {result['method_accuracy']:.1%}"
-                    )
-                    st.markdown(f"**Begründung:** {result['reasoning']}")
-                    # Easter Egg prüfen
-                    _egg_ctx = {
-                        "cycles":           result.get("cycle", 0),
-                        "previous_cycles":  st.session_state.prev_cycles,
-                        "accuracy":         result.get("overall_accuracy"),
-                        "total_return_pct": None,
-                    }
-                    _egg_text = check_easter_egg(_egg_ctx)
-                    if _egg_text:
-                        if CONFETTI_MARKER in _egg_text:
-                            st.balloons()
-                            _egg_text = _egg_text.replace(CONFETTI_MARKER, "")
-                        st.info(_egg_text)
-                    st.session_state.prev_cycles = result.get("cycle", 0)
-                    st.rerun()
-
-    with tab_auto:
-        st.markdown(
-            "**Auto-Modus** – testet alle Methoden reihum (UCB1-Auswahl), "
-            "priorisiert Methoden mit höchster bisheriger Genauigkeit."
-        )
-        n_auto = st.slider("Anzahl Zyklen", 1, 10, 3, key="auto_cycles")
-        if st.button("🔄 Auto-Training starten", use_container_width=True, key="btn_auto"):
-            if not get_ollama_status()["running"]:
-                st.error("Ollama nicht erreichbar.")
-            else:
-                prog = st.progress(0, text="Starte…")
-                last_result = None
-                for i in range(n_auto):
-                    prog.progress((i + 1) / n_auto, text=f"Zyklus {i+1}/{n_auto}…")
-                    last_result = trainer.auto_mode(ticker, st.session_state.model)
-                    if last_result.get("error"):
-                        st.error(last_result["error"])
-                        break
-                prog.empty()
-                if last_result and not last_result.get("error"):
-                    st.success(
-                        f"✅ {n_auto} Zyklen abgeschlossen | "
-                        f"Bevorzugte Methode: **{last_result.get('preferred_method', '–')}**"
-                    )
-                    st.rerun()
-
-    with tab_sklearn:
-        st.markdown(
-            "**sklearn GradientBoosting** – klassisches ML auf technischen Features "
-            "(kein LLM nötig, schneller)."
-        )
-        horizon = st.slider("Vorhersage-Horizont (Tage)", 1, 20, 5, key="sklearn_horizon")
-        if st.button("🚀 sklearn Training", use_container_width=True, key="btn_sklearn"):
-            with st.spinner("Trainiere GradientBoosting…"):
-                try:
-                    new_state = train(ticker, df, horizon=horizon)
-                    st.success(
-                        f"✅ Training abgeschlossen! "
-                        f"Zyklus {new_state['cycles']} | "
-                        f"Genauigkeit: {new_state['accuracy']:.1%}"
-                    )
-                    st.rerun()
-                except ValueError as e:
-                    st.error(str(e))
-
-    # ── Method Scores ─────────────────────────────────────────
-    if state.get("method_scores"):
-        st.divider()
-        st.markdown("### Methoden-Vergleich")
-        ms = state["method_scores"]
-        ms_df = pd.DataFrame(
-            [{"Methode": k, "Genauigkeit": v, "Balken": v} for k, v in sorted(
-                ms.items(), key=lambda x: x[1], reverse=True
-            )]
-        )
-        fig_ms = go.Figure(go.Bar(
-            x=list(ms.values()),
-            y=list(ms.keys()),
-            orientation="h",
-            marker_color=["#26a69a" if v >= 0.5 else "#ef5350" for v in ms.values()],
-            text=[f"{v:.1%}" for v in ms.values()],
-            textposition="outside",
+    if indicator == "RSI" and "RSI" in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["RSI"], name="RSI",
+            line=dict(color=_BLUE, width=1.5), fill="tozeroy",
+            fillcolor="rgba(88,166,255,0.06)",
         ))
-        fig_ms.add_vline(x=0.5, line_dash="dash", line_color="#9e9e9e",
-                         annotation_text="Zufall (50%)")
-        fig_ms.update_layout(
-            template="plotly_dark", height=300,
-            xaxis=dict(range=[0, 1], tickformat=".0%"),
-            margin=dict(l=160),
-        )
-        st.plotly_chart(fig_ms, use_container_width=True)
+        fig.add_hline(y=70, line_dash="dash", line_color=_RED,
+                      annotation_text="Überkauft (70)", annotation_font_size=9)
+        fig.add_hline(y=30, line_dash="dash", line_color=_GREEN,
+                      annotation_text="Überverkauft (30)", annotation_font_size=9)
+        fig.update_yaxes(range=[0, 100])
+        fig.update_layout(title="RSI (14)")
 
-    # ── Accuracy-Verlauf ──────────────────────────────────────
-    if state.get("accuracy_history"):
-        st.divider()
-        st.markdown("### Accuracy-Verlauf")
-        ah = pd.DataFrame(state["accuracy_history"])
-        if "accuracy_snapshot" in ah.columns:
-            fig_acc = go.Figure(go.Scatter(
-                x=ah.index + 1,
-                y=ah["accuracy_snapshot"],
-                mode="lines+markers",
-                name="Gesamt-Accuracy",
-                line=dict(color="#2196f3"),
+    elif indicator == "MACD":
+        if "MACD" in df.columns:
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df["MACD"], name="MACD",
+                line=dict(color=_BLUE, width=1.5),
             ))
-            fig_acc.add_hline(y=0.5, line_dash="dash", line_color="#9e9e9e",
-                              annotation_text="Zufallsniveau")
-            fig_acc.update_layout(
-                template="plotly_dark", height=280,
-                xaxis_title="Zyklus", yaxis=dict(tickformat=".0%", range=[0, 1]),
-            )
-            st.plotly_chart(fig_acc, use_container_width=True)
-        with st.expander("Accuracy-Tabelle"):
-            st.dataframe(ah, use_container_width=True)
+        if "MACD_Signal" in df.columns:
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df["MACD_Signal"], name="Signal",
+                line=dict(color=_AMBER, width=1.2),
+            ))
+        if "MACD_Hist" in df.columns:
+            hist = df["MACD_Hist"]
+            colors = [_GREEN if v >= 0 else _RED for v in hist]
+            fig.add_trace(go.Bar(
+                x=df.index, y=hist, name="Histogramm",
+                marker_color=colors, opacity=0.7,
+            ))
+        fig.add_hline(y=0, line_color="#30363d")
+        fig.update_layout(title="MACD (12/26/9)")
 
-    # ── Insights ─────────────────────────────────────────────
-    if state.get("insights"):
-        st.divider()
-        st.markdown("### KI-Erkenntnisse (letzte Zyklen)")
-        for ins in reversed(state["insights"]):
-            st.caption(ins)
-
-    # ── Feature Importance (sklearn) ──────────────────────────
-    if state.get("feature_importance"):
-        st.divider()
-        st.markdown("### Feature Importance (sklearn/GBM)")
-        fi = pd.Series(state["feature_importance"]).sort_values(ascending=True)
-        fig = go.Figure(go.Bar(
-            x=fi.values, y=fi.index, orientation="h", marker_color="#ff9800"
-        ))
-        fig.update_layout(template="plotly_dark", height=400, xaxis_title="Importance")
-        st.plotly_chart(fig, use_container_width=True)
-
-    # ── Alle trainierten Aktien ───────────────────────────────
-    st.divider()
-    st.markdown("### Alle trainierten Symbole")
-    trained = list_trained_stocks()
-    if trained:
-        st.write(", ".join(trained))
+    elif indicator == "Bollinger Bands":
+        for col, color, name in [
+            ("BB_Upper", _RED, "BB Oberes Band"),
+            ("BB_Middle", _AMBER, "BB Mitte"),
+            ("BB_Lower", _GREEN, "BB Unteres Band"),
+        ]:
+            if col in df.columns:
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=df[col], name=name,
+                    line=dict(color=color, width=1.2),
+                ))
+        if "Close" in df.columns:
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df["Close"], name="Kurs",
+                line=dict(color="#c9d1d9", width=1),
+            ))
+        fig.update_layout(title="Bollinger Bands (20, 2σ)")
     else:
-        st.caption("Noch keine Modelle trainiert.")
+        return None
+    return fig
 
 
-# ============================================================
-# SEITE: PAPER-TRADING
-# ============================================================
-elif page == "Paper-Trading":
-    st.title("💼 Paper-Trading")
+def _accuracy_gauge(accuracy: float) -> go.Figure:
+    val = accuracy * 100
+    color = _GREEN if val >= 55 else (_AMBER if val >= 45 else _RED)
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=val,
+        number={"suffix": "%", "font": {"size": 28, "color": color,
+                                         "family": "IBM Plex Mono"}},
+        gauge=dict(
+            axis=dict(range=[0, 100], tickcolor="#30363d",
+                      tickfont=dict(size=9, color="#8b949e")),
+            bar=dict(color=color, thickness=0.25),
+            bgcolor="#161b22",
+            borderwidth=1, bordercolor="#30363d",
+            steps=[
+                dict(range=[0, 40],  color="#2a0d0d"),
+                dict(range=[40, 60], color="#1c2128"),
+                dict(range=[60, 100],color="#0d2b1a"),
+            ],
+            threshold=dict(
+                line=dict(color=_RED, width=3),
+                thickness=0.75, value=50,
+            ),
+        ),
+    ))
+    fig.update_layout(**_DARK, height=220,
+                      margin=dict(l=20, r=20, t=24, b=8))
+    return fig
 
-    # ── Konfiguration ──────────────────────────────────────
-    with st.sidebar.expander("⚙️ Trading-Parameter"):
-        pt_budget    = st.number_input("Startkapital (€)",  value=DEFAULT_BUDGET_EUR, step=1000.0, key="pt_budget")
-        pt_ordercost = st.number_input("Ordergebühr (€)",   value=ORDER_COST_EUR,     step=0.5,    key="pt_ordercost")
-        pt_spread    = st.number_input("Spread (%)",         value=SPREAD_PERCENT,     step=0.05,   key="pt_spread",
-                                       format="%.3f")
 
-    portfolio_name = st.session_state.portfolio_name
-    pt = PaperTrader(
-        name=portfolio_name,
-        start_budget=pt_budget,
-        order_cost=pt_ordercost,
-        spread_pct=pt_spread,
+def _method_bars(method_scores: dict) -> go.Figure:
+    if not method_scores:
+        return go.Figure()
+    items = sorted(method_scores.items(), key=lambda x: x[1], reverse=True)
+    names = [i[0] for i in items]
+    vals  = [i[1] for i in items]
+    colors = [_GREEN if v >= 0.5 else _RED for v in vals]
+    fig = go.Figure(go.Bar(
+        x=vals, y=names, orientation="h",
+        marker_color=colors,
+        text=[f"{v:.1%}" for v in vals],
+        textposition="outside",
+        textfont=dict(family="IBM Plex Mono", size=10),
+    ))
+    fig.add_vline(x=0.5, line_dash="dash", line_color="#30363d",
+                  annotation_text="Zufall", annotation_font_size=9)
+    fig.update_layout(
+        **_DARK, height=max(200, len(names) * 36 + 60),
+        xaxis=dict(range=[0, 1.05], tickformat=".0%", gridcolor="#1c2128"),
+        yaxis=dict(gridcolor="#1c2128"),
+        margin=dict(l=160, r=60, t=16, b=8),
     )
+    return fig
 
-    # Aktuelle Preise für offene Positionen
-    pt_state = pt.load()
-    current_prices: dict[str, float] = {}
-    for sym in pt_state.positions:
-        d = fetch_ohlcv(sym, period="5d")
-        current_prices[sym] = float(d["Close"].iloc[-1]) if not d.empty else pt_state.positions[sym]["avg_price"]
 
-    summary = pt.get_portfolio_summary(current_prices)
-
-    # Easter Eggs
-    eggs = check_triggers(
-        summary["total_value"],
-        summary["total_return_pct"],
-        summary["num_trades"],
-        summary["positions"],
-        st.session_state.prev_portfolio_value,
+def _equity_chart(
+    perf_df: pd.DataFrame,
+    start_budget: float,
+    title: str = "Portfolio-Wert",
+) -> go.Figure:
+    fig = go.Figure()
+    if perf_df.empty or "value" not in perf_df.columns:
+        fig.update_layout(**_DARK, height=250)
+        return fig
+    x = perf_df.get("timestamp", perf_df.index)
+    y = perf_df["value"]
+    above = [v >= start_budget for v in y]
+    fig.add_trace(go.Scatter(
+        x=x, y=y, mode="lines",
+        name="Portfolio",
+        line=dict(color=_GREEN, width=2),
+        fill="tozeroy",
+        fillcolor="rgba(0,255,136,0.06)",
+    ))
+    fig.add_hline(y=start_budget, line_dash="dash",
+                  line_color="#30363d",
+                  annotation_text=f"Start {start_budget:,.0f}€",
+                  annotation_font_size=9)
+    fig.update_layout(
+        **_DARK, height=260,
+        xaxis_title="", yaxis_title="Wert (€)",
+        title=title,
     )
-    st.session_state.prev_portfolio_value = summary["total_value"]
-    for egg in eggs:
-        st.toast(f"{egg.emoji} {egg.title}", icon=egg.emoji)
-        st.info(f"**{egg.title}**\n\n{egg.message}")
+    return fig
 
-    # ── KPIs + versteckter Klick-Counter (Währungs-Easter-Egg) ───────────
-    col1, col2, col3, col4, col5 = st.columns(5)
+# ─────────────────────────────────────────────────────────────────────────────
+# Sidebar
+# ─────────────────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown(
+        f'<div style="font-family:IBM Plex Mono,monospace;color:#00ff88;'
+        f'font-size:20px;font-weight:700;letter-spacing:2px;">'
+        f'{APP_ICON} {APP_TITLE}</div>'
+        f'<div style="color:#8b949e;font-size:10px;margin-top:2px;">'
+        f'v{APP_VERSION} · Lokale KI-Aktienanalyse</div>',
+        unsafe_allow_html=True,
+    )
+    st.divider()
 
-    # Versteckter Button hinter dem Gesamtwert-Label
-    _currency = st.session_state.selected_currency
-    _display_val = get_currency_display(summary["total_value"], _currency)
-    with col1:
-        if st.button(
-            f"**Gesamtwert**\n{_display_val}",
-            key="btn_total_click",
-            help=f"Klick {st.session_state.currency_clicks + 1}/{CURRENCY_UNLOCK_CLICKS} "
-                 "bis zur Währungsauswahl 🤫",
-            use_container_width=True,
-        ):
-            st.session_state.currency_clicks += 1
-            if st.session_state.currency_clicks >= CURRENCY_UNLOCK_CLICKS:
-                st.session_state.currency_unlocked = True
-        st.caption(f"{summary['total_return_pct']:+.2f}%")
+    # ── Verlauf ──────────────────────────────────────────────────────────
+    _section("📋 Zuletzt analysiert")
+    if st.session_state.history:
+        for hist_ticker in reversed(st.session_state.history[-5:]):
+            if st.button(
+                f"↗ {hist_ticker}", key=f"hist_{hist_ticker}",
+                use_container_width=True,
+            ):
+                st.session_state.ticker = hist_ticker
+                with st.spinner(f"Lade {hist_ticker}…"):
+                    df_h = fetch_ohlcv(hist_ticker, period=st.session_state.period)
+                    if not df_h.empty:
+                        st.session_state.df   = df_h
+                        st.session_state.info = fetch_info(hist_ticker)
+                        st.session_state.prediction  = None
+                        st.session_state.analysis_text = ""
+                st.rerun()
+    else:
+        st.caption("Noch keine Aktien analysiert.")
 
-    col2.metric("Cash",          f"{summary['cash']:,.2f} €")
-    col3.metric("Positionswert", f"{summary['position_value']:,.2f} €")
-    col4.metric("Realisierter G/V", f"{summary['realized_pnl']:+,.2f} €")
-    col5.metric("Win-Rate",      f"{summary['win_rate']:.0%}" if summary["num_sell_trades"] else "–",
-                f"{summary['num_sell_trades']} Trades")
+    st.divider()
 
-    # Währungsauswahl (erscheint nach CURRENCY_UNLOCK_CLICKS Klicks)
-    if st.session_state.currency_unlocked:
-        st.success(
-            "🎉 **Easter Egg freigeschaltet!** Du hast die geheime Währungsauswahl entdeckt."
+    # ── Letzte Vorhersage ─────────────────────────────────────────────────
+    _section("🔮 Letzte KI-Vorhersage")
+    if st.session_state.last_pred_signal:
+        badge = _signal_badge_html(st.session_state.last_pred_signal)
+        st.markdown(
+            f'{badge} &nbsp; '
+            f'<span style="color:#8b949e;font-size:11px;">'
+            f'{st.session_state.last_pred_ticker} · '
+            f'{st.session_state.last_pred_conf:.0%}</span>',
+            unsafe_allow_html=True,
         )
+        if st.session_state.last_pred_time:
+            st.caption(st.session_state.last_pred_time)
+    else:
+        st.caption("Noch keine Vorhersage.")
+
+    st.divider()
+
+    # ── Easter Egg: Währungsauswahl ───────────────────────────────────────
+    if st.session_state.currency_unlocked:
+        _section("💱 Anzeigewährung")
         st.session_state.selected_currency = st.selectbox(
-            "💱 Anzeigewährung",
+            "Währung",
             CURRENCIES,
             index=CURRENCIES.index(st.session_state.selected_currency),
-            key="currency_select",
+            key="sidebar_currency_select",
+            label_visibility="collapsed",
         )
-        if st.button("🔒 Zurücksetzen", key="btn_currency_reset"):
+        if st.button("🔒 Zurücksetzen", key="sb_currency_reset",
+                     use_container_width=True):
             st.session_state.currency_clicks   = 0
             st.session_state.currency_unlocked = False
             st.session_state.selected_currency = CURRENCIES[0]
             st.rerun()
 
-    # Trade-Count Easter Egg
-    trade_egg = get_trade_count_egg(summary["num_trades"])
-    if trade_egg and summary["num_trades"] not in st.session_state.eggs_fired:
-        st.session_state.eggs_fired.add(summary["num_trades"])
-        st.toast(trade_egg)
+    # ── Paper-Trading Parameter ───────────────────────────────────────────
+    st.divider()
+    with st.expander("⚙️ Trading-Parameter"):
+        st.session_state.pt_budget = st.number_input(
+            "Startkapital (€)", value=float(st.session_state.pt_budget),
+            step=1000.0, min_value=100.0, key="sb_budget",
+        )
+        st.session_state.pt_order_cost = st.number_input(
+            "Ordergebühr (€)", value=float(st.session_state.pt_order_cost),
+            step=0.5, min_value=0.0, key="sb_ordercost",
+        )
+        st.session_state.pt_spread = st.number_input(
+            "Spread (%)", value=float(st.session_state.pt_spread),
+            step=0.01, min_value=0.0, format="%.3f", key="sb_spread",
+        )
 
-    # ── Lambo-Meter ───────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Haupt-Tabs
+# ─────────────────────────────────────────────────────────────────────────────
+tab1, tab2, tab3 = st.tabs([
+    "📊 Analyse & Training",
+    "💰 Paper Trading",
+    "⚙️ Modell-Manager",
+])
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 1 – ANALYSE & TRAINING
+# ═════════════════════════════════════════════════════════════════════════════
+with tab1:
+    # ── A: Suchleiste ────────────────────────────────────────────────────────
+    _section("🔍 Aktiensuche  –  WKN, ISIN, Name oder Ticker")
+    row_a, row_b, row_c, row_d = st.columns([4, 1, 1, 1])
+    with row_a:
+        q = st.text_input(
+            "Suche", placeholder="z.B. BMW, 519000, Apple, SAP.DE",
+            key="search_q", label_visibility="collapsed",
+        )
+    with row_b:
+        do_search = st.button("🔍 Suchen", use_container_width=True, key="btn_search")
+    with row_c:
+        st.session_state.period = st.selectbox(
+            "Zeitraum", ["1mo", "3mo", "6mo", "1y", "2y", "5y"],
+            index=3, key="period_sel", label_visibility="collapsed",
+        )
+    with row_d:
+        do_load = st.button("📥 Laden", use_container_width=True,
+                             type="primary", key="btn_load")
+
+    # Suche ausführen
+    if do_search and q:
+        with st.spinner("Suche läuft…"):
+            results = search_stocks(q)
+        if results:
+            st.session_state.search_results = results
+            st.session_state.search_selected_idx = 0
+        else:
+            st.warning("Keine Ergebnisse gefunden.")
+
+    # Autocomplete-Dropdown
+    if st.session_state.search_results:
+        opts = [
+            f"{r.get('symbol','?')} – {r.get('name','')[:40]} ({r.get('exchange','')})"
+            for r in st.session_state.search_results
+        ]
+        idx = st.selectbox(
+            "Ergebnisse", range(len(opts)),
+            format_func=lambda i: opts[i],
+            key="search_sel",
+            label_visibility="collapsed",
+        )
+        st.session_state.search_selected_idx = idx
+
+    # Daten laden
+    if do_load:
+        # Ticker bestimmen: aus Suchergebnis oder direkt aus Text-Input
+        if st.session_state.search_results and not (q and is_valid_ticker(q)):
+            sel = st.session_state.search_results[
+                st.session_state.search_selected_idx
+            ]
+            ticker_to_load = sel["symbol"]
+        elif q:
+            ticker_to_load = q.strip().upper()
+        else:
+            ticker_to_load = ""
+
+        if ticker_to_load:
+            with st.spinner(f"Lade {ticker_to_load}…"):
+                df_new = fetch_ohlcv(ticker_to_load, period=st.session_state.period)
+            if df_new.empty:
+                st.error(df_new.attrs.get("error", "Fehler beim Laden der Daten."))
+            else:
+                st.session_state.ticker = ticker_to_load
+                st.session_state.df     = df_new
+                st.session_state.info   = fetch_info(ticker_to_load)
+                st.session_state.prediction   = None
+                st.session_state.analysis_text = ""
+                # Verlauf aktualisieren
+                hist = st.session_state.history
+                if ticker_to_load not in hist:
+                    hist.append(ticker_to_load)
+                if len(hist) > 10:
+                    st.session_state.history = hist[-10:]
+                st.success(f"✅ {len(df_new)} Kerzen geladen.")
+                st.rerun()
+        else:
+            st.error("Bitte WKN, Ticker oder Firmenname eingeben.")
+
+    # ── B: Chart + Controls ──────────────────────────────────────────────────
+    if st.session_state.df is not None:
+        df: pd.DataFrame = st.session_state.df
+        ticker: str      = st.session_state.ticker
+        info: dict       = st.session_state.info
+
+        # Kopfzeile
+        name  = info.get("name", ticker)
+        curr  = info.get("currency", "")
+        last  = float(df["Close"].iloc[-1])
+        prev  = float(df["Close"].iloc[-2]) if len(df) > 1 else last
+        chg   = (last - prev) / prev * 100 if prev else 0
+        chg_c = _GREEN if chg >= 0 else _RED
+        st.markdown(
+            f'<div style="margin:8px 0 12px;">'
+            f'<span style="font-family:IBM Plex Mono;font-size:22px;'
+            f'font-weight:700;color:#c9d1d9;">{name}</span>&nbsp;&nbsp;'
+            f'<span style="color:#8b949e;font-size:14px;">{ticker} · {curr}</span>'
+            f'&nbsp;&nbsp;<span style="font-family:IBM Plex Mono;font-size:20px;'
+            f'font-weight:700;color:#00ff88;">{last:.2f}</span>'
+            f'&nbsp;<span style="color:{chg_c};font-size:14px;">{chg:+.2f}%</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        col_left, col_right = st.columns([1, 2])
+
+        with col_left:
+            _section("⚙️ Konfiguration")
+            # Modell-Auswahl
+            running_models = get_available_models()
+            model_opts = running_models if running_models else AVAILABLE_MODELS
+            try:
+                def_idx = model_opts.index(st.session_state.model)
+            except ValueError:
+                def_idx = 0
+            st.session_state.model = st.selectbox(
+                "🤖 KI-Modell", model_opts, index=def_idx, key="model_sel",
+            )
+            # Methode
+            st.session_state.method = st.selectbox(
+                "📐 Analyse-Methode", ANALYSIS_METHODS,
+                index=ANALYSIS_METHODS.index(st.session_state.method)
+                      if st.session_state.method in ANALYSIS_METHODS else 0,
+                key="method_sel",
+            )
+            # Schnell-Aktionen
+            st.divider()
+            _section("⚡ Schnellaktionen")
+
+            if st.button("🔮 Signal berechnen", use_container_width=True,
+                         key="btn_quick_pred"):
+                with st.spinner("Berechne Signal…"):
+                    pred = predict(ticker, df, method=st.session_state.method)
+                    st.session_state.prediction   = pred
+                    st.session_state.last_pred_ticker = ticker
+                    st.session_state.last_pred_signal = pred.signal
+                    st.session_state.last_pred_conf   = pred.confidence
+                    st.session_state.last_pred_time   = time.strftime("%H:%M:%S")
+                st.rerun()
+
+            if st.session_state.prediction:
+                pred = st.session_state.prediction
+                st.markdown(
+                    f'{_signal_badge_html(pred.signal)}'
+                    f'&nbsp;<span style="color:#8b949e;font-size:12px;">'
+                    f'{pred.confidence:.0%}</span>',
+                    unsafe_allow_html=True,
+                )
+                if pred.summary:
+                    st.caption(pred.summary[:120])
+
+            # KI-Analyse
+            if is_ollama_running():
+                if st.button("🤖 KI-Analyse starten", use_container_width=True,
+                             key="btn_quick_ai"):
+                    pred = st.session_state.prediction or predict(
+                        ticker, df, method=st.session_state.method
+                    )
+                    ctx = build_context_string(ticker, df, pred)
+                    with st.spinner("KI analysiert…"):
+                        try:
+                            text = analyze_stock(
+                                st.session_state.model, ticker, ctx,
+                                method=st.session_state.method,
+                            )
+                            st.session_state.analysis_text = text
+                        except Exception as e:
+                            st.error(str(e))
+            else:
+                st.warning("Ollama offline → Tab ⚙️")
+
+            if st.session_state.analysis_text:
+                st.divider()
+                _section("📝 KI-Analyse")
+                st.markdown(
+                    _quote_html(st.session_state.analysis_text[:400] + "…"),
+                    unsafe_allow_html=True,
+                )
+
+        with col_right:
+            _section("📈 Candlestick-Chart")
+            show_sma = st.checkbox("SMAs", value=True, key="chk_sma")
+            show_vol = st.checkbox("Volumen", value=True, key="chk_vol")
+            st.plotly_chart(
+                _candlestick_pro(df, ticker, show_volume=show_vol, show_sma=show_sma),
+                use_container_width=True,
+            )
+            ind_opts = ["– keiner –", "RSI", "MACD", "Bollinger Bands"]
+            ind_sel  = st.selectbox("Indikator", ind_opts, key="ind_sel")
+            if ind_sel != "– keiner –":
+                fig_ind = _indicator_fig(df, ind_sel)
+                if fig_ind:
+                    st.plotly_chart(fig_ind, use_container_width=True)
+
+    else:
+        # Onboarding wenn noch keine Daten geladen
+        st.markdown('<div style="height:24px;"></div>', unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
+        for col, icon, head, txt in [
+            (c1, "📈", "Analysieren", "KI-gestützte Analyse mit lokalen LLMs. Keine Cloud, keine API-Keys."),
+            (c2, "🎓", "Trainieren",  "Trainiere Vorhersagemodelle und verfolge deren Genauigkeit im Zeitverlauf."),
+            (c3, "🏎️", "Paper-Trading", f"Starte mit {DEFAULT_BUDGET_EUR:,.0f}€ virtuellem Kapital und jage den Lambo."),
+        ]:
+            with col:
+                st.markdown(
+                    f'<div class="sm-card" style="text-align:center;padding:24px;">'
+                    f'<div style="font-size:40px;">{icon}</div>'
+                    f'<div style="color:#00ff88;font-weight:700;margin:8px 0;">{head}</div>'
+                    f'<div style="color:#8b949e;font-size:13px;">{txt}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+    # ── C: Training-Sektion ──────────────────────────────────────────────────
+    if st.session_state.df is not None:
+        st.divider()
+        _section("🎓 Training & Backtesting")
+
+        state   = load_state(st.session_state.ticker)
+        trainer = StockTrainer()
+
+        sub1, sub2, sub3 = st.tabs(["🤖 LLM-Zyklus", "🔄 Auto-Modus", "📊 Backtesting"])
+
+        # ── LLM-Zyklus ──────────────────────────────────────────────────────
+        with sub1:
+            col_m, col_r = st.columns([1, 2])
+            with col_m:
+                t_method = st.selectbox(
+                    "Methode",
+                    [m for m in ANALYSIS_METHODS if m != "Auto (KI wählt)"],
+                    key="train_method_llm",
+                )
+                btn_cycle = st.button("▶ Zyklus starten", use_container_width=True,
+                                      type="primary", key="btn_llm_cycle")
+            with col_r:
+                if btn_cycle:
+                    if not is_ollama_running():
+                        st.error("Ollama offline – bitte `ollama serve` starten.")
+                    else:
+                        anim_slot = st.empty()
+                        quote = random.choice(_QUOTES)
+                        anim_slot.markdown(
+                            _ticker_html() + _quote_html(
+                                f'<span class="sm-pulse">⬛</span> '
+                                f'KI analysiert {st.session_state.ticker}… · {quote}'
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        with st.spinner(f"Trainingszyklus ({t_method})…"):
+                            result = trainer.run_training_cycle(
+                                st.session_state.ticker,
+                                t_method,
+                                st.session_state.model,
+                            )
+                        anim_slot.empty()
+                        if result.get("error"):
+                            st.error(result["error"])
+                        else:
+                            ok = result.get("correct", False)
+                            pred_sig = result.get("prediction", "?")
+                            actual   = result.get("actual", "?")
+                            conf     = result.get("confidence", 0.0)
+                            cycle    = result.get("cycle", 0)
+                            m_acc    = result.get("method_accuracy", 0.0)
+                            o_acc    = result.get("overall_accuracy", 0.0)
+
+                            mc1, mc2, mc3, mc4 = st.columns(4)
+                            mc1.metric("Vorhersage",
+                                       pred_sig, "✅ Korrekt" if ok else "❌ Falsch")
+                            mc2.metric("Konfidenz", f"{conf:.0%}")
+                            mc3.metric("Methoden-Acc", f"{m_acc:.1%}")
+                            mc4.metric("Gesamt-Acc", f"{o_acc:.1%}")
+
+                            if result.get("reasoning"):
+                                st.markdown(
+                                    _quote_html(result["reasoning"][:300]),
+                                    unsafe_allow_html=True,
+                                )
+                            # Easter Egg
+                            egg = check_easter_egg({
+                                "cycles": cycle,
+                                "previous_cycles": st.session_state.prev_cycles,
+                                "accuracy": o_acc,
+                                "total_return_pct": None,
+                            })
+                            if egg:
+                                if CONFETTI_MARKER in egg:
+                                    st.balloons()
+                                    egg = egg.replace(CONFETTI_MARKER, "")
+                                st.info(egg)
+                            st.session_state.prev_cycles = cycle
+
+                            # Letzte Vorhersage in Sidebar aktualisieren
+                            st.session_state.last_pred_ticker = st.session_state.ticker
+                            st.session_state.last_pred_signal = pred_sig
+                            st.session_state.last_pred_conf   = conf
+                            st.session_state.last_pred_time   = time.strftime("%H:%M:%S")
+                            st.rerun()
+                else:
+                    st.markdown(
+                        _quote_html(random.choice(_QUOTES)),
+                        unsafe_allow_html=True,
+                    )
+
+        # ── Auto-Modus ───────────────────────────────────────────────────────
+        with sub2:
+            col_x, col_y = st.columns([1, 2])
+            with col_x:
+                n_auto = st.slider("Zyklen", 1, 20, 3, key="auto_n")
+                btn_auto = st.button("🔄 Auto starten", use_container_width=True,
+                                     type="primary", key="btn_auto")
+            with col_y:
+                if btn_auto:
+                    if not is_ollama_running():
+                        st.error("Ollama offline.")
+                    else:
+                        st.markdown(_ticker_html(), unsafe_allow_html=True)
+                        last_res = None
+                        with st.status(
+                            f"Auto-Training: {n_auto} Zyklen für {st.session_state.ticker}",
+                            expanded=True,
+                        ) as status:
+                            for i in range(n_auto):
+                                status.update(
+                                    label=f"Zyklus {i+1}/{n_auto} läuft…"
+                                )
+                                res = trainer.auto_mode(
+                                    st.session_state.ticker,
+                                    st.session_state.model,
+                                )
+                                last_res = res
+                                if res.get("error"):
+                                    st.write(f"❌ Zyklus {i+1}: {res['error']}")
+                                    break
+                                ok_sym = "✅" if res.get("correct") else "❌"
+                                st.write(
+                                    f"{ok_sym} Zyklus {i+1} · "
+                                    f"**{res.get('prediction','?')}** · "
+                                    f"Methode: {res.get('method','?')} · "
+                                    f"Acc: {res.get('overall_accuracy', 0):.1%}"
+                                )
+                            status.update(label="Fertig!", state="complete")
+
+                        if last_res and not last_res.get("error"):
+                            egg = check_easter_egg({
+                                "cycles": last_res.get("cycle", 0),
+                                "previous_cycles": st.session_state.prev_cycles,
+                                "accuracy": last_res.get("overall_accuracy"),
+                                "total_return_pct": None,
+                            })
+                            if egg:
+                                if CONFETTI_MARKER in egg:
+                                    st.balloons()
+                                    egg = egg.replace(CONFETTI_MARKER, "")
+                                st.info(egg)
+                            st.session_state.prev_cycles = last_res.get("cycle", 0)
+                            st.rerun()
+
+        # ── Backtesting ──────────────────────────────────────────────────────
+        with sub3:
+            bt_col1, bt_col2 = st.columns(2)
+            with bt_col1:
+                bt_method = st.selectbox(
+                    "Methode",
+                    [m for m in ANALYSIS_METHODS if m != "Auto (KI wählt)"],
+                    key="bt_method",
+                )
+            with bt_col2:
+                bt_budget = st.number_input(
+                    "Startkapital (€)", value=DEFAULT_BUDGET_EUR,
+                    step=1000.0, key="bt_budget",
+                )
+            if st.button("▶ Backtest starten", use_container_width=True,
+                         key="btn_bt"):
+                fn = SIGNAL_FUNCTIONS.get(bt_method)
+                if not fn:
+                    st.error(f"Methode '{bt_method}' nicht verfügbar.")
+                else:
+                    with st.spinner("Berechne Signale…"):
+                        signals = {}
+                        df_bt = st.session_state.df
+                        for i in range(50, len(df_bt)):
+                            try:
+                                sig, _ = fn(df_bt.iloc[:i+1])
+                                signals[df_bt.index[i]] = sig
+                            except Exception:
+                                signals[df_bt.index[i]] = "HALTEN"
+                        sig_s  = pd.Series(signals)
+                        result = backtest_signals(
+                            st.session_state.ticker, df_bt, sig_s,
+                            initial_cash=bt_budget,
+                        )
+                    bc1, bc2, bc3, bc4, bc5 = st.columns(5)
+                    bc1.metric("Rendite", f"{result.total_return_pct:+.2f}%")
+                    bc2.metric("Buy & Hold", f"{result.buy_and_hold_pct:+.2f}%")
+                    bc3.metric("Win-Rate", f"{result.win_rate:.0%}")
+                    bc4.metric("Max Drawdown", f"{result.max_drawdown_pct:.2f}%")
+                    bc5.metric("Sharpe", f"{result.sharpe_ratio:.2f}")
+                    if result.equity_curve:
+                        eq_df = pd.DataFrame({
+                            "value": result.equity_curve,
+                        })
+                        st.plotly_chart(
+                            _equity_chart(eq_df, bt_budget,
+                                          f"Equity Curve – {bt_method}"),
+                            use_container_width=True,
+                        )
+
+        # ── Trainings-Statistiken ────────────────────────────────────────────
+        state = load_state(st.session_state.ticker)
+        if state.get("cycles", 0) > 0:
+            st.divider()
+            _section("📊 Trainings-Statistiken")
+
+            s1, s2, s3 = st.columns([1, 1, 2])
+            with s1:
+                acc = state.get("current_accuracy") or state.get("accuracy") or 0.0
+                st.markdown(
+                    f'<div class="sm-card" style="text-align:center;">'
+                    f'<div class="sm-label">Trainingszyklen</div>'
+                    f'<div class="sm-big-num">{state["cycles"]}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            with s2:
+                best = state.get("best_method") or "–"
+                st.markdown(
+                    f'<div class="sm-card" style="text-align:center;">'
+                    f'<div class="sm-label">Beste Methode</div>'
+                    f'<div style="font-family:IBM Plex Mono;font-size:15px;'
+                    f'font-weight:700;color:#f0b429;margin-top:8px;">{best}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            with s3:
+                if acc:
+                    st.plotly_chart(
+                        _accuracy_gauge(acc),
+                        use_container_width=True,
+                    )
+
+            if state.get("method_scores"):
+                st.plotly_chart(
+                    _method_bars(state["method_scores"]),
+                    use_container_width=True,
+                )
+
+            if state.get("insights"):
+                _section("💡 KI-Erkenntnisse")
+                for ins in reversed(state["insights"][-3:]):
+                    st.markdown(_quote_html(ins), unsafe_allow_html=True)
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 2 – PAPER TRADING
+# ═════════════════════════════════════════════════════════════════════════════
+with tab2:
+    pt = PaperTrader(
+        name=st.session_state.portfolio_name,
+        start_budget=st.session_state.pt_budget,
+        order_cost=st.session_state.pt_order_cost,
+        spread_pct=st.session_state.pt_spread,
+    )
+    pt_state = pt.load()
+
+    # Aktuelle Preise für offene Positionen laden
+    current_prices: dict[str, float] = {}
+    for sym in pt_state.positions:
+        d = fetch_ohlcv(sym, period="5d")
+        current_prices[sym] = (
+            float(d["Close"].iloc[-1]) if not d.empty
+            else pt_state.positions[sym].get("avg_price", 0)
+        )
+
+    summary = pt.get_portfolio_summary(current_prices)
+
+    # ── Portfolio KPIs ────────────────────────────────────────────────────────
+    _section("💼 Portfolio-Übersicht")
+
+    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+
+    # Gesamtwert – klickbarer Button (Easter-Egg Klick-Counter)
+    _currency     = st.session_state.selected_currency
+    _display_val  = get_currency_display(summary["total_value"], _currency)
+    _ret_color    = _GREEN if summary["total_return_pct"] >= 0 else _RED
+    _ret_sign     = "+" if summary["total_return_pct"] >= 0 else ""
+    with kpi1:
+        if st.button(
+            f"💼 Gesamtwert\n{_display_val}",
+            key="btn_total_click",
+            help=(
+                f"Klick {st.session_state.currency_clicks + 1}"
+                f"/{CURRENCY_UNLOCK_CLICKS} bis zur Währungsauswahl 🤫"
+            ),
+            use_container_width=True,
+        ):
+            st.session_state.currency_clicks += 1
+            if st.session_state.currency_clicks >= CURRENCY_UNLOCK_CLICKS:
+                st.session_state.currency_unlocked = True
+                st.rerun()
+        st.markdown(
+            f'<span style="color:{_ret_color};font-family:IBM Plex Mono;">'
+            f'{_ret_sign}{summary["total_return_pct"]:.2f}%</span>',
+            unsafe_allow_html=True,
+        )
+
+    kpi2.metric("Cash",           f"{summary['cash']:,.2f} €")
+    kpi3.metric("Positionen",     f"{summary['position_value']:,.2f} €")
+    kpi4.metric(
+        "Realisiert",
+        f"{summary['realized_pnl']:+,.2f} €",
+        delta_color="normal",
+    )
+    win_r = summary.get("win_rate", 0.0)
+    n_sell = summary.get("num_sell_trades", 0)
+    kpi5.metric("Win-Rate",       f"{win_r:.0%}" if n_sell else "–",
+                f"{n_sell} Trades")
+
+    # Währungsauswahl nach Unlock
+    if st.session_state.currency_unlocked:
+        st.markdown(
+            '<div class="sm-card-accent">'
+            '🎉 <strong>Easter Egg freigeschaltet!</strong> '
+            'Die geheime Währungsauswahl ist jetzt in der Sidebar verfügbar.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+    # Trade-Count Easter Egg
+    trade_egg = get_trade_count_egg(summary.get("num_trades", 0))
+    if trade_egg:
+        egg_key = f"trade_egg_{summary.get('num_trades', 0)}"
+        if egg_key not in st.session_state.eggs_fired:
+            st.session_state.eggs_fired.add(egg_key)
+            st.toast(trade_egg)
+
+    # ── Lambo-O-Meter ─────────────────────────────────────────────────────────
     st.divider()
     lv_pct, lv_msg = lambo_progress(summary["total_value"])
-    st.markdown(f"### 🏎️ Lambo-O-Meter  ·  {lambo_display(summary['total_value'])}")
-    st.progress(lv_pct / 100, text=lv_msg)
+    _section(f"🏎️ Lambo-O-Meter  ·  {lambo_display(summary['total_value'])}")
+    st.progress(min(lv_pct / 100, 1.0), text=lv_msg)
 
-    # ── Performance-Chart ─────────────────────────────────
+    # ── Performance-Chart ─────────────────────────────────────────────────────
     perf_df = pt.get_performance_chart()
     if len(perf_df) > 1:
-        fig_perf = go.Figure()
-        fig_perf.add_trace(go.Scatter(
-            x=perf_df["timestamp"], y=perf_df["value"],
-            mode="lines", name="Portfolio", line=dict(color="#2196f3", width=2),
-            fill="tozeroy", fillcolor="rgba(33,150,243,0.08)",
-        ))
-        fig_perf.add_hline(y=pt_state.start_budget, line_dash="dash",
-                           line_color="#9e9e9e", annotation_text="Start")
-        fig_perf.update_layout(template="plotly_dark", height=280,
-                               xaxis_title="Zeit", yaxis_title="Wert (€)")
-        st.plotly_chart(fig_perf, use_container_width=True)
+        st.plotly_chart(
+            _equity_chart(perf_df, float(pt_state.start_budget),
+                          "Portfolio-Wert über Zeit"),
+            use_container_width=True,
+        )
 
-    # ── Positionen ────────────────────────────────────────
+    # ── Offene Positionen ─────────────────────────────────────────────────────
     st.divider()
-    st.markdown("### Offene Positionen")
-    if summary["positions"]:
-        st.dataframe(pd.DataFrame(summary["positions"]), use_container_width=True, hide_index=True)
+    _section("📋 Offene Positionen")
+    if summary.get("positions"):
+        pos_df = pd.DataFrame(summary["positions"])
+        st.dataframe(pos_df, use_container_width=True, hide_index=True)
     else:
-        st.caption("Keine offenen Positionen.")
+        st.markdown(
+            '<div class="sm-card" style="text-align:center;color:#8b949e;'
+            'padding:24px;">Keine offenen Positionen.</div>',
+            unsafe_allow_html=True,
+        )
 
-    # ── Tabs: Manuell | Auto-Trade ────────────────────────
+    # ── Trading-Tabs ──────────────────────────────────────────────────────────
     st.divider()
-    tab_manual, tab_auto = st.tabs(["🖱️ Manuelle Order", "🤖 Auto-Trade (KI)"])
+    t_manual, t_auto, t_hist, t_reset = st.tabs([
+        "🖱️ Manuelle Order", "🤖 Auto-Trade", "📋 Trade-Historie", "⚠️ Reset"
+    ])
 
-    with tab_manual:
+    with t_manual:
         if st.session_state.df is not None and st.session_state.ticker:
             ticker_pt = st.session_state.ticker
             df_pt     = st.session_state.df
             price_pt  = float(df_pt["Close"].iloc[-1])
+            pt_state_now = pt.load()
 
-            col_a, col_b, col_c, col_d = st.columns(4)
-            with col_a:
+            ma1, ma2, ma3, ma4 = st.columns(4)
+            with ma1:
                 pt_dir = st.selectbox("Richtung", ["BUY", "SELL"], key="pt_dir")
-            with col_b:
-                pt_frac = st.slider("Cash-Anteil", 0.05, 1.0, 0.2, 0.05, key="pt_frac")
-            with col_c:
-                st.metric("Aktueller Kurs", f"{price_pt:.2f}")
-            with col_d:
-                invest_eur = pt_state.cash * pt_frac
-                qty_est    = invest_eur / price_pt if price_pt > 0 else 0
-                st.metric("Geschätzte Menge", f"{qty_est:.4f}")
+            with ma2:
+                pt_frac = st.slider("Cash-Anteil", 0.05, 1.0, 0.2, 0.05,
+                                    key="pt_frac")
+            with ma3:
+                st.metric("Kurs", f"{price_pt:.2f} €")
+            with ma4:
+                invest = pt_state_now.cash * pt_frac
+                qty_est = invest / price_pt if price_pt > 0 else 0
+                st.metric("Menge (ca.)", f"{qty_est:.4f}")
 
-            pred_pt    = st.session_state.prediction
-            sig_str    = pred_pt.signal if pred_pt else "MANUELL"
+            pred_pt = st.session_state.prediction
+            sig_str = pred_pt.signal if pred_pt else "MANUELL"
 
-            if st.button(f"✅ {pt_dir} {ticker_pt}", use_container_width=True, key="btn_pt_order"):
-                qty = (pt_state.cash * pt_frac) / (price_pt * (1 + pt_spread/100)) if pt_dir == "BUY" else \
-                      (pt_state.positions.get(ticker_pt, {}).get("quantity", 0))
-                res = pt.place_order(ticker_pt, pt_dir, qty, price_pt, signal=sig_str)
+            if st.button(
+                f"✅ {pt_dir} {ticker_pt}",
+                use_container_width=True,
+                type="primary",
+                key="btn_pt_order",
+            ):
+                if pt_dir == "BUY":
+                    spread_f = st.session_state.pt_spread / 100
+                    qty = invest / (price_pt * (1 + spread_f))
+                else:
+                    qty = (pt_state_now.positions
+                           .get(ticker_pt, {}).get("quantity", 0))
+                res = pt.place_order(ticker_pt, pt_dir, qty, price_pt,
+                                     signal=sig_str)
                 if res["ok"]:
+                    pnl_str = f"{res['pnl']:+.2f} €" if res.get("pnl") else "–"
                     st.success(
-                        f"{pt_dir} {res['quantity']:.4f} × {ticker_pt} @ {res['exec_price']:.2f} € "
-                        f"| PnL: {res['pnl']:+.2f} €"
+                        f"{pt_dir} {res['quantity']:.4f} × {ticker_pt} "
+                        f"@ {res['exec_price']:.2f} € · PnL: {pnl_str}"
                     )
                     st.rerun()
                 else:
                     st.error(res["error"])
         else:
-            st.info("Bitte links eine Aktie laden.")
+            st.info("Bitte im Tab **📊 Analyse** zuerst eine Aktie laden.")
 
-    with tab_auto:
+    with t_auto:
         st.markdown(
-            "**Auto-Trade**: KI analysiert die Aktie und platziert automatisch "
-            "Paper-Orders basierend auf Vorhersagen."
+            "KI analysiert die gewählte Aktie und platziert automatisch "
+            "Paper-Orders basierend auf LLM-Vorhersagen."
         )
         if st.session_state.ticker:
-            col_x, col_y, col_z = st.columns(3)
-            with col_x:
-                at_cycles = st.slider("Anzahl Zyklen", 1, 10, 3, key="at_cycles")
-            with col_y:
-                at_invest = st.slider("Invest-Anteil je BUY", 0.05, 0.5, 0.2, 0.05, key="at_invest")
-            with col_z:
-                at_method = st.selectbox("Methode", ANALYSIS_METHODS, key="at_method",
-                                         index=ANALYSIS_METHODS.index("Auto (KI wählt)"))
-
-            if st.button("🚀 Auto-Trade starten", use_container_width=True, key="btn_auto_trade"):
-                if not get_ollama_status()["running"]:
-                    st.error("Ollama nicht erreichbar.")
+            aa1, aa2, aa3 = st.columns(3)
+            with aa1:
+                at_cycles = st.slider("Zyklen", 1, 10, 3, key="at_cycles")
+            with aa2:
+                at_invest = st.slider("Invest-Anteil/BUY",
+                                      0.05, 0.5, 0.2, 0.05, key="at_invest")
+            with aa3:
+                at_method = st.selectbox(
+                    "Methode", ANALYSIS_METHODS,
+                    index=ANALYSIS_METHODS.index("Auto (KI wählt)"),
+                    key="at_method",
+                )
+            if st.button("🚀 Auto-Trade starten", use_container_width=True,
+                         type="primary", key="btn_auto_trade"):
+                if not is_ollama_running():
+                    st.error("Ollama offline.")
                 else:
-                    with st.spinner(f"Führe {at_cycles} Auto-Trade-Zyklen aus…"):
+                    st.markdown(_ticker_html(), unsafe_allow_html=True)
+                    with st.status(
+                        f"Auto-Trade: {at_cycles} Zyklen",
+                        expanded=True,
+                    ) as at_status:
                         log = pt.auto_trade(
                             st.session_state.ticker,
                             st.session_state.model,
@@ -669,148 +1301,244 @@ elif page == "Paper-Trading":
                             method=at_method,
                             invest_pct=at_invest,
                         )
-                    st.success(f"✅ {len(log)} Zyklen abgeschlossen")
-                    st.dataframe(pd.DataFrame(log), use_container_width=True, hide_index=True)
+                        for entry in log:
+                            action = entry.get("action", "?")
+                            icon = "🟢" if action == "BUY" else "🔴" if action == "SELL" else "⚪"
+                            st.write(
+                                f"{icon} Zyklus {entry.get('cycle','?')}: "
+                                f"**{action}** · {entry.get('prediction','?')} "
+                                f"({entry.get('confidence', 0):.0%})"
+                            )
+                        at_status.update(label="Auto-Trade abgeschlossen!",
+                                         state="complete")
                     st.rerun()
         else:
-            st.info("Bitte links eine Aktie laden.")
+            st.info("Bitte zuerst eine Aktie laden.")
 
-    # ── Reset ─────────────────────────────────────────────
-    st.divider()
-    with st.expander("⚠️ Portfolio zurücksetzen"):
-        reset_budget = st.number_input("Neues Startkapital (€)", value=float(pt_state.start_budget), step=1000.0)
-        if st.button("🔄 Zurücksetzen", type="secondary"):
-            pt.reset(new_budget=reset_budget)
-            st.success(f"Portfolio zurückgesetzt auf {reset_budget:,.0f} €.")
-            st.rerun()
-
-    # ── Trade-Historie ────────────────────────────────────
-    st.divider()
-    st.markdown("### Trade-Historie")
-    if pt_state.trades:
-        th_df = pd.DataFrame(pt_state.trades)
-        cols  = ["timestamp","symbol","direction","quantity","exec_price","pnl","pnl_pct","method","signal"]
-        show_cols = [c for c in cols if c in th_df.columns]
-        st.dataframe(th_df[show_cols].sort_values("timestamp", ascending=False),
-                     use_container_width=True, hide_index=True)
-    else:
-        st.caption("Noch keine Trades.")
-
-
-# ============================================================
-# SEITE: BACKTESTING
-# ============================================================
-elif page == "Backtesting":
-    st.title("📊 Backtesting")
-
-    if st.session_state.df is None:
-        st.info("Bitte erst links eine Aktie laden.")
-        st.stop()
-
-    df = st.session_state.df
-    ticker = st.session_state.ticker
-
-    st.markdown(f"Backtesting für **{ticker}** mit {len(df)} Datenpunkten.")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        bt_method = st.selectbox(
-            "Methode",
-            ["SMA Crossover", "RSI", "MACD", "Bollinger Bands"],
-        )
-    with col2:
-        bt_budget = st.number_input("Startkapital (€)", value=DEFAULT_BUDGET_EUR, step=1000.0)
-
-    if st.button("▶️ Backtest starten", use_container_width=True):
-        from modules.predictor import SIGNAL_FUNCTIONS
-
-        with st.spinner("Berechne Signale..."):
-            fn = SIGNAL_FUNCTIONS.get(bt_method)
-            if not fn:
-                st.error(f"Methode '{bt_method}' nicht verfügbar.")
-                st.stop()
-
-            # Signale je Datum berechnen
-            signals = {}
-            for i in range(50, len(df)):
-                slice_df = df.iloc[:i+1]
-                try:
-                    sig, _ = fn(slice_df)
-                    signals[df.index[i]] = sig
-                except Exception:
-                    signals[df.index[i]] = "HALTEN"
-
-            signal_series = pd.Series(signals)
-            result = backtest_signals(ticker, df, signal_series, initial_cash=bt_budget)
-
-        # Ergebnisse
-        st.divider()
-        col_a, col_b, col_c, col_d = st.columns(4)
-        col_a.metric("Strategie-Rendite", f"{result.total_return_pct:+.2f}%")
-        col_b.metric("Buy & Hold", f"{result.buy_and_hold_pct:+.2f}%")
-        col_c.metric("Win-Rate", f"{result.win_rate:.0%}")
-        col_d.metric("Max. Drawdown", f"{result.max_drawdown_pct:.2f}%")
-
-        st.metric("Sharpe Ratio", f"{result.sharpe_ratio:.3f}")
-        st.metric("Anzahl Trades", result.num_trades)
-
-        # Equity Curve
-        st.plotly_chart(
-            equity_curve_chart(result.equity_curve, bt_budget, f"Equity Curve – {bt_method}"),
-            use_container_width=True,
-        )
-
-        # Trade-Details
-        if result.trades:
-            with st.expander("Trade-Details"):
-                st.dataframe(pd.DataFrame(result.trades), use_container_width=True)
-
-
-# ============================================================
-# SEITE: EINSTELLUNGEN
-# ============================================================
-elif page == "Einstellungen":
-    st.title("⚙️ Einstellungen")
-
-    st.markdown("### Ollama Status")
-    _status = get_ollama_status()
-    if _status["running"]:
-        models_detail = get_available_models_with_info() if _status["model_count"] else []
-        st.success(f"✅ Ollama erreichbar unter {_status['url']} | {_status['model_count']} Modell(e) installiert")
-        if models_detail:
+    with t_hist:
+        if pt_state.trades:
+            th = pd.DataFrame(pt_state.trades)
+            cols = ["timestamp", "symbol", "direction", "quantity",
+                    "exec_price", "pnl", "pnl_pct", "signal"]
+            show = [c for c in cols if c in th.columns]
             st.dataframe(
-                pd.DataFrame(models_detail)[["name", "size_gb", "modified", "description"]],
-                use_container_width=True,
-                hide_index=True,
+                th[show].sort_values("timestamp", ascending=False),
+                use_container_width=True, hide_index=True,
             )
         else:
-            st.info("Noch kein Modell installiert. Sidebar → Modell auswählen → herunterladen.")
+            st.info("Noch keine Trades.")
+
+    with t_reset:
+        st.warning("⚠️ Alle Positionen und Trade-Historie werden gelöscht!")
+        reset_b = st.number_input(
+            "Neues Startkapital (€)",
+            value=float(pt_state.start_budget), step=1000.0,
+            key="pt_reset_budget",
+        )
+        if st.button("🔄 Portfolio zurücksetzen", type="secondary",
+                     key="btn_pt_reset"):
+            pt.reset(new_budget=reset_b)
+            st.success(f"Portfolio zurückgesetzt auf {reset_b:,.0f} €.")
+            st.rerun()
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 3 – MODELL-MANAGER
+# ═════════════════════════════════════════════════════════════════════════════
+with tab3:
+    _section("🔌 Ollama Status")
+
+    ollama_st = get_ollama_status()
+    running   = ollama_st["running"]
+
+    if running:
+        model_count = ollama_st.get("model_count", 0)
+        st.markdown(
+            f'<div class="sm-card-accent">'
+            f'<span class="sm-online">● ONLINE</span>'
+            f'&nbsp;&nbsp;<span style="color:#8b949e;font-size:12px;">'
+            f'{ollama_st.get("url","http://localhost:11434")} · '
+            f'{model_count} Modell(e) installiert</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
     else:
-        st.error(f"❌ {_status['error']}")
-        st.markdown(_status["install_guide"])
+        st.markdown(
+            f'<div class="sm-card" style="border-color:#ff4444;">'
+            f'<span class="sm-offline">● OFFLINE</span>'
+            f'&nbsp;&nbsp;<span style="color:#8b949e;font-size:12px;">'
+            f'{ollama_st.get("error","Ollama nicht erreichbar.")}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        with st.expander("📖 Installationsanleitung"):
+            st.markdown(ollama_st.get("install_guide", "Bitte Ollama unter https://ollama.ai installieren."))
 
+    # ── Installierte Modelle ──────────────────────────────────────────────────
     st.divider()
-    st.markdown("### Über StockMind")
-    st.markdown(f"""
-    **{APP_TITLE}** v{APP_VERSION}
+    _section("📦 Installierte Modelle")
 
-    Ein lokales, KI-gestütztes Aktienanalyse-Tool das vollständig auf deinem Rechner läuft.
+    if running:
+        installed = get_available_models_with_info()
+        if installed:
+            active_model = st.session_state.model
+            for m in installed:
+                name  = m.get("name", "?")
+                size  = m.get("size_gb", 0)
+                descr = m.get("description") or MODEL_DESCRIPTIONS.get(name, "")
+                is_active = (name == active_model)
+                badge = '<span class="sm-active-badge">AKTIV</span>' if is_active else ""
+                st.markdown(
+                    f'<div class="sm-model-row">'
+                    f'<span style="font-family:IBM Plex Mono;font-weight:700;'
+                    f'color:#c9d1d9;min-width:120px;">{name}</span>'
+                    f'<span style="color:#8b949e;font-size:12px;min-width:70px;">'
+                    f'{size:.1f} GB</span>'
+                    f'<span style="color:#8b949e;font-size:12px;flex:1;">'
+                    f'{descr}</span>'
+                    f'{badge}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            if st.button("🔄 Modell-Liste aktualisieren",
+                         key="btn_refresh_models"):
+                st.rerun()
+        else:
+            st.info("Ollama läuft, aber noch kein Modell installiert.")
+    else:
+        st.info("Ollama offline – keine Modelle verfügbar.")
 
-    | Komponente | Technologie |
-    |---|---|
-    | Dashboard | Streamlit |
-    | Marktdaten | yfinance |
-    | Lokale KI | Ollama |
-    | ML-Modell | scikit-learn (GradientBoosting) |
-    | Charts | Plotly |
-
-    > ⚠️ **Haftungsausschluss:** StockMind ist ein experimentelles Tool zur Bildung und
-    > Unterhaltung. Alle Analysen und Signale stellen **keine Anlageberatung** dar.
-    > Investitionsentscheidungen liegen ausschließlich in deiner Verantwortung.
-    """)
-
+    # ── Download ──────────────────────────────────────────────────────────────
     st.divider()
-    st.markdown("### 🏎️ Lambo-Kurs")
-    st.info(f"1 Lambo (Aventador SVJ) = **{LAMBO_PRICE_EUR:,.0f} €**")
-    test_val = st.number_input("Portfolio-Wert testen (€)", value=10_000.0, step=1_000.0)
-    st.markdown(f"Das entspricht: {format_lambo(test_val)}")
+    _section("⬇️ Modell herunterladen")
+
+    installed_names = set(get_available_models()) if running else set()
+    download_opts   = [m for m in AVAILABLE_MODELS if m not in installed_names]
+
+    if not download_opts:
+        st.success("✅ Alle empfohlenen Modelle sind bereits installiert.")
+    else:
+        dl_col1, dl_col2 = st.columns([2, 1])
+        with dl_col1:
+            dl_model = st.selectbox(
+                "Modell wählen", download_opts, key="dl_model_sel",
+            )
+            descr = MODEL_DESCRIPTIONS.get(dl_model, "")
+            if descr:
+                st.caption(f"ℹ️ {descr}")
+        with dl_col2:
+            st.write("")
+            btn_dl = st.button(
+                f"⬇️ {dl_model} herunterladen",
+                use_container_width=True,
+                type="primary",
+                key="btn_dl",
+                disabled=not running,
+            )
+
+        if not running:
+            st.warning("Ollama muss laufen um Modelle herunterzuladen.")
+
+        if btn_dl and running:
+            st.markdown(_ticker_html(), unsafe_allow_html=True)
+            progress_slot = st.empty()
+            bar_slot      = st.empty()
+            done = False
+            total_bytes = 0
+            pulled_bytes = 0
+            try:
+                for i, line in enumerate(download_model(dl_model)):
+                    if not line.strip():
+                        continue
+                    progress_slot.markdown(
+                        f'<div class="sm-card" style="font-family:IBM Plex Mono;'
+                        f'font-size:11px;color:#8b949e;">{line}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    # Einfacher Zähler als Fortschrittsindikator
+                    pct = min((i % 200) / 200, 1.0)
+                    bar_slot.progress(pct, text=f"Lade {dl_model}…")
+                    done = True
+            except Exception as e:
+                st.error(f"Download-Fehler: {e}")
+
+            progress_slot.empty()
+            bar_slot.empty()
+            if done:
+                st.success(
+                    f"✅ **{dl_model}** erfolgreich heruntergeladen! "
+                    "Seite neu laden um das Modell zu nutzen."
+                )
+                st.rerun()
+
+    # ── Modell-Vergleichstabelle ──────────────────────────────────────────────
+    st.divider()
+    _section("📊 Modell-Vergleich & Empfehlungen")
+
+    comparison = [
+        {
+            "Modell":       "llama3",
+            "Größe (ca.)":  "4.7 GB",
+            "Stärken":      "Ausgewogene Analyse, gutes Deutsch/Englisch",
+            "RAM":          "8 GB",
+            "Empfohlen für":"Standardanalyse, Einsteiger",
+            "⭐":            "⭐⭐⭐⭐⭐",
+        },
+        {
+            "Modell":       "mistral",
+            "Größe (ca.)":  "4.1 GB",
+            "Stärken":      "Sehr schnell, effizient, gute Logik",
+            "RAM":          "8 GB",
+            "Empfohlen für":"Viele Auto-Zyklen, schnelles Training",
+            "⭐":            "⭐⭐⭐⭐",
+        },
+        {
+            "Modell":       "phi3",
+            "Größe (ca.)":  "2.3 GB",
+            "Stärken":      "Klein & sparsam, überraschend gut",
+            "RAM":          "4 GB",
+            "Empfohlen für":"Schwache Hardware, erste Tests",
+            "⭐":            "⭐⭐⭐",
+        },
+        {
+            "Modell":       "gemma2",
+            "Größe (ca.)":  "5.4 GB",
+            "Stärken":      "Googles Modell, strukturierte Ausgaben",
+            "RAM":          "8 GB",
+            "Empfohlen für":"JSON-Parsing, strukturierte Analysen",
+            "⭐":            "⭐⭐⭐⭐",
+        },
+        {
+            "Modell":       "qwen2",
+            "Größe (ca.)":  "4.4 GB",
+            "Stärken":      "Mehrsprachig, Mathematik-stärke",
+            "RAM":          "8 GB",
+            "Empfohlen für":"Internationale Aktien, Quantanalyse",
+            "⭐":            "⭐⭐⭐⭐",
+        },
+    ]
+    comp_df = pd.DataFrame(comparison)
+    st.dataframe(comp_df, use_container_width=True, hide_index=True)
+
+    # ── Über StockMind ────────────────────────────────────────────────────────
+    st.divider()
+    _section(f"ℹ️ Über {APP_TITLE} v{APP_VERSION}")
+    st.markdown(
+        f'<div class="sm-card">'
+        f'<table style="width:100%;font-size:13px;color:#c9d1d9;">'
+        f'<tr><td style="color:#8b949e;width:180px;">Dashboard</td><td>Streamlit</td></tr>'
+        f'<tr><td style="color:#8b949e;">Marktdaten</td><td>yfinance (Yahoo Finance)</td></tr>'
+        f'<tr><td style="color:#8b949e;">Lokale KI</td><td>Ollama (llama3, mistral, …)</td></tr>'
+        f'<tr><td style="color:#8b949e;">ML-Modell</td><td>scikit-learn GradientBoosting</td></tr>'
+        f'<tr><td style="color:#8b949e;">Charts</td><td>Plotly</td></tr>'
+        f'<tr><td style="color:#8b949e;">Lambo-Ziel</td>'
+        f'<td style="color:#00ff88;">Lamborghini Aventador SVJ = '
+        f'{LAMBO_PRICE_EUR:,.0f} €</td></tr>'
+        f'</table>'
+        f'<div style="margin-top:12px;color:#8b949e;font-size:11px;">'
+        f'⚠️ StockMind ist ein experimentelles Bildungs- und Unterhaltungstool. '
+        f'Alle Analysen und Signale stellen keine Anlageberatung dar.'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
