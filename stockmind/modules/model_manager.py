@@ -17,20 +17,8 @@ from typing import Generator, Optional
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import AVAILABLE_MODELS, DEFAULT_MODEL, OLLAMA_BASE_URL, OLLAMA_TIMEOUT_S
+from config import AVAILABLE_MODELS, DEFAULT_MODEL, MODEL_DESCRIPTIONS, OLLAMA_BASE_URL, OLLAMA_TIMEOUT_S
 
-
-# ---------------------------------------------------------------------------
-# Modell-Beschreibungen
-# ---------------------------------------------------------------------------
-
-MODEL_DESCRIPTIONS: dict[str, str] = {
-    "llama3":  "Ausgewogen, gut für Analyse",
-    "mistral": "Schnell, effizient",
-    "phi3":    "Klein & sparsam",
-    "gemma2":  "Googles Modell",
-    "qwen2":   "Mehrsprachig",
-}
 
 # ANSI-Escape-Sequenzen aus subprocess-Output entfernen
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*[mGKHF]|\r')
