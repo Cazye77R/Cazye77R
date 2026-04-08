@@ -141,6 +141,20 @@
 
     .form-group.full-width { grid-column: 1 / -1; }
 
+    /* ── Input Validation ── */
+    .form-group input.input-error,
+    .form-group select.input-error {
+      border-color: var(--danger) !important;
+      box-shadow: 0 0 0 2px rgba(224,82,96,0.25);
+    }
+    .field-error-msg {
+      color: var(--danger);
+      font-size: 0.76rem;
+      margin-top: 0.15rem;
+      display: none;
+    }
+    .field-error-msg.visible { display: block; }
+
     label {
       font-size: 0.82rem;
       color: var(--text-muted);
@@ -1060,10 +1074,112 @@
     }
 
     /* ─────────────────────────────────────────────
+       FORM VALIDATION
+    ───────────────────────────────────────────── */
+    function _fieldErr(id, msg) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.add('input-error');
+      let hint = el.parentElement.querySelector('.field-error-msg');
+      if (!hint) {
+        hint = document.createElement('span');
+        hint.className = 'field-error-msg';
+        el.parentElement.appendChild(hint);
+      }
+      hint.textContent = msg;
+      hint.classList.add('visible');
+    }
+
+    function _fieldOk(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.remove('input-error');
+      const hint = el.parentElement.querySelector('.field-error-msg');
+      if (hint) hint.classList.remove('visible');
+    }
+
+    function clearFormErrors() {
+      ['f-desc','f-date','f-filament','f-hours','f-minutes','f-kwh','f-selling']
+        .forEach(_fieldOk);
+    }
+
+    function validateBookingForm() {
+      const errors = [];
+
+      // Beschreibung — Pflichtfeld
+      const desc = document.getElementById('f-desc').value.trim();
+      if (!desc) { _fieldErr('f-desc', 'Pflichtfeld'); errors.push('Beschreibung fehlt'); }
+      else _fieldOk('f-desc');
+
+      // Datum — Pflichtfeld
+      const date = document.getElementById('f-date').value;
+      if (!date) { _fieldErr('f-date', 'Pflichtfeld'); errors.push('Datum fehlt'); }
+      else _fieldOk('f-date');
+
+      // Filament (g) — Pflichtfeld, > 0, kein NaN
+      const gramsRaw = document.getElementById('f-filament').value;
+      const grams = parseFloat(gramsRaw);
+      if (gramsRaw === '' || isNaN(grams)) {
+        _fieldErr('f-filament', 'Ungültiger Wert'); errors.push('Filamentgewicht: ungültiger Wert');
+      } else if (grams <= 0) {
+        _fieldErr('f-filament', 'Muss > 0 g sein'); errors.push('Filamentgewicht muss > 0 g sein');
+      } else _fieldOk('f-filament');
+
+      // Stunden — optional, aber kein NaN und nicht negativ
+      const hoursRaw = document.getElementById('f-hours').value;
+      if (hoursRaw !== '') {
+        const hours = parseInt(hoursRaw);
+        if (isNaN(hours) || hours < 0) {
+          _fieldErr('f-hours', 'Ungültiger Wert (≥ 0)'); errors.push('Stunden: ungültiger Wert');
+        } else _fieldOk('f-hours');
+      } else _fieldOk('f-hours');
+
+      // Minuten — optional, 0–59, kein NaN
+      const minutesRaw = document.getElementById('f-minutes').value;
+      if (minutesRaw !== '') {
+        const minutes = parseInt(minutesRaw);
+        if (isNaN(minutes) || minutes < 0 || minutes > 59) {
+          _fieldErr('f-minutes', 'Wert 0–59 erwartet'); errors.push('Minuten: Wert 0–59 erwartet');
+        } else _fieldOk('f-minutes');
+      } else _fieldOk('f-minutes');
+
+      // Leistung kW — optional, kein NaN, nicht negativ
+      const powerRaw = document.getElementById('f-kwh').value;
+      if (powerRaw !== '') {
+        const powerKw = parseFloat(powerRaw);
+        if (isNaN(powerKw) || powerKw < 0) {
+          _fieldErr('f-kwh', 'Ungültiger Wert (≥ 0)'); errors.push('Leistung: ungültiger Wert');
+        } else _fieldOk('f-kwh');
+      } else _fieldOk('f-kwh');
+
+      // Verkaufspreis — Pflichtfeld, kein NaN, nicht negativ
+      const sellingRaw = document.getElementById('f-selling').value;
+      const selling = parseFloat(sellingRaw);
+      if (sellingRaw === '' || isNaN(selling)) {
+        _fieldErr('f-selling', 'Ungültiger Wert'); errors.push('Verkaufspreis: ungültiger Wert');
+      } else if (selling < 0) {
+        _fieldErr('f-selling', 'Darf nicht negativ sein'); errors.push('Verkaufspreis darf nicht negativ sein');
+      } else _fieldOk('f-selling');
+
+      if (errors.length > 0) {
+        showToast('Eingabefehler: ' + errors.join(' · '), 'error');
+        return false;
+      }
+
+      // Warnhinweis bei Verkaufspreis = 0 (kein Block)
+      if (!isNaN(selling) && selling === 0) {
+        showToast('Hinweis: Verkaufspreis ist 0 € – Buchung wird trotzdem gespeichert.', 'info');
+      }
+
+      return true;
+    }
+
+    /* ─────────────────────────────────────────────
        ADD BOOKING
     ───────────────────────────────────────────── */
     function addBooking(e) {
       e.preventDefault();
+      if (!validateBookingForm()) return;
 
       const settings = loadSettings();
       const profileSel = document.getElementById('f-filament-profile').value;
@@ -1110,6 +1226,7 @@
 
       document.getElementById('booking-form').reset();
       document.getElementById('f-date').value = todayISO();
+      clearFormErrors();
       resetPreview();
       renderBookingsTable();
       clearInvoiceTags('invoice-list');
@@ -1117,6 +1234,7 @@
     }
 
     function addBookingAndRepeat() {
+      if (!validateBookingForm()) return;
       // Build booking from current form — identical logic to addBooking()
       const settings = loadSettings();
       const profileSel = document.getElementById('f-filament-profile').value;
@@ -1132,11 +1250,6 @@
       const hours   = parseInt(document.getElementById('f-hours').value)      || 0;
       const minutes = parseInt(document.getElementById('f-minutes').value)    || 0;
       const selling = parseFloat(document.getElementById('f-selling').value)  || 0;
-
-      if (!desc || grams <= 0 || selling < 0) {
-        showToast('Bitte Beschreibung, Filament (> 0) und Verkaufspreis ausfüllen.', 'error');
-        return;
-      }
 
       const { filamentCost, electricityCost, totalCost, profit, totalKwh, margin } =
         calculateCosts(grams, filamentPrice, powerKw, hours, minutes, settings.electricityPricePerKwh, selling);
@@ -1837,9 +1950,12 @@
         btn.addEventListener('click', () => activateTab(btn.dataset.tab));
       });
 
-      /* Booking form live preview */
+      /* Booking form live preview + clear validation errors on input */
       ['f-filament', 'f-kwh', 'f-hours', 'f-minutes', 'f-selling'].forEach(id => {
-        document.getElementById(id).addEventListener('input', updateFormPreview);
+        document.getElementById(id).addEventListener('input', () => { _fieldOk(id); updateFormPreview(); });
+      });
+      ['f-desc', 'f-date'].forEach(id => {
+        document.getElementById(id).addEventListener('input', () => _fieldOk(id));
       });
 
       /* Booking form submit */
