@@ -382,6 +382,13 @@ def main() -> None:
                 "API-Key",
                 type="password",
                 key=f"chat_apikey_{provider}",
+                help="Dein API-Key wird maskiert angezeigt und niemals gespeichert.",
+            )
+            st.sidebar.info(
+                "🔒 Der API-Key wird ausschließlich im Arbeitsspeicher dieser "
+                "Browser-Session gehalten. Er wird nicht auf Disk geschrieben, "
+                "nicht geloggt und nicht an Dritte weitergegeben.",
+                icon=None,
             )
         ollama_host = "http://localhost:11434"
         if provider == "ollama":
