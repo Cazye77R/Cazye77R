@@ -281,7 +281,7 @@ def _section(label: str) -> None:
 def _ensure_data_dirs() -> None:
     """Erstellt fehlende Daten-Ordner beim ersten Start."""
     import os
-    for d in ["data", "data/cache", "data/training_state", "data/portfolio"]:
+    for d in ["data", "data/cache", "data/training_state", "data/portfolio", "data/logs"]:
         os.makedirs(d, exist_ok=True)
 
 

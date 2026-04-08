@@ -15,10 +15,14 @@ venv/
 env/
 
 # StockMind – generierte Daten (kein Quellcode)
-stockmind/data/cache/
-stockmind/data/cache/*.parquet
-stockmind/data/training_state/
-stockmind/data/portfolio/
+stockmind/data/cache/*
+!stockmind/data/cache/.gitkeep
+stockmind/data/training_state/*
+!stockmind/data/training_state/.gitkeep
+stockmind/data/portfolio/*
+!stockmind/data/portfolio/.gitkeep
+stockmind/data/logs/*
+!stockmind/data/logs/.gitkeep
 
 # IDE
 .idea/
