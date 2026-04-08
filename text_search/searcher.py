@@ -14,6 +14,8 @@ from .semantic import EmbeddingIndex, SemanticResult, build_embedding_index, sea
 
 SearchMode = Literal["keyword", "semantic", "hybrid"]
 
+_RRF_K = 60  # RRF damping constant — standard value from Cormack et al. 2009
+
 
 @dataclass
 class SearchResult:
@@ -72,27 +74,31 @@ def search(
         sem_results = search_semantic(index.embedding_index, query, top_k=top_k, offline=offline)
         return [SearchResult(chunk=r.chunk, score=r.score, mode="semantic") for r in sem_results]
 
-    # Hybrid: fetch more candidates then merge
+    # Hybrid: Reciprocal Rank Fusion (RRF)
+    # RRF score = Σ weight_i / (k + rank_i)  where k=60 dampens the impact of
+    # top ranks and prevents a single dominant list from overwhelming the other.
+    # Using rank position (not raw scores) makes fusion robust across differently
+    # scaled retrievers (BM25 values vs. cosine similarity in [0, 1]).
     fetch_k = max(top_k * 2, 20)
     kw_results = search_keyword(index.keyword_index, query, top_k=fetch_k)
     sem_results = search_semantic(index.embedding_index, query, top_k=fetch_k, offline=offline)
 
-    kw_map: dict[int, float] = {r.chunk.chunk_id: r.score for r in kw_results}
-    sem_map: dict[int, float] = {r.chunk.chunk_id: r.score for r in sem_results}
-
-    kw_map = _minmax(kw_map)
-    sem_map = _minmax(sem_map)
-
-    all_ids = set(kw_map) | set(sem_map)
-    chunk_by_id = {r.chunk.chunk_id: r.chunk for r in kw_results}
+    chunk_by_id: dict[int, Chunk] = {r.chunk.chunk_id: r.chunk for r in kw_results}
     chunk_by_id.update({r.chunk.chunk_id: r.chunk for r in sem_results})
 
-    combined: list[tuple[int, float]] = []
-    for cid in all_ids:
-        score = (1 - semantic_weight) * kw_map.get(cid, 0.0) + semantic_weight * sem_map.get(cid, 0.0)
-        combined.append((cid, score))
+    rrf_scores: dict[int, float] = {}
+    kw_weight = 1.0 - semantic_weight
+    sem_weight = semantic_weight
 
-    combined.sort(key=lambda x: x[1], reverse=True)
+    for rank, r in enumerate(kw_results, start=1):
+        cid = r.chunk.chunk_id
+        rrf_scores[cid] = rrf_scores.get(cid, 0.0) + kw_weight / (_RRF_K + rank)
+
+    for rank, r in enumerate(sem_results, start=1):
+        cid = r.chunk.chunk_id
+        rrf_scores[cid] = rrf_scores.get(cid, 0.0) + sem_weight / (_RRF_K + rank)
+
+    combined = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
     return [
         SearchResult(chunk=chunk_by_id[cid], score=score, mode="hybrid")
         for cid, score in combined[:top_k]
@@ -185,12 +191,3 @@ def load_index(path: Path) -> SearchIndex:
         return SearchIndex(keyword_index=kw_index, embedding_index=emb_index)
 
 
-def _minmax(scores: dict[int, float]) -> dict[int, float]:
-    if not scores:
-        return scores
-    lo = min(scores.values())
-    hi = max(scores.values())
-    span = hi - lo
-    if span == 0:
-        return {k: 1.0 for k in scores}
-    return {k: (v - lo) / span for k, v in scores.items()}
