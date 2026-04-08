@@ -601,6 +601,26 @@ def main() -> None:
         )
 
         if uploaded_files:
+            # ── File size checks ─────────────────────────────────────────────
+            _MB = 1024 * 1024
+            _oversized   = [f for f in uploaded_files if len(f.getvalue()) > 100 * _MB]
+            _large        = [f for f in uploaded_files if 25 * _MB < len(f.getvalue()) <= 100 * _MB]
+
+            if _oversized:
+                for f in _oversized:
+                    size_mb = len(f.getvalue()) / _MB
+                    st.error(
+                        f"**{f.name}** ist {size_mb:.0f} MB groß (Limit: 100 MB). "
+                        "Bitte die Datei aufteilen oder eine kleinere Version hochladen."
+                    )
+            if _large:
+                for f in _large:
+                    size_mb = len(f.getvalue()) / _MB
+                    st.warning(
+                        f"**{f.name}** ist {size_mb:.0f} MB groß. "
+                        "Der Index-Aufbau kann einige Minuten dauern."
+                    )
+
             file_bytes_map = {f.name: f.getvalue() for f in uploaded_files}
             index_params = dict(
                 file_bytes_map=file_bytes_map,
@@ -615,7 +635,7 @@ def main() -> None:
             preset_hint = f"Preset: **{preset_name}** · Chunk-Größe: {chunk_size} · Overlap: {overlap}"
             st.info(f"{len(uploaded_files)} Datei(en) bereit. {preset_hint}")
 
-            if st.button("Index aufbauen", type="primary"):
+            if st.button("Index aufbauen", type="primary", disabled=bool(_oversized)):
                 try:
                     _cached_index(**index_params)
                     # Persist params and file bytes for subsequent reruns
