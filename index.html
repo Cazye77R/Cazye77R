@@ -1399,6 +1399,7 @@
       a.download = `3d-drucker-buchungen-${todayISO()}.csv`;
       a.click();
       URL.revokeObjectURL(url);
+      localStorage.setItem('lastExportDate', todayISO());
       showToast(`${bookings.length} Buchungen exportiert.`, 'success');
     }
 
@@ -1944,6 +1945,17 @@
 
       /* Render table */
       renderBookingsTable();
+
+      /* Backup-Hinweis (max. einmal pro Session) */
+      if (!sessionStorage.getItem('backupHintShown')) {
+        const lastExport = localStorage.getItem('lastExportDate');
+        const needsHint  = !lastExport ||
+          (Date.now() - new Date(lastExport).getTime()) > 7 * 24 * 60 * 60 * 1000;
+        if (needsHint) {
+          setTimeout(() => showToast('Tipp: Exportiere regelmäßig ein CSV-Backup deiner Daten.', 'info'), 1200);
+          sessionStorage.setItem('backupHintShown', '1');
+        }
+      }
 
       /* Tab nav click handlers */
       document.querySelectorAll('.tab-btn').forEach(btn => {
