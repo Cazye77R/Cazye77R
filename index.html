@@ -871,6 +871,7 @@
     ───────────────────────────────────────────── */
     const STORAGE_KEY  = '3d_tracker_bookings';
     const SETTINGS_KEY = '3d_tracker_settings';
+    const DATA_VERSION = '1.4';
 
     const CSV_HEADER = [
       'ID','Datum','Beschreibung','Rechnungsnummern','Kommentar',
@@ -927,12 +928,54 @@
     }
 
     /* ─────────────────────────────────────────────
+       SCHEMA MIGRATION
+    ───────────────────────────────────────────── */
+    function migrateData(bookings, storedVersion) {
+      if (storedVersion === DATA_VERSION && bookings.every(b =>
+        b.invoiceNumbers !== undefined &&
+        b.comment       !== undefined &&
+        b.margin        !== undefined &&
+        b.filamentProfileName !== undefined
+      )) return bookings;
+
+      let migratedCount = 0;
+      const result = bookings.map(b => {
+        let changed = false;
+        const u = { ...b };
+        if (u.invoiceNumbers      === undefined) { u.invoiceNumbers = [];  changed = true; }
+        if (u.comment             === undefined) { u.comment = '';         changed = true; }
+        if (u.filamentProfileName === undefined) { u.filamentProfileName = ''; changed = true; }
+        if (u.electricityKwPerHour === undefined) { u.electricityKwPerHour = 0; changed = true; }
+        if (u.electricityKwhTotal  === undefined) { u.electricityKwhTotal  = 0; changed = true; }
+        if (u.margin === undefined) {
+          u.margin = u.sellingPrice > 0
+            ? Math.round((u.profit / u.sellingPrice) * 1000) / 10
+            : 0;
+          changed = true;
+        }
+        if (changed) migratedCount++;
+        return u;
+      });
+
+      console.info(
+        `[3D Tracker] Migration: v${storedVersion || 'unbekannt'} → v${DATA_VERSION}` +
+        (migratedCount > 0 ? ` | ${migratedCount} Buchung(en) aktualisiert` : '')
+      );
+      return result;
+    }
+
+    /* ─────────────────────────────────────────────
        STORAGE
     ───────────────────────────────────────────── */
     function loadFromStorage() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        return raw ? JSON.parse(raw) : [];
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        // Support old format (plain array) and new format ({ version, bookings })
+        const storedVersion = Array.isArray(parsed) ? null : parsed.version;
+        const bookings      = Array.isArray(parsed) ? parsed : (parsed.bookings || []);
+        return migrateData(bookings, storedVersion);
       } catch (e) {
         showToast('Fehler beim Laden der Buchungen.', 'error');
         return [];
@@ -941,7 +984,7 @@
 
     function saveToStorage(bookings) {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(bookings));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: DATA_VERSION, bookings }));
       } catch (e) {
         if (e.name === 'QuotaExceededError') {
           showToast('Speicher voll! Buchung konnte nicht gespeichert werden.', 'error');
