@@ -28,6 +28,23 @@ Keine Cloud, keine API-Kosten, keine Datenweitergabe.
 
 ---
 
+## Installation
+
+```bash
+cd stockmind
+pip install -r requirements.txt
+```
+
+> **Zum Aktualisieren der Pins** (nach Änderungen in `requirements.in`):
+> ```bash
+> pip install pip-tools
+> pip-compile requirements.in
+> ```
+> `requirements.in` enthält die gewünschten Abhängigkeiten ohne Versionspins.
+> `requirements.txt` enthält die gepinnten Versionen für reproduzierbare Builds.
+
+---
+
 ## Schnellstart in 3 Schritten
 
 ### 1. Abhängigkeiten installieren

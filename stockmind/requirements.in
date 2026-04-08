@@ -1,0 +1,16 @@
+streamlit
+ollama
+yfinance
+pandas
+numpy
+plotly
+scikit-learn
+ta
+requests
+pydantic
+python-dotenv>=1.0.0
+pyarrow>=14.0
+ruff
+pytest
+pytest-timeout
+loguru>=0.7
