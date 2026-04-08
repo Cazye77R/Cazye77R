@@ -78,6 +78,16 @@ def _load_pdf(path: Path, chunk_size: int = 300, overlap: int = 50) -> List[Chun
     return chunks
 
 
+def _split_sentences(text: str) -> List[str]:
+    """Split text into sentences on . ! ? followed by whitespace or end of string.
+
+    Limitation: does not handle abbreviations (e.g. 'Dr. Smith') — acceptable
+    for a zero-dependency implementation using only re.split().
+    """
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
 def _chunk_text(
     text: str,
     source: str,
@@ -87,45 +97,63 @@ def _chunk_text(
     overlap: int = 50,
     start_chunk_id: int = 0,
 ) -> List[Chunk]:
-    """Split text into overlapping word-window chunks."""
-    words = re.split(r"(\s+)", text)
-    tokens: List[str] = []
-    for w in words:
-        stripped = w.strip()
-        if stripped:
-            tokens.append(stripped)
+    """Split text into chunks by accumulating whole sentences up to chunk_size words.
 
-    if not tokens:
+    A new chunk begins where the previous one ended, minus an overlap tail of
+    ~overlap words (by rewinding to the sentences that cover them). This keeps
+    sentences intact — no sentence is split across chunk boundaries.
+    """
+    sentences = _split_sentences(text)
+    if not sentences:
         return []
 
     chunks: List[Chunk] = []
-    step = max(1, chunk_size - overlap)
     chunk_id = start_chunk_id
+    i = 0  # index of the first sentence of the current chunk
 
-    for start in range(0, len(tokens), step):
-        end = start + chunk_size
-        window = tokens[start:end]
-        if not window:
-            break
-        chunk_text = " ".join(window)
+    while i < len(sentences):
+        # Accumulate sentences until chunk_size words is reached.
+        # Always include at least one sentence even if it alone exceeds chunk_size.
+        current: List[str] = []
+        word_count = 0
+        j = i
+        while j < len(sentences):
+            sent_words = len(sentences[j].split())
+            if current and word_count + sent_words > chunk_size:
+                break
+            current.append(sentences[j])
+            word_count += sent_words
+            j += 1
 
+        chunk_text = " ".join(current)
+
+        # Approximate line_start: count newlines in all text before this chunk
         line_start: int | None = None
         if base_line is not None:
-            prefix_text = " ".join(tokens[:start])
-            line_start = base_line + prefix_text.count("\n")
+            prefix = " ".join(sentences[:i])
+            line_start = base_line + prefix.count("\n")
 
-        chunks.append(
-            Chunk(
-                text=chunk_text,
-                source=source,
-                chunk_id=chunk_id,
-                page=page,
-                line_start=line_start,
-            )
-        )
+        chunks.append(Chunk(
+            text=chunk_text,
+            source=source,
+            chunk_id=chunk_id,
+            page=page,
+            line_start=line_start,
+        ))
         chunk_id += 1
 
-        if end >= len(tokens):
-            break
+        # Determine next start position with overlap.
+        # Walk backward through sentences of this chunk until ~overlap words
+        # are covered; the first of those sentences becomes the next start.
+        # next_i > i is guaranteed to prevent infinite loops.
+        if overlap > 0 and j > i + 1:
+            overlap_counted = 0
+            k = j - 1
+            while k > i and overlap_counted < overlap:
+                overlap_counted += len(sentences[k].split())
+                k -= 1
+            i = max(i + 1, k + 1)
+        else:
+            i = j
 
     return chunks
