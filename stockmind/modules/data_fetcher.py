@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import pickle
 import re
 import sys
 import time
@@ -463,7 +462,7 @@ def _cache_path(symbol: str, period: str, interval: str) -> Path:
     # Dateiname: sicher, eindeutig
     safe_symbol = re.sub(r'[^A-Za-z0-9]', '_', symbol)
     key = f"{safe_symbol}_{period}_{interval}"
-    return cache_dir / f"{key}.pkl"
+    return cache_dir / f"{key}.parquet"
 
 
 def _load_cache(symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
@@ -474,12 +473,7 @@ def _load_cache(symbol: str, period: str, interval: str) -> Optional[pd.DataFram
     if time.time() - path.stat().st_mtime > _CACHE_TTL_S:
         return None     # Abgelaufen – nicht löschen, wird beim nächsten Fetch überschrieben
     try:
-        with open(path, "rb") as f:
-            data = pickle.load(f)
-        # Versions-Check
-        if not isinstance(data, dict) or "df" not in data:
-            return None
-        return data["df"]
+        return pd.read_parquet(path)
     except Exception:
         return None     # Korrupter Cache – ignorieren, neu laden
 
@@ -488,8 +482,7 @@ def _save_cache(symbol: str, period: str, interval: str, df: pd.DataFrame) -> No
     """Persistiert einen DataFrame als Cache-Eintrag."""
     path = _cache_path(symbol, period, interval)
     try:
-        with open(path, "wb") as f:
-            pickle.dump({"df": df, "timestamp": time.time(), "symbol": symbol}, f)
+        df.to_parquet(path, compression="snappy")
     except Exception:
         pass    # Cache-Fehler sind nicht kritisch
 

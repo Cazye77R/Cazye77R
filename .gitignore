@@ -16,6 +16,7 @@ env/
 
 # StockMind – generierte Daten (kein Quellcode)
 stockmind/data/cache/
+stockmind/data/cache/*.parquet
 stockmind/data/training_state/
 stockmind/data/portfolio/
 
