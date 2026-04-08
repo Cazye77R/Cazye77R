@@ -10,3 +10,6 @@ requests
 pydantic
 python-dotenv>=1.0.0
 pyarrow>=14.0
+ruff
+pytest
+pytest-timeout
