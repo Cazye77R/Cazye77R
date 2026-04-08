@@ -1,6 +1,33 @@
 """
 StockMind – Zentrale Konfiguration
+
+Werte, die via .env überschreibbar sind, werden mit os.getenv() geladen.
+Alle anderen Konstanten bleiben hardcodiert und sind nicht umgebungsabhängig.
 """
+
+import logging
+import os
+
+from dotenv import load_dotenv
+
+# Lade .env aus dem Verzeichnis dieser Datei (stockmind/.env)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
+
+# ── Via .env konfigurierbar ───────────────────────────────────────────────────
+
+# Ollama API – überschreibbar per OLLAMA_HOST=http://my-server:11434
+OLLAMA_BASE_URL: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+
+# Cache-Lebensdauer in Stunden – überschreibbar per CACHE_TTL_HOURS=0
+CACHE_TTL_HOURS: int = int(os.getenv("CACHE_TTL_HOURS", "24"))
+
+# Log-Level – überschreibbar per LOG_LEVEL=DEBUG
+LOG_LEVEL: int = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+
+# Logging einmalig konfigurieren
+logging.basicConfig(level=LOG_LEVEL, format="%(levelname)s %(name)s: %(message)s")
+
+# ── Unveränderliche Konstanten ────────────────────────────────────────────────
 
 # --- Handelskosten ---
 ORDER_COST_EUR: float = 5.0          # Standard-Ordergebühr in €
@@ -21,6 +48,7 @@ AVAILABLE_MODELS: list[str] = [
     "qwen2",
 ]
 DEFAULT_MODEL: str = "llama3"
+OLLAMA_TIMEOUT_S: int = 120
 
 # --- Analyse-Methoden ---
 ANALYSIS_METHODS: list[str] = [
@@ -39,9 +67,6 @@ TRAINING_STATE_DIR: str = "data/training_state"
 PORTFOLIO_DIR: str = "data/portfolio"
 CACHE_DIR: str = "data/cache"
 
-# --- Cache ---
-CACHE_TTL_HOURS: int = 24           # Lebensdauer des OHLCV-Cache in Stunden
-
 # --- Technische Indikatoren – Standardparameter ---
 SMA_SHORT: int = 20
 SMA_LONG: int = 50
@@ -57,10 +82,6 @@ BOLLINGER_STD: float = 2.0
 # --- Daten-Download ---
 DEFAULT_PERIOD: str = "1y"           # Standardzeitraum für yfinance
 DEFAULT_INTERVAL: str = "1d"         # Tages-Kerzen
-
-# --- Ollama API ---
-OLLAMA_BASE_URL: str = "http://localhost:11434"
-OLLAMA_TIMEOUT_S: int = 120
 
 # --- App-Metadaten ---
 APP_TITLE: str = "StockMind"

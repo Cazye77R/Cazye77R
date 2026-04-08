@@ -25,6 +25,12 @@ stockmind/data/portfolio/
 *.swp
 *.swo
 
+# Umgebungsvariablen – .env.example NICHT ignorieren
+stockmind/.env
+.env
+!.env.example
+!stockmind/.env.example
+
 # OS
 .DS_Store
 Thumbs.db
