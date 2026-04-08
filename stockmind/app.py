@@ -19,6 +19,7 @@ from config import (
     APP_TITLE, APP_ICON, APP_VERSION,
     ANALYSIS_METHODS, DEFAULT_BUDGET_EUR, DEFAULT_PERIOD,
     LAMBO_PRICE_EUR, ORDER_COST_EUR, SPREAD_PERCENT, AVAILABLE_MODELS,
+    EXPLORATION_CONSTANT,
 )
 from modules.model_manager import (
     MODEL_DESCRIPTIONS, is_ollama_running, get_ollama_status,
@@ -1578,6 +1579,29 @@ with tab3:
     ]
     comp_df = pd.DataFrame(comparison)
     st.dataframe(comp_df, use_container_width=True, hide_index=True)
+
+    # ── Aktive Konfiguration ──────────────────────────────────────────────────
+    st.divider()
+    _section("🔧 Aktive Konfiguration")
+    import math as _math
+    st.markdown(
+        '<div class="sm-card">'
+        '<table style="width:100%;font-size:13px;color:#c9d1d9;">'
+        f'<tr><td style="color:#8b949e;width:220px;">UCB1 Exploration-Konstante</td>'
+        f'<td><code style="color:#00ff88;">{EXPLORATION_CONSTANT}</code>&nbsp;'
+        f'<span style="color:#8b949e;font-size:11px;">(sqrt(2) = {_math.sqrt(2):.4f})</span></td></tr>'
+        f'<tr><td style="color:#8b949e;">Ollama Host</td>'
+        f'<td><code>{__import__("os").getenv("OLLAMA_HOST", "http://localhost:11434")}</code></td></tr>'
+        f'<tr><td style="color:#8b949e;">Cache TTL</td>'
+        f'<td><code>{__import__("config").CACHE_TTL_HOURS} h</code></td></tr>'
+        f'<tr><td style="color:#8b949e;">Log-Level</td>'
+        f'<td><code>{__import__("os").getenv("LOG_LEVEL", "INFO")}</code></td></tr>'
+        '</table>'
+        '<div style="margin-top:8px;color:#8b949e;font-size:11px;">'
+        'Werte aus <code>.env</code> änderbar – App neu starten zum Übernehmen.'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
 
     # ── Über StockMind ────────────────────────────────────────────────────────
     st.divider()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 # --- Handelskosten ---
 ORDER_COST_EUR: float = 5.0
 SPREAD_PERCENT: float = 0.1
@@ -34,3 +36,8 @@ MACD_SLOW: int = 26
 MACD_SIGNAL: int = 9
 BOLLINGER_PERIOD: int = 20
 BOLLINGER_STD: float = 2.0
+
+# --- UCB1-Algorithmus (Auto-Training) ---
+# Exploration-Konstante: höher = mehr neue Methoden testen, niedriger = mehr exploitieren
+# sqrt(2) ≈ 1.414 ist der theoretische Standardwert für UCB1
+EXPLORATION_CONSTANT: float = float(os.getenv("EXPLORATION_CONSTANT", "1.414"))

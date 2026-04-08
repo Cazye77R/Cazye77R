@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     ANALYSIS_METHODS,
     DEFAULT_MODEL,
+    EXPLORATION_CONSTANT,
     TRAINING_STATE_DIR,
 )
 from modules.logger import logger
@@ -286,7 +287,7 @@ class StockTrainer:
     def _select_next_method(self, state: dict) -> str:
         """
         UCB1-basierte Methodenwahl (Upper Confidence Bound):
-          score(m) = accuracy(m) + sqrt(2 * ln(total+1) / (count(m)+1))
+          score(m) = accuracy(m) + sqrt(EXPLORATION_CONSTANT * ln(total+1) / (count(m)+1))
         Ungetestete Methoden werden direkt priorisiert.
         """
         method_scores = state.get("method_scores", {})
@@ -307,7 +308,7 @@ class StockTrainer:
         for m in _METHODS:
             acc = method_scores.get(m, 0.5)
             n   = max(1, counts.get(m, 1))
-            ucb = acc + math.sqrt(2 * math.log(total_cycles + 1) / n)
+            ucb = acc + math.sqrt(EXPLORATION_CONSTANT * math.log(total_cycles + 1) / n)
             if ucb > best_score:
                 best_score, best_method = ucb, m
         return best_method
