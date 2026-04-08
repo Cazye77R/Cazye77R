@@ -15,7 +15,8 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from modules.trainer import build_features, load_model, load_state
+# Keine Module-zu-Modul-Importe – build_features ist hier inline definiert;
+# ml_bundle und training_state werden von app.py übergeben.
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +105,37 @@ SCORE_TO_SIGNAL = {1: "KAUFEN", 0: "HALTEN", -1: "VERKAUFEN"}
 
 
 # ---------------------------------------------------------------------------
+# ML-Feature-Berechnung (inline, kein Trainer-Import nötig)
+# ---------------------------------------------------------------------------
+
+def _build_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Berechnet numerische ML-Features aus OHLCV-Daten."""
+    feat = pd.DataFrame(index=df.index)
+    close, high, low, volume = df["Close"], df["High"], df["Low"], df["Volume"]
+    feat["ret_1d"]         = close.pct_change(1)
+    feat["ret_5d"]         = close.pct_change(5)
+    feat["ret_20d"]        = close.pct_change(20)
+    feat["sma_20"]         = close.rolling(20).mean() / close - 1
+    feat["sma_50"]         = close.rolling(50).mean() / close - 1
+    feat["sma_cross"]      = feat["sma_20"] - feat["sma_50"]
+    feat["volatility_20d"] = close.pct_change().rolling(20).std()
+    feat["vol_ratio"]      = volume / volume.rolling(20).mean()
+    delta = close.diff()
+    gain  = delta.clip(lower=0).rolling(14).mean()
+    loss  = (-delta.clip(upper=0)).rolling(14).mean()
+    feat["rsi"] = 100 - (100 / (1 + gain / loss.replace(0, float("nan"))))
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    macd  = ema12 - ema26
+    feat["macd_hist"] = macd - macd.ewm(span=9, adjust=False).mean()
+    bb_mid = close.rolling(20).mean()
+    feat["bb_pos"]   = (close - bb_mid) / (2 * close.rolling(20).std())
+    feat["hl_range"] = (high - low) / close
+    feat.dropna(inplace=True)
+    return feat
+
+
+# ---------------------------------------------------------------------------
 # Haupt-Vorhersage
 # ---------------------------------------------------------------------------
 
@@ -112,7 +144,14 @@ def predict(
     df: pd.DataFrame,
     method: str = "Auto (KI wählt)",
     horizon_days: int = 5,
+    ml_bundle: Optional[dict] = None,
+    training_state: Optional[dict] = None,
 ) -> Prediction:
+    """
+    ml_bundle:      Optional dict mit 'model' und 'scaler' (aus trainer.load_model).
+    training_state: Optional dict mit 'accuracy' etc. (aus trainer.load_state).
+    Beide werden von app.py übergeben – predictor importiert trainer NICHT mehr.
+    """
     """
     Erstellt eine Vorhersage für einen Ticker.
 
@@ -146,15 +185,14 @@ def predict(
         except Exception as exc:
             warnings.append(f"{m}: Fehler – {exc}")
 
-    # --- ML-Modell (optional) ---
+    # --- ML-Modell (optional, Bundle von app.py übergeben) ---
     ml_prob: Optional[float] = None
-    bundle = load_model(ticker)
-    if bundle:
+    if ml_bundle:
         try:
-            features = build_features(df)
+            features = _build_features(df)
             if len(features) > 0:
-                X = bundle["scaler"].transform(features.iloc[[-1]].values)
-                ml_prob = float(bundle["model"].predict_proba(X)[0][1])
+                X = ml_bundle["scaler"].transform(features.iloc[[-1]].values)
+                ml_prob = float(ml_bundle["model"].predict_proba(X)[0][1])
                 ml_score = (ml_prob - 0.5) * 2          # Skalierung auf [-1, 1]
                 scores.append(ml_score * 0.8)            # ML bekommt Gewicht 0.8
                 indicator_signals["ML-Modell"] = {
@@ -185,8 +223,7 @@ def predict(
     else:
         signal = "HALTEN"
 
-    state = load_state(ticker)
-    model_acc = state.get("accuracy")
+    model_acc = (training_state or {}).get("accuracy")
     acc_str = f" (Modell-Genauigkeit: {model_acc:.1%})" if model_acc else ""
 
     summary = (

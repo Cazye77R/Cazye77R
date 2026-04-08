@@ -28,7 +28,7 @@ from modules.model_manager import (
 from modules.data_fetcher import (
     search_stocks, fetch_ohlcv, fetch_info, is_valid_ticker,
 )
-from modules.trainer import StockTrainer, load_state, train, list_trained_stocks
+from modules.trainer import StockTrainer, load_state, load_model, train, list_trained_stocks
 from modules.predictor import predict, build_context_string, SIGNAL_FUNCTIONS
 from modules.backtester import (
     PaperTrader, lambo_value, lambo_display, lambo_progress, backtest_signals,
@@ -273,6 +273,52 @@ def _section(label: str) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # Session State
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Startup-Health-Check: Verzeichnisse + Ollama-Status
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _ensure_data_dirs() -> None:
+    """Erstellt fehlende Daten-Ordner beim ersten Start."""
+    import os
+    for d in ["data", "data/cache", "data/training_state", "data/portfolio"]:
+        os.makedirs(d, exist_ok=True)
+
+
+def _startup_check() -> None:
+    """
+    Beim App-Start: Verzeichnisse anlegen, Ollama pruefen, Onboarding anzeigen.
+    Wird einmal pro Session ausgefuehrt (session_state.startup_done).
+    """
+    if st.session_state.get("startup_done"):
+        return
+    _ensure_data_dirs()
+
+    ollama_ok = is_ollama_running()
+    has_models = False
+    if ollama_ok:
+        try:
+            has_models = len(get_available_models()) > 0
+        except Exception:
+            pass
+
+    if not ollama_ok:
+        st.info(
+            "Willkommen bei StockMind! "
+            "Ollama ist nicht erreichbar – starte es mit: "
+            "ollama serve && ollama pull llama3. "
+            "Marktdaten und Charts funktionieren auch ohne Ollama.",
+            icon="🚀",
+        )
+    elif not has_models:
+        st.info(
+            "Kein Modell installiert – "
+            "oeffne den Tab Modell-Manager und lade ein Modell herunter (Empfehlung: llama3).",
+            icon="📦",
+        )
+
+    st.session_state.startup_done = True
+
 def _init_session() -> None:
     defaults: dict = {
         "ticker": "",
@@ -305,12 +351,18 @@ def _init_session() -> None:
         "pt_budget": DEFAULT_BUDGET_EUR,
         "pt_order_cost": ORDER_COST_EUR,
         "pt_spread": SPREAD_PERCENT,
+        # Training-Zustand (für Animation/Sperre)
+        "running_training": False,
+        # Portfolio-Cache (vermeidet wiederholte yfinance-Calls)
+        "pt_summary_cache": None,
+        "pt_prices_cache": {},
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
 _init_session()
+_startup_check()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Chart-Hilfsfunktionen
@@ -722,9 +774,11 @@ with tab1:
                     hist.append(ticker_to_load)
                 if len(hist) > 10:
                     st.session_state.history = hist[-10:]
+                st.toast(f"📊 {len(df_new)} Kerzen geladen", icon="✅")
                 st.success(f"✅ {len(df_new)} Kerzen geladen.")
                 st.rerun()
         else:
+            st.toast("Bitte WKN, Ticker oder Firmenname eingeben.", icon="🚨")
             st.error("Bitte WKN, Ticker oder Firmenname eingeben.")
 
     # ── B: Chart + Controls ──────────────────────────────────────────────────
@@ -780,7 +834,8 @@ with tab1:
             if st.button("🔮 Signal berechnen", use_container_width=True,
                          key="btn_quick_pred"):
                 with st.spinner("Berechne Signal…"):
-                    pred = predict(ticker, df, method=st.session_state.method)
+                    pred = predict(ticker, df, method=st.session_state.method,
+                                  ml_bundle=load_model(ticker), training_state=load_state(ticker))
                     st.session_state.prediction   = pred
                     st.session_state.last_pred_ticker = ticker
                     st.session_state.last_pred_signal = pred.signal
@@ -804,7 +859,8 @@ with tab1:
                 if st.button("🤖 KI-Analyse starten", use_container_width=True,
                              key="btn_quick_ai"):
                     pred = st.session_state.prediction or predict(
-                        ticker, df, method=st.session_state.method
+                        ticker, df, method=st.session_state.method,
+                        ml_bundle=load_model(ticker), training_state=load_state(ticker),
                     )
                     ctx = build_context_string(ticker, df, pred)
                     with st.spinner("KI analysiert…"):
@@ -896,6 +952,7 @@ with tab1:
                             ),
                             unsafe_allow_html=True,
                         )
+                        st.session_state.running_training = True
                         with st.spinner(f"Trainingszyklus ({t_method})…"):
                             result = trainer.run_training_cycle(
                                 st.session_state.ticker,
@@ -1024,6 +1081,7 @@ with tab1:
                          key="btn_bt"):
                 fn = SIGNAL_FUNCTIONS.get(bt_method)
                 if not fn:
+                    st.toast(f"Methode '{bt_method}' nicht verfügbar.", icon="🚨")
                     st.error(f"Methode '{bt_method}' nicht verfügbar.")
                 else:
                     with st.spinner("Berechne Signale…"):
@@ -1287,6 +1345,7 @@ with tab2:
             if st.button("🚀 Auto-Trade starten", use_container_width=True,
                          type="primary", key="btn_auto_trade"):
                 if not is_ollama_running():
+                    st.toast("Ollama offline.", icon="🚨")
                     st.error("Ollama offline.")
                 else:
                     st.markdown(_ticker_html(), unsafe_allow_html=True)
@@ -1459,6 +1518,7 @@ with tab3:
                     bar_slot.progress(pct, text=f"Lade {dl_model}…")
                     done = True
             except Exception as e:
+                st.toast(f"Download-Fehler: {e}", icon="🚨")
                 st.error(f"Download-Fehler: {e}")
 
             progress_slot.empty()
