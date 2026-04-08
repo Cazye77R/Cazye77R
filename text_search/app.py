@@ -518,10 +518,35 @@ def main() -> None:
                     st.stop()
                 try:
                     stream_gen, sources = answer_question(query, search_index, chat_config)
+
+                    # Show context BEFORE the answer so the user can verify what was fed to the LLM
+                    if sources:
+                        with st.expander(
+                            f"📄 Verwendeter Kontext ({len(sources)} Chunks)",
+                            expanded=False,
+                        ):
+                            for rank, r in enumerate(sources, 1):
+                                score_pct = (
+                                    f"{r.score * 100:.1f}%"
+                                    if r.score <= 1.0
+                                    else f"{r.score:.2f}"
+                                )
+                                loc = ""
+                                if r.chunk.page is not None:
+                                    loc = f", Seite {r.chunk.page}"
+                                elif r.chunk.line_start is not None:
+                                    loc = f", Zeile {r.chunk.line_start}"
+                                st.markdown(
+                                    f"**[{rank}]** `{r.chunk.source}`{loc} — Score: `{score_pct}`"
+                                )
+                                st.text(r.chunk.text)
+                                if rank < len(sources):
+                                    st.divider()
+
                     st.markdown("**Antwort:**")
                     st.write_stream(stream_gen)
                     if sources:
-                        with st.expander("📎 Quellen"):
+                        with st.expander("📎 Quellen (mit Scores)"):
                             for rank, r in enumerate(sources, 1):
                                 _render_result(r, rank, query, all_chunks, file_bytes_map)
                 except ConnectionError as exc:

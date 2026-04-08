@@ -107,21 +107,26 @@ def answer_question(
 
 def _build_prompt(question: str, sources: List[SearchResult]) -> str:
     context_parts: list[str] = []
-    for r in sources:
+    for i, r in enumerate(sources, 1):
         loc = ""
         if r.chunk.page is not None:
             loc = f", Seite {r.chunk.page}"
         elif r.chunk.line_start is not None:
             loc = f", Zeile {r.chunk.line_start}"
         context_parts.append(
-            f"[Quelle: {r.chunk.source}{loc}, Chunk #{r.chunk.chunk_id}]\n{r.chunk.text}"
+            f"[{i}] [Quelle: {r.chunk.source}{loc}, Chunk #{r.chunk.chunk_id}]\n{r.chunk.text}"
         )
     context_block = "\n\n".join(context_parts)
 
     system = (
         "Du bist ein präziser Assistent. Beantworte die Frage ausschließlich auf "
-        "Basis der unten aufgeführten Textausschnitte. Falls die Antwort nicht "
-        "hervorgeht, antworte: \"Die Dokumente enthalten keine Information dazu.\"\n"
+        "Basis der unten aufgeführten Textausschnitte. "
+        "Zitiere jeden verwendeten Textausschnitt mit seiner Nummer in eckigen Klammern, "
+        "z. B. [1] oder [2], direkt im Antworttext. "
+        "Falls die Antwort nicht hervorgeht, antworte: "
+        "\"Die Dokumente enthalten keine Information dazu.\"\n"
+        "WICHTIG: Verwende ausschließlich die bereitgestellten Textausschnitte. "
+        "Kein externes Wissen, keine eigenen Schlussfolgerungen über den Dokumentinhalt hinaus.\n"
         "Antworte auf Deutsch."
     )
     return f"SYSTEM:\n{system}\n\nKONTEXT:\n{context_block}\n\nUSER:\n{question}"
