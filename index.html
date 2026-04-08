@@ -1353,9 +1353,9 @@
           <td>${escapeHtml(invoices)}</td>
           <td title="${escapeHtml(comment)}">${shortComment}</td>
           <td style="white-space:nowrap;">
-            <button class="btn-icon" title="Bearbeiten" onclick="openEditModal('${b.id}')">&#9998;</button>
-            <button class="btn-icon" title="Kopieren" onclick="copyBooking('${b.id}')">&#128203;</button>
-            <button class="btn-icon" title="Löschen" onclick="deleteBooking('${b.id}')">&#128465;</button>
+            <button class="btn-icon" title="Bearbeiten" aria-label="Buchung bearbeiten" onclick="openEditModal('${b.id}')">&#9998;</button>
+            <button class="btn-icon" title="Kopieren" aria-label="Buchung kopieren" onclick="copyBooking('${b.id}')">&#128203;</button>
+            <button class="btn-icon" title="Löschen" aria-label="Buchung löschen" onclick="deleteBooking('${b.id}')">&#128465;</button>
           </td>
         </tr>`;
       }).join('');
