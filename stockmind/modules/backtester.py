@@ -27,6 +27,9 @@ from config import (
     PORTFOLIO_DIR,
     SPREAD_PERCENT,
 )
+from modules.logger import logger
+
+logger.debug(f"Module loaded: {__name__}")
 
 
 # ===========================================================================

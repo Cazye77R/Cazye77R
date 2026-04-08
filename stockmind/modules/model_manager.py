@@ -18,6 +18,9 @@ import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import AVAILABLE_MODELS, DEFAULT_MODEL, MODEL_DESCRIPTIONS, OLLAMA_BASE_URL, OLLAMA_TIMEOUT_S
+from modules.logger import logger
+
+logger.debug(f"Module loaded: {__name__}")
 
 
 # ANSI-Escape-Sequenzen aus subprocess-Output entfernen
@@ -66,7 +69,8 @@ def is_ollama_running() -> bool:
     try:
         resp = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=3)
         return resp.status_code == 200
-    except Exception:
+    except Exception as _exc:
+        logger.debug(f"Ollama nicht erreichbar: {_exc}")
         return False
 
 
@@ -139,7 +143,8 @@ def get_available_models() -> list[str]:
         models = resp.json().get("models", [])
         # "llama3:latest" → "llama3"
         return [m["name"].split(":")[0] for m in models]
-    except Exception:
+    except Exception as _exc:
+        logger.debug(f"get_available_models fehlgeschlagen: {_exc}")
         return []
 
 
@@ -166,7 +171,8 @@ def get_available_models_with_info() -> list[dict]:
                 "description": MODEL_DESCRIPTIONS.get(name, ""),
             })
         return result
-    except Exception:
+    except Exception as _exc:
+        logger.debug(f"get_available_models_with_info fehlgeschlagen: {_exc}")
         return []
 
 
@@ -222,6 +228,7 @@ def download_model(model_name: str) -> Generator[str, None, None]:
         line = _strip_ansi(raw_line)
         if line and line != last_line:
             last_line = line
+            logger.info(f"ollama pull {model_name}: {line.strip()}")
             yield line
 
     proc.wait()
@@ -283,6 +290,7 @@ def query_model(
             return _query_via_http(model_name, messages, temperature)
         except Exception as exc:
             last_exc = exc
+            logger.warning(f"query_model Versuch {attempt + 1}/{max_retries + 1} fehlgeschlagen: {exc}")
             if attempt < max_retries:
                 wait = 2 ** attempt          # 1s, 2s
                 time.sleep(wait)

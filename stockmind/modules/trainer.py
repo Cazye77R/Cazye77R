@@ -27,6 +27,9 @@ from config import (
     DEFAULT_MODEL,
     TRAINING_STATE_DIR,
 )
+from modules.logger import logger
+
+logger.debug(f"Module loaded: {__name__}")
 
 # Methoden ohne "Auto (KI wählt)"
 _METHODS = [m for m in ANALYSIS_METHODS if m != "Auto (KI wählt)"]
@@ -167,6 +170,7 @@ class StockTrainer:
         try:
             raw_response = query_model(model_name, prompt, system, temperature=0.1)
         except Exception as exc:
+            logger.error(f"LLM-Anfrage fehlgeschlagen ({symbol}, {method}): {exc}")
             return self._error_result(str(exc), symbol, method)
 
         # --- Antwort parsen ---
@@ -576,7 +580,7 @@ class StockTrainer:
             data = json.loads(clean)
             return _normalize_parsed(data)
         except Exception:
-            pass
+            logger.debug("LLM-Antwort kein direktes JSON – versuche Extraktion")
 
         # 2. JSON-Block suchen
         # ```json { ... } ``` oder erstes vollständiges { ... }
@@ -588,7 +592,7 @@ class StockTrainer:
                 data = json.loads(block_match.group(1))
                 return _normalize_parsed(data)
             except Exception:
-                pass
+                logger.debug("JSON-Block in LLM-Antwort nicht parsebar – verwende Regex")
 
         # 3. Regex-Extraktion
         pred_match = re.search(

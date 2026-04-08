@@ -25,6 +25,9 @@ from config import (
     DEFAULT_INTERVAL,
     DEFAULT_PERIOD,
 )
+from modules.logger import logger
+
+logger.debug(f"Module loaded: {__name__}")
 
 # ---------------------------------------------------------------------------
 # Konstanten
@@ -258,6 +261,7 @@ def fetch_ohlcv(
             auto_adjust=True,
         )
     except Exception as exc:
+        logger.error(f"yfinance Download fehlgeschlagen ({symbol}): {exc}")
         return _empty_df(f"yfinance Download fehlgeschlagen: {exc}")
 
     if raw is None or raw.empty:
@@ -334,11 +338,10 @@ def _add_indicators(df: pd.DataFrame) -> pd.DataFrame:
             df[f"ema_{w}"] = EMAIndicator(close=close, window=w).ema_indicator()
 
     except ImportError:
-        # ta nicht installiert: Fallback auf manuelle Berechnung
+        logger.debug("ta-Bibliothek nicht installiert – verwende manuellen Indikator-Fallback")
         df = _add_indicators_manual(df)
-    except Exception:
-        # Kein Crash – Indikatoren bleiben weg, OHLCV ist trotzdem nutzbar
-        pass
+    except Exception as _exc:
+        logger.warning(f"Indikator-Berechnung fehlgeschlagen, OHLCV ohne Indikatoren: {_exc}")
 
     return df
 
@@ -407,6 +410,7 @@ def fetch_info(ticker: str) -> dict:
             "description": info.get("longBusinessSummary", ""),
         }
     except Exception as exc:
+        logger.warning(f"fetch_info({ticker}): {exc}")
         return {"symbol": ticker, "error": str(exc)}
 
 
@@ -474,8 +478,9 @@ def _load_cache(symbol: str, period: str, interval: str) -> Optional[pd.DataFram
         return None     # Abgelaufen – nicht löschen, wird beim nächsten Fetch überschrieben
     try:
         return pd.read_parquet(path)
-    except Exception:
-        return None     # Korrupter Cache – ignorieren, neu laden
+    except Exception as _exc:
+        logger.debug(f"Cache-Datei korrupt oder unlesbar ({path.name}): {_exc}")
+        return None
 
 
 def _save_cache(symbol: str, period: str, interval: str, df: pd.DataFrame) -> None:
@@ -483,8 +488,8 @@ def _save_cache(symbol: str, period: str, interval: str, df: pd.DataFrame) -> No
     path = _cache_path(symbol, period, interval)
     try:
         df.to_parquet(path, compression="snappy")
-    except Exception:
-        pass    # Cache-Fehler sind nicht kritisch
+    except Exception as _exc:
+        logger.warning(f"Cache-Schreiben fehlgeschlagen ({path.name}): {_exc}")
 
 
 def _empty_df(error_msg: str) -> pd.DataFrame:

@@ -13,3 +13,4 @@ pyarrow>=14.0
 ruff
 pytest
 pytest-timeout
+loguru>=0.7
