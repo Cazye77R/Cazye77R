@@ -934,144 +934,118 @@
       return new Date().toISOString().slice(0, 10);
     }
 
-    function csvEscape(val) {
-      const s = String(val == null ? '' : val);
-      if (s.includes(';') || s.includes('"') || s.includes('\n')) {
-        return '"' + s.replace(/"/g, '""') + '"';
-      }
-      return s;
-    }
+    /* placeholder — real impl moved to CSVHandler below */
+    function csvEscape(val) { return CSVHandler.escape(val); }
 
     /* ─────────────────────────────────────────────
-       SCHEMA MIGRATION
+       NAMESPACE: StorageManager
     ───────────────────────────────────────────── */
-    function migrateData(bookings, storedVersion) {
-      if (storedVersion === DATA_VERSION && bookings.every(b =>
-        b.invoiceNumbers !== undefined &&
-        b.comment       !== undefined &&
-        b.margin        !== undefined &&
-        b.filamentProfileName !== undefined
-      )) return bookings;
+    const StorageManager = {
+      migrate(bookings, storedVersion) {
+        if (storedVersion === DATA_VERSION && bookings.every(b =>
+          b.invoiceNumbers !== undefined &&
+          b.comment       !== undefined &&
+          b.margin        !== undefined &&
+          b.filamentProfileName !== undefined
+        )) return bookings;
 
-      let migratedCount = 0;
-      const result = bookings.map(b => {
-        let changed = false;
-        const u = { ...b };
-        if (u.invoiceNumbers      === undefined) { u.invoiceNumbers = [];  changed = true; }
-        if (u.comment             === undefined) { u.comment = '';         changed = true; }
-        if (u.filamentProfileName === undefined) { u.filamentProfileName = ''; changed = true; }
-        if (u.electricityKwPerHour === undefined) { u.electricityKwPerHour = 0; changed = true; }
-        if (u.electricityKwhTotal  === undefined) { u.electricityKwhTotal  = 0; changed = true; }
-        if (u.margin === undefined) {
-          u.margin = u.sellingPrice > 0
-            ? Math.round((u.profit / u.sellingPrice) * 1000) / 10
-            : 0;
-          changed = true;
+        let migratedCount = 0;
+        const result = bookings.map(b => {
+          let changed = false;
+          const u = { ...b };
+          if (u.invoiceNumbers      === undefined) { u.invoiceNumbers = [];  changed = true; }
+          if (u.comment             === undefined) { u.comment = '';         changed = true; }
+          if (u.filamentProfileName === undefined) { u.filamentProfileName = ''; changed = true; }
+          if (u.electricityKwPerHour === undefined) { u.electricityKwPerHour = 0; changed = true; }
+          if (u.electricityKwhTotal  === undefined) { u.electricityKwhTotal  = 0; changed = true; }
+          if (u.margin === undefined) {
+            u.margin = u.sellingPrice > 0
+              ? Math.round((u.profit / u.sellingPrice) * 1000) / 10
+              : 0;
+            changed = true;
+          }
+          if (changed) migratedCount++;
+          return u;
+        });
+
+        console.info(
+          `[3D Tracker] Migration: v${storedVersion || 'unbekannt'} → v${DATA_VERSION}` +
+          (migratedCount > 0 ? ` | ${migratedCount} Buchung(en) aktualisiert` : '')
+        );
+        return result;
+      },
+
+      load() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return [];
+          const parsed = JSON.parse(raw);
+          const storedVersion = Array.isArray(parsed) ? null : parsed.version;
+          const bookings      = Array.isArray(parsed) ? parsed : (parsed.bookings || []);
+          return StorageManager.migrate(bookings, storedVersion);
+        } catch (e) {
+          showToast('Fehler beim Laden der Buchungen.', 'error');
+          return [];
         }
-        if (changed) migratedCount++;
-        return u;
-      });
+      },
 
-      console.info(
-        `[3D Tracker] Migration: v${storedVersion || 'unbekannt'} → v${DATA_VERSION}` +
-        (migratedCount > 0 ? ` | ${migratedCount} Buchung(en) aktualisiert` : '')
-      );
-      return result;
-    }
+      save(bookings) {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: DATA_VERSION, bookings }));
+        } catch (e) {
+          if (e.name === 'QuotaExceededError') {
+            showToast('Speicher voll! Buchung konnte nicht gespeichert werden.', 'error');
+          } else {
+            showToast('Fehler beim Speichern.', 'error');
+          }
+        }
+      },
 
-    /* ─────────────────────────────────────────────
-       STORAGE
-    ───────────────────────────────────────────── */
-    function loadFromStorage() {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        // Support old format (plain array) and new format ({ version, bookings })
-        const storedVersion = Array.isArray(parsed) ? null : parsed.version;
-        const bookings      = Array.isArray(parsed) ? parsed : (parsed.bookings || []);
-        return migrateData(bookings, storedVersion);
-      } catch (e) {
-        showToast('Fehler beim Laden der Buchungen.', 'error');
-        return [];
-      }
-    }
+      loadSettings() {
+        try {
+          const raw = localStorage.getItem(SETTINGS_KEY);
+          return raw ? JSON.parse(raw) : { filamentPricePerKg: 22.99, electricityPricePerKwh: 0.32, filaments: [] };
+        } catch (e) {
+          return { filamentPricePerKg: 22.99, electricityPricePerKwh: 0.32, filaments: [] };
+        }
+      },
 
-    function saveToStorage(bookings) {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: DATA_VERSION, bookings }));
-      } catch (e) {
-        if (e.name === 'QuotaExceededError') {
-          showToast('Speicher voll! Buchung konnte nicht gespeichert werden.', 'error');
-        } else {
-          showToast('Fehler beim Speichern.', 'error');
+      saveSettings(settings) {
+        try {
+          localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        } catch (e) {
+          showToast('Einstellungen konnten nicht gespeichert werden.', 'error');
         }
       }
-    }
-
-    function loadSettings() {
-      try {
-        const raw = localStorage.getItem(SETTINGS_KEY);
-        return raw ? JSON.parse(raw) : { filamentPricePerKg: 22.99, electricityPricePerKwh: 0.32, filaments: [] };
-      } catch (e) {
-        return { filamentPricePerKg: 22.99, electricityPricePerKwh: 0.32, filaments: [] };
-      }
-    }
-
-    function saveSettings(settings) {
-      try {
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-      } catch (e) {
-        showToast('Einstellungen konnten nicht gespeichert werden.', 'error');
-      }
-    }
+    };
+    // Wrappers — behalten bestehende Funktionsnamen
+    function migrateData(b, v)   { return StorageManager.migrate(b, v); }
+    function loadFromStorage()   { return StorageManager.load(); }
+    function saveToStorage(b)    { return StorageManager.save(b); }
+    function loadSettings()      { return StorageManager.loadSettings(); }
+    function saveSettings(s)     { return StorageManager.saveSettings(s); }
 
     /* ─────────────────────────────────────────────
-       CALCULATIONS
+       NAMESPACE: CostCalculator
     ───────────────────────────────────────────── */
-    function calculateCosts(filamentGrams, filamentPricePerKg, electricityKwPerHour, durationHours, durationMinutes, electricityPricePerKwh, sellingPrice) {
-      const filamentCost    = Math.round((filamentGrams / 1000) * filamentPricePerKg * 100) / 100;
-      const totalKwh        = Math.round(electricityKwPerHour * (durationHours + durationMinutes / 60) * 1000) / 1000;
-      const electricityCost = Math.round(totalKwh * electricityPricePerKwh * 100) / 100;
-      const totalCost       = Math.round((filamentCost + electricityCost) * 100) / 100;
-      const profit          = Math.round((sellingPrice - totalCost) * 100) / 100;
-      const margin = sellingPrice > 0 ? Math.round((profit / sellingPrice) * 1000) / 10 : 0;
-      return { filamentCost, electricityCost, totalCost, profit, totalKwh, margin };
-    }
+    const CostCalculator = {
+      calc(filamentGrams, filamentPricePerKg, electricityKwPerHour, durationHours, durationMinutes, electricityPricePerKwh, sellingPrice) {
+        const filamentCost    = Math.round((filamentGrams / 1000) * filamentPricePerKg * 100) / 100;
+        const totalKwh        = Math.round(electricityKwPerHour * (durationHours + durationMinutes / 60) * 1000) / 1000;
+        const electricityCost = Math.round(totalKwh * electricityPricePerKwh * 100) / 100;
+        const totalCost       = Math.round((filamentCost + electricityCost) * 100) / 100;
+        const profit          = Math.round((sellingPrice - totalCost) * 100) / 100;
+        const margin = sellingPrice > 0 ? Math.round((profit / sellingPrice) * 1000) / 10 : 0;
+        return { filamentCost, electricityCost, totalCost, profit, totalKwh, margin };
+      }
+    };
+    // Wrapper — behält bestehenden Funktionsnamen
+    function calculateCosts(...args) { return CostCalculator.calc(...args); }
 
     /* ─────────────────────────────────────────────
        FORM PREVIEW
     ───────────────────────────────────────────── */
-    function updateFormPreview() {
-      const settings = loadSettings();
-      const profileSel = document.getElementById('f-filament-profile').value;
-      let filamentPrice = settings.filamentPricePerKg;
-      if (profileSel) {
-        const prof = (settings.filaments || []).find(f => f.id === profileSel);
-        if (prof) filamentPrice = prof.pricePerKg;
-      }
-      const grams   = parseFloat(document.getElementById('f-filament').value) || 0;
-      const powerKw = parseFloat(document.getElementById('f-kwh').value)      || 0;
-      const hours   = parseInt(document.getElementById('f-hours').value)      || 0;
-      const minutes = parseInt(document.getElementById('f-minutes').value)    || 0;
-      const selling = parseFloat(document.getElementById('f-selling').value)  || 0;
-
-      const { filamentCost, electricityCost, totalCost, profit, totalKwh, margin } =
-        calculateCosts(grams, filamentPrice, powerKw, hours, minutes, settings.electricityPricePerKwh, selling);
-
-      const setVal = (id, val, coloured) => {
-        const el = document.getElementById(id);
-        el.textContent = formatEur(val);
-        if (coloured) el.className = 'preview-value ' + (val > 0 ? 'positive' : 'negative');
-      };
-
-      setVal('prev-filament', filamentCost, false);
-      setVal('prev-elec',     electricityCost, false);
-      setVal('prev-total',    totalCost, false);
-      setVal('prev-profit',   profit, true);
-      document.getElementById('prev-kwh-total').textContent = totalKwh.toFixed(3) + ' kWh';
-      document.getElementById('prev-margin').textContent = margin.toFixed(1) + ' %';
-    }
+    function updateFormPreview() { return UI.updateFormPreview(); }
 
     /* ─────────────────────────────────────────────
        FORM VALIDATION
@@ -1283,16 +1257,7 @@
       showToast('Buchung gespeichert – Formular bereit für nächste Eingabe.', 'success');
     }
 
-    function resetPreview() {
-      ['prev-filament','prev-elec','prev-total'].forEach(id => {
-        const el = document.getElementById(id);
-        el.textContent = '— €';
-        el.className = 'preview-value';
-      });
-      const pp = document.getElementById('prev-profit');
-      pp.textContent = '— €';
-      pp.className = 'preview-value';
-    }
+    function resetPreview() { return UI.resetPreview(); }
 
     /* ─────────────────────────────────────────────
        DELETE BOOKING
@@ -1319,47 +1284,7 @@
     /* ─────────────────────────────────────────────
        RENDER TABLE
     ───────────────────────────────────────────── */
-    function renderBookingsTable() {
-      const tbody    = document.getElementById('bookings-tbody');
-      const bookings = loadFromStorage();
-
-      if (bookings.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="16" class="empty-state">Keine Buchungen vorhanden</td></tr>';
-        return;
-      }
-
-      const sorted = [...bookings].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-
-      tbody.innerHTML = sorted.map(b => {
-        const dur = b.durationHours + 'h ' + String(b.durationMinutes).padStart(2, '0') + 'm';
-        const profitClass = (b.profit ?? 0) > 0 ? 'profit-positive' : 'profit-negative';
-        const invoices = (b.invoiceNumbers || []).join(', ');
-        const comment = b.comment || '';
-        const shortComment = comment.length > 40 ? escapeHtml(comment.slice(0, 40)) + '…' : escapeHtml(comment);
-        return `<tr>
-          <td>${formatDate(b.date)}</td>
-          <td>${escapeHtml(b.description)}</td>
-          <td>${dur}</td>
-          <td>${escapeHtml(b.filamentProfileName || '—')}</td>
-          <td>${b.filamentGrams}</td>
-          <td>${b.electricityKwPerHour}</td>
-          <td>${(b.electricityKwhTotal || 0).toFixed(3)}</td>
-          <td>${formatEur(b.filamentCost)}</td>
-          <td>${formatEur(b.electricityCost)}</td>
-          <td>${formatEur(b.totalCost)}</td>
-          <td>${formatEur(b.sellingPrice)}</td>
-          <td class="${profitClass}">${formatEur(b.profit)}</td>
-          <td class="${profitClass}">${(b.margin ?? 0).toFixed(1)} %</td>
-          <td>${escapeHtml(invoices)}</td>
-          <td title="${escapeHtml(comment)}">${shortComment}</td>
-          <td style="white-space:nowrap;">
-            <button class="btn-icon" title="Bearbeiten" aria-label="Buchung bearbeiten" onclick="openEditModal('${b.id}')">&#9998;</button>
-            <button class="btn-icon" title="Kopieren" aria-label="Buchung kopieren" onclick="copyBooking('${b.id}')">&#128203;</button>
-            <button class="btn-icon" title="Löschen" aria-label="Buchung löschen" onclick="deleteBooking('${b.id}')">&#128465;</button>
-          </td>
-        </tr>`;
-      }).join('');
-    }
+    function renderBookingsTable() { return UI.renderBookingsTable(); }
 
     function escapeHtml(str) {
       return String(str)
@@ -1370,142 +1295,127 @@
     }
 
     /* ─────────────────────────────────────────────
-       CSV EXPORT
+       NAMESPACE: CSVHandler
     ───────────────────────────────────────────── */
-    function exportCSV() {
-      const bookings = loadFromStorage();
-      if (bookings.length === 0) {
-        showToast('Keine Buchungen zum Exportieren vorhanden.', 'info');
-        return;
-      }
+    const CSVHandler = {
+      escape(val) {
+        const s = String(val == null ? '' : val);
+        if (s.includes(';') || s.includes('"') || s.includes('\n')) {
+          return '"' + s.replace(/"/g, '""') + '"';
+        }
+        return s;
+      },
 
-      const rows = bookings.map(b => [
-        b.id, b.date, b.description,
-        (b.invoiceNumbers || []).join('|'),
-        b.comment || '',
-        b.durationHours, b.durationMinutes,
-        b.filamentProfileName || '',
-        b.filamentGrams, b.filamentPricePerKg,
-        b.electricityKwPerHour, b.electricityKwhTotal, b.electricityPricePerKwh,
-        b.sellingPrice, b.filamentCost, b.electricityCost, b.totalCost, b.profit,
-        b.margin ?? 0
-      ].map(csvEscape).join(';'));
-
-      const csvContent = CSV_HEADER + '\n' + rows.join('\n');
-      const blob = new Blob([BOM, csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      a.download = `3d-drucker-buchungen-${todayISO()}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-      localStorage.setItem('lastExportDate', todayISO());
-      showToast(`${bookings.length} Buchungen exportiert.`, 'success');
-    }
-
-    /* ─────────────────────────────────────────────
-       CSV IMPORT
-    ───────────────────────────────────────────── */
-    let _pendingImportFile = null;
-
-    function showImportDialog(file) {
-      _pendingImportFile = file;
-      document.getElementById('import-modal').classList.add('open');
-    }
-
-    function closeImportModal() {
-      document.getElementById('import-modal').classList.remove('open');
-      _pendingImportFile = null;
-      document.getElementById('csv-file-input').value = '';
-    }
-
-    function importCSV(file, mode) {
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        try {
-          let text = e.target.result;
-          // strip UTF-8 BOM if present
-          if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-
-          const lines = text.split(/\r?\n/).filter(l => l.trim());
-          if (lines.length < 2) {
-            showToast('CSV ist leer oder ungültig.', 'error');
-            return;
-          }
-
-          // skip header line
-          const dataLines = lines.slice(1);
-          const imported  = [];
-
-          for (const line of dataLines) {
-            const cols = parseCSVLine(line);
-            if (cols.length < 19) continue;
-            imported.push({
-              id:                     cols[0] || generateId(),
-              date:                   cols[1],
-              description:            cols[2],
-              invoiceNumbers:         cols[3] ? cols[3].split('|').filter(Boolean) : [],
-              comment:                cols[4] || '',
-              durationHours:          Number(cols[5])  || 0,
-              durationMinutes:        Number(cols[6])  || 0,
-              filamentProfileName:    cols[7] || '',
-              filamentGrams:          Number(cols[8])  || 0,
-              filamentPricePerKg:     Number(cols[9])  || 0,
-              electricityKwPerHour:   Number(cols[10]) || 0,
-              electricityKwhTotal:    Number(cols[11]) || 0,
-              electricityPricePerKwh: Number(cols[12]) || 0,
-              sellingPrice:           Number(cols[13]) || 0,
-              filamentCost:           Number(cols[14]) || 0,
-              electricityCost:        Number(cols[15]) || 0,
-              totalCost:              Number(cols[16]) || 0,
-              profit:                 Number(cols[17]) || 0,
-              margin:                 Number(cols[18]) || 0,
-            });
-          }
-
-          let existing = mode === 'replace' ? [] : loadFromStorage();
-
-          if (mode === 'merge') {
-            const existingIds = new Set(existing.map(b => b.id));
-            for (const b of imported) {
-              if (!existingIds.has(b.id)) {
-                existing.push(b);
-                existingIds.add(b.id);
-              }
-            }
+      parseLine(line) {
+        const result = [];
+        let current  = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (inQuotes) {
+            if (ch === '"' && line[i + 1] === '"') { current += '"'; i++; }
+            else if (ch === '"')                   { inQuotes = false; }
+            else                                   { current += ch; }
           } else {
-            existing = imported;
+            if (ch === '"')       { inQuotes = true; }
+            else if (ch === ';')  { result.push(current); current = ''; }
+            else                  { current += ch; }
           }
-
-          saveToStorage(existing);
-          renderBookingsTable();
-          showToast(`${imported.length} Buchungen importiert (${mode === 'merge' ? 'zusammengeführt' : 'ersetzt'}).`, 'success');
-        } catch (err) {
-          showToast('Fehler beim Importieren der CSV-Datei.', 'error');
         }
-      };
-      reader.readAsText(file, 'UTF-8');
-    }
+        result.push(current);
+        return result;
+      },
 
-    function parseCSVLine(line) {
-      const result = [];
-      let current  = '';
-      let inQuotes = false;
-      for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (inQuotes) {
-          if (ch === '"' && line[i + 1] === '"') { current += '"'; i++; }
-          else if (ch === '"')                   { inQuotes = false; }
-          else                                   { current += ch; }
-        } else {
-          if (ch === '"')       { inQuotes = true; }
-          else if (ch === ';')  { result.push(current); current = ''; }
-          else                  { current += ch; }
+      export() {
+        const bookings = loadFromStorage();
+        if (bookings.length === 0) {
+          showToast('Keine Buchungen zum Exportieren vorhanden.', 'info');
+          return;
         }
+        const rows = bookings.map(b => [
+          b.id, b.date, b.description,
+          (b.invoiceNumbers || []).join('|'),
+          b.comment || '',
+          b.durationHours, b.durationMinutes,
+          b.filamentProfileName || '',
+          b.filamentGrams, b.filamentPricePerKg,
+          b.electricityKwPerHour, b.electricityKwhTotal, b.electricityPricePerKwh,
+          b.sellingPrice, b.filamentCost, b.electricityCost, b.totalCost, b.profit,
+          b.margin ?? 0
+        ].map(v => CSVHandler.escape(v)).join(';'));
+        const csvContent = CSV_HEADER + '\n' + rows.join('\n');
+        const blob = new Blob([BOM, csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `3d-drucker-buchungen-${todayISO()}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        localStorage.setItem('lastExportDate', todayISO());
+        showToast(`${bookings.length} Buchungen exportiert.`, 'success');
+      },
+
+      import(file, mode) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          try {
+            let text = e.target.result;
+            if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+            const lines = text.split(/\r?\n/).filter(l => l.trim());
+            if (lines.length < 2) { showToast('CSV ist leer oder ungültig.', 'error'); return; }
+            const dataLines = lines.slice(1);
+            const imported  = [];
+            for (const line of dataLines) {
+              const cols = CSVHandler.parseLine(line);
+              if (cols.length < 19) continue;
+              imported.push({
+                id:                     cols[0] || generateId(),
+                date:                   cols[1],
+                description:            cols[2],
+                invoiceNumbers:         cols[3] ? cols[3].split('|').filter(Boolean) : [],
+                comment:                cols[4] || '',
+                durationHours:          Number(cols[5])  || 0,
+                durationMinutes:        Number(cols[6])  || 0,
+                filamentProfileName:    cols[7] || '',
+                filamentGrams:          Number(cols[8])  || 0,
+                filamentPricePerKg:     Number(cols[9])  || 0,
+                electricityKwPerHour:   Number(cols[10]) || 0,
+                electricityKwhTotal:    Number(cols[11]) || 0,
+                electricityPricePerKwh: Number(cols[12]) || 0,
+                sellingPrice:           Number(cols[13]) || 0,
+                filamentCost:           Number(cols[14]) || 0,
+                electricityCost:        Number(cols[15]) || 0,
+                totalCost:              Number(cols[16]) || 0,
+                profit:                 Number(cols[17]) || 0,
+                margin:                 Number(cols[18]) || 0,
+              });
+            }
+            let existing = mode === 'replace' ? [] : loadFromStorage();
+            if (mode === 'merge') {
+              const existingIds = new Set(existing.map(b => b.id));
+              for (const b of imported) {
+                if (!existingIds.has(b.id)) { existing.push(b); existingIds.add(b.id); }
+              }
+            } else {
+              existing = imported;
+            }
+            saveToStorage(existing);
+            renderBookingsTable();
+            showToast(`${imported.length} Buchungen importiert (${mode === 'merge' ? 'zusammengeführt' : 'ersetzt'}).`, 'success');
+          } catch (err) {
+            showToast('Fehler beim Importieren der CSV-Datei.', 'error');
+          }
+        };
+        reader.readAsText(file, 'UTF-8');
       }
-      result.push(current);
-      return result;
-    }
+    };
+    // Wrappers — behalten bestehende Funktionsnamen
+    function exportCSV()           { return CSVHandler.export(); }
+    function importCSV(file, mode) { return CSVHandler.import(file, mode); }
+    function parseCSVLine(line)    { return CSVHandler.parseLine(line); }
+
+    /* _pendingImportFile — state for import modal */
+    let _pendingImportFile = null;
 
     /* ─────────────────────────────────────────────
        CHART
@@ -1675,49 +1585,133 @@
     }
 
     /* ─────────────────────────────────────────────
-       TOAST
+       NAMESPACE: UI
     ───────────────────────────────────────────── */
-    function showToast(message, type) {
-      const container = document.getElementById('toast-container');
-      const toast     = document.createElement('div');
-      toast.className = `toast ${type}`;
-      toast.textContent = message;
-      container.appendChild(toast);
+    const UI = {
+      showToast(message, type) {
+        const container = document.getElementById('toast-container');
+        const toast     = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => toast.classList.add('show'));
+        });
+        setTimeout(() => {
+          toast.classList.remove('show');
+          setTimeout(() => toast.remove(), 300);
+        }, 3000);
+      },
 
-      // trigger reflow then show
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => toast.classList.add('show'));
-      });
+      showImportDialog(file) {
+        _pendingImportFile = file;
+        document.getElementById('import-modal').classList.add('open');
+      },
 
-      setTimeout(() => {
-        toast.classList.remove('show');
-        setTimeout(() => toast.remove(), 300);
-      }, 3000);
-    }
+      closeImportModal() {
+        document.getElementById('import-modal').classList.remove('open');
+        _pendingImportFile = null;
+        document.getElementById('csv-file-input').value = '';
+      },
 
-    /* ─────────────────────────────────────────────
-       TAB SWITCHING
-    ───────────────────────────────────────────── */
-    function activateTab(tabId) {
-      document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-
-      const section = document.getElementById(tabId);
-      const btn     = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
-      if (section) section.classList.add('active');
-      if (btn)     btn.classList.add('active');
-
-      // lazy-render chart when switching to its tab
-      if (tabId === 'diagramm') {
-        populateYearSelector();
-        const sel = document.getElementById('year-selector');
-        renderChart(parseInt(sel.value) || new Date().getFullYear());
+      activateTab(tabId) {
+        document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        const section = document.getElementById(tabId);
+        const btn     = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+        if (section) section.classList.add('active');
+        if (btn)     btn.classList.add('active');
+        if (tabId === 'diagramm') {
+          populateYearSelector();
+          const sel = document.getElementById('year-selector');
+          renderChart(parseInt(sel.value) || new Date().getFullYear());
+        }
+        if (tabId === 'statistiken') renderStatistics();
       }
+    };
+      updateFormPreview() {
+        const settings = loadSettings();
+        const profileSel = document.getElementById('f-filament-profile').value;
+        let filamentPrice = settings.filamentPricePerKg;
+        if (profileSel) {
+          const prof = (settings.filaments || []).find(f => f.id === profileSel);
+          if (prof) filamentPrice = prof.pricePerKg;
+        }
+        const grams   = parseFloat(document.getElementById('f-filament').value) || 0;
+        const powerKw = parseFloat(document.getElementById('f-kwh').value)      || 0;
+        const hours   = parseInt(document.getElementById('f-hours').value)      || 0;
+        const minutes = parseInt(document.getElementById('f-minutes').value)    || 0;
+        const selling = parseFloat(document.getElementById('f-selling').value)  || 0;
+        const { filamentCost, electricityCost, totalCost, profit, totalKwh, margin } =
+          calculateCosts(grams, filamentPrice, powerKw, hours, minutes, settings.electricityPricePerKwh, selling);
+        const setVal = (id, val, coloured) => {
+          const el = document.getElementById(id);
+          el.textContent = formatEur(val);
+          if (coloured) el.className = 'preview-value ' + (val > 0 ? 'positive' : 'negative');
+        };
+        setVal('prev-filament', filamentCost, false);
+        setVal('prev-elec',     electricityCost, false);
+        setVal('prev-total',    totalCost, false);
+        setVal('prev-profit',   profit, true);
+        document.getElementById('prev-kwh-total').textContent = totalKwh.toFixed(3) + ' kWh';
+        document.getElementById('prev-margin').textContent = margin.toFixed(1) + ' %';
+      },
 
-      if (tabId === 'statistiken') {
-        renderStatistics();
+      resetPreview() {
+        ['prev-filament','prev-elec','prev-total'].forEach(id => {
+          const el = document.getElementById(id);
+          el.textContent = '— €';
+          el.className = 'preview-value';
+        });
+        const pp = document.getElementById('prev-profit');
+        pp.textContent = '— €';
+        pp.className = 'preview-value';
+      },
+
+      renderBookingsTable() {
+        const tbody    = document.getElementById('bookings-tbody');
+        const bookings = loadFromStorage();
+        if (bookings.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="16" class="empty-state">Keine Buchungen vorhanden</td></tr>';
+          return;
+        }
+        const sorted = [...bookings].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        tbody.innerHTML = sorted.map(b => {
+          const dur = b.durationHours + 'h ' + String(b.durationMinutes).padStart(2, '0') + 'm';
+          const profitClass = (b.profit ?? 0) > 0 ? 'profit-positive' : 'profit-negative';
+          const invoices = (b.invoiceNumbers || []).join(', ');
+          const comment = b.comment || '';
+          const shortComment = comment.length > 40 ? escapeHtml(comment.slice(0, 40)) + '…' : escapeHtml(comment);
+          return `<tr>
+            <td>${formatDate(b.date)}</td>
+            <td>${escapeHtml(b.description)}</td>
+            <td>${dur}</td>
+            <td>${escapeHtml(b.filamentProfileName || '—')}</td>
+            <td>${b.filamentGrams}</td>
+            <td>${b.electricityKwPerHour}</td>
+            <td>${(b.electricityKwhTotal || 0).toFixed(3)}</td>
+            <td>${formatEur(b.filamentCost)}</td>
+            <td>${formatEur(b.electricityCost)}</td>
+            <td>${formatEur(b.totalCost)}</td>
+            <td>${formatEur(b.sellingPrice)}</td>
+            <td class="${profitClass}">${formatEur(b.profit)}</td>
+            <td class="${profitClass}">${(b.margin ?? 0).toFixed(1)} %</td>
+            <td>${escapeHtml(invoices)}</td>
+            <td title="${escapeHtml(comment)}">${shortComment}</td>
+            <td style="white-space:nowrap;">
+              <button class="btn-icon" title="Bearbeiten" aria-label="Buchung bearbeiten" onclick="openEditModal('${b.id}')">&#9998;</button>
+              <button class="btn-icon" title="Kopieren" aria-label="Buchung kopieren" onclick="copyBooking('${b.id}')">&#128203;</button>
+              <button class="btn-icon" title="Löschen" aria-label="Buchung löschen" onclick="deleteBooking('${b.id}')">&#128465;</button>
+            </td>
+          </tr>`;
+        }).join('');
       }
-    }
+    };
+    // Wrappers — behalten bestehende Funktionsnamen
+    function showToast(m, t)        { return UI.showToast(m, t); }
+    function showImportDialog(f)    { return UI.showImportDialog(f); }
+    function closeImportModal()     { return UI.closeImportModal(); }
+    function activateTab(tabId)     { return UI.activateTab(tabId); }
 
     /* ─────────────────────────────────────────────
        INVOICE TAG HELPERS
