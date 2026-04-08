@@ -872,6 +872,7 @@
     const STORAGE_KEY  = '3d_tracker_bookings';
     const SETTINGS_KEY = '3d_tracker_settings';
     const DATA_VERSION = '1.4';
+    const BOM          = '\uFEFF'; // UTF-8 Byte Order Mark für Excel-Kompatibilität
 
     const CSV_HEADER = [
       'ID','Datum','Beschreibung','Rechnungsnummern','Kommentar',
@@ -1277,8 +1278,8 @@
         b.margin ?? 0
       ].map(csvEscape).join(';'));
 
-      const csv  = '\uFEFF' + CSV_HEADER + '\n' + rows.join('\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const csvContent = CSV_HEADER + '\n' + rows.join('\n');
+      const blob = new Blob([BOM, csvContent], { type: 'text/csv;charset=utf-8;' });
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
       a.href     = url;
