@@ -455,11 +455,11 @@ def main() -> None:
     st.sidebar.markdown("---")
     st.sidebar.subheader("Index-Cache")
     cached_index_upload = st.sidebar.file_uploader(
-        "Gespeicherten Index laden (.pkl)", type=["pkl"]
+        "Gespeicherten Index laden (.zip)", type=["zip"]
     )
     if cached_index_upload is not None and search_index is None:
         try:
-            with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
                 tmp.write(cached_index_upload.getbuffer())
             search_index = load_index(Path(tmp.name))
             st.sidebar.success(f"Index geladen ({len(search_index.keyword_index.chunks)} Chunks)")
@@ -468,14 +468,14 @@ def main() -> None:
 
     # Index download
     if search_index is not None:
-        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
             save_index(search_index, Path(tmp.name))
             idx_bytes = Path(tmp.name).read_bytes()
         st.sidebar.download_button(
-            "Index herunterladen (.pkl)",
+            "Index herunterladen (.zip)",
             data=idx_bytes,
-            file_name="text_search_index.pkl",
-            mime="application/octet-stream",
+            file_name="text_search_index.zip",
+            mime="application/zip",
         )
 
     # ── SEARCH MODE ──────────────────────────────────────────────────────────
