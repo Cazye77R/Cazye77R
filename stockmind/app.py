@@ -19,7 +19,7 @@ from config import (
     APP_TITLE, APP_ICON, APP_VERSION,
     ANALYSIS_METHODS, DEFAULT_BUDGET_EUR, DEFAULT_PERIOD,
     LAMBO_PRICE_EUR, ORDER_COST_EUR, SPREAD_PERCENT, AVAILABLE_MODELS,
-    EXPLORATION_CONSTANT,
+    EXPLORATION_CONSTANT, ENABLE_EASTER_EGGS,
 )
 from modules.model_manager import (
     MODEL_DESCRIPTIONS, is_ollama_running, get_ollama_status,
@@ -657,7 +657,7 @@ with st.sidebar:
     st.divider()
 
     # ── Easter Egg: Währungsauswahl ───────────────────────────────────────
-    if st.session_state.currency_unlocked:
+    if ENABLE_EASTER_EGGS and st.session_state.currency_unlocked:
         _section("💱 Anzeigewährung")
         st.session_state.selected_currency = st.selectbox(
             "Währung",
@@ -985,17 +985,18 @@ with tab1:
                                     unsafe_allow_html=True,
                                 )
                             # Easter Egg
-                            egg = check_easter_egg({
-                                "cycles": cycle,
-                                "previous_cycles": st.session_state.prev_cycles,
-                                "accuracy": o_acc,
-                                "total_return_pct": None,
-                            })
-                            if egg:
-                                if CONFETTI_MARKER in egg:
-                                    st.balloons()
-                                    egg = egg.replace(CONFETTI_MARKER, "")
-                                st.info(egg)
+                            if ENABLE_EASTER_EGGS:
+                                egg = check_easter_egg({
+                                    "cycles": cycle,
+                                    "previous_cycles": st.session_state.prev_cycles,
+                                    "accuracy": o_acc,
+                                    "total_return_pct": None,
+                                })
+                                if egg:
+                                    if CONFETTI_MARKER in egg:
+                                        st.balloons()
+                                        egg = egg.replace(CONFETTI_MARKER, "")
+                                    st.info(egg)
                             st.session_state.prev_cycles = cycle
 
                             # Letzte Vorhersage in Sidebar aktualisieren
@@ -1050,17 +1051,18 @@ with tab1:
                             status.update(label="Fertig!", state="complete")
 
                         if last_res and not last_res.get("error"):
-                            egg = check_easter_egg({
-                                "cycles": last_res.get("cycle", 0),
-                                "previous_cycles": st.session_state.prev_cycles,
-                                "accuracy": last_res.get("overall_accuracy"),
-                                "total_return_pct": None,
-                            })
-                            if egg:
-                                if CONFETTI_MARKER in egg:
-                                    st.balloons()
-                                    egg = egg.replace(CONFETTI_MARKER, "")
-                                st.info(egg)
+                            if ENABLE_EASTER_EGGS:
+                                egg = check_easter_egg({
+                                    "cycles": last_res.get("cycle", 0),
+                                    "previous_cycles": st.session_state.prev_cycles,
+                                    "accuracy": last_res.get("overall_accuracy"),
+                                    "total_return_pct": None,
+                                })
+                                if egg:
+                                    if CONFETTI_MARKER in egg:
+                                        st.balloons()
+                                        egg = egg.replace(CONFETTI_MARKER, "")
+                                    st.info(egg)
                             st.session_state.prev_cycles = last_res.get("cycle", 0)
                             st.rerun()
 
@@ -1193,19 +1195,22 @@ with tab2:
     _ret_color    = _GREEN if summary["total_return_pct"] >= 0 else _RED
     _ret_sign     = "+" if summary["total_return_pct"] >= 0 else ""
     with kpi1:
-        if st.button(
-            f"💼 Gesamtwert\n{_display_val}",
-            key="btn_total_click",
-            help=(
-                f"Klick {st.session_state.currency_clicks + 1}"
-                f"/{CURRENCY_UNLOCK_CLICKS} bis zur Währungsauswahl 🤫"
-            ),
-            use_container_width=True,
-        ):
-            st.session_state.currency_clicks += 1
-            if st.session_state.currency_clicks >= CURRENCY_UNLOCK_CLICKS:
-                st.session_state.currency_unlocked = True
-                st.rerun()
+        if ENABLE_EASTER_EGGS:
+            if st.button(
+                f"💼 Gesamtwert\n{_display_val}",
+                key="btn_total_click",
+                help=(
+                    f"Klick {st.session_state.currency_clicks + 1}"
+                    f"/{CURRENCY_UNLOCK_CLICKS} bis zur Währungsauswahl 🤫"
+                ),
+                use_container_width=True,
+            ):
+                st.session_state.currency_clicks += 1
+                if st.session_state.currency_clicks >= CURRENCY_UNLOCK_CLICKS:
+                    st.session_state.currency_unlocked = True
+                    st.rerun()
+        else:
+            st.metric("💼 Gesamtwert", _display_val)
         st.markdown(
             f'<span style="color:{_ret_color};font-family:IBM Plex Mono;">'
             f'{_ret_sign}{summary["total_return_pct"]:.2f}%</span>',
@@ -1225,7 +1230,7 @@ with tab2:
                 f"{n_sell} Trades")
 
     # Währungsauswahl nach Unlock
-    if st.session_state.currency_unlocked:
+    if ENABLE_EASTER_EGGS and st.session_state.currency_unlocked:
         st.markdown(
             '<div class="sm-card-accent">'
             '🎉 <strong>Easter Egg freigeschaltet!</strong> '
@@ -1235,18 +1240,20 @@ with tab2:
         )
 
     # Trade-Count Easter Egg
-    trade_egg = get_trade_count_egg(summary.get("num_trades", 0))
-    if trade_egg:
-        egg_key = f"trade_egg_{summary.get('num_trades', 0)}"
-        if egg_key not in st.session_state.eggs_fired:
-            st.session_state.eggs_fired.add(egg_key)
-            st.toast(trade_egg)
+    if ENABLE_EASTER_EGGS:
+        trade_egg = get_trade_count_egg(summary.get("num_trades", 0))
+        if trade_egg:
+            egg_key = f"trade_egg_{summary.get('num_trades', 0)}"
+            if egg_key not in st.session_state.eggs_fired:
+                st.session_state.eggs_fired.add(egg_key)
+                st.toast(trade_egg)
 
     # ── Lambo-O-Meter ─────────────────────────────────────────────────────────
-    st.divider()
-    lv_pct, lv_msg = lambo_progress(summary["total_value"])
-    _section(f"🏎️ Lambo-O-Meter  ·  {lambo_display(summary['total_value'])}")
-    st.progress(min(lv_pct / 100, 1.0), text=lv_msg)
+    if ENABLE_EASTER_EGGS:
+        st.divider()
+        lv_pct, lv_msg = lambo_progress(summary["total_value"])
+        _section(f"🏎️ Lambo-O-Meter  ·  {lambo_display(summary['total_value'])}")
+        st.progress(min(lv_pct / 100, 1.0), text=lv_msg)
 
     # ── Performance-Chart ─────────────────────────────────────────────────────
     perf_df = pt.get_performance_chart()

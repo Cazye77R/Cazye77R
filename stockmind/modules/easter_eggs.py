@@ -13,7 +13,7 @@ from typing import Optional
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import LAMBO_PRICE_EUR
+from config import ENABLE_EASTER_EGGS, LAMBO_PRICE_EUR
 
 
 # ===========================================================================
@@ -61,6 +61,10 @@ def get_currency_display(eur_value: float, currency: str) -> str:
         get_currency_display(10_234.56, "🍕 Pizzen (12€)")  → "852 🍕 Pizzen"
         get_currency_display(10_234.56, "🏎️ Lambos (536.000€)") → "0.0191 🏎️ Lambos"
     """
+    # Feature-Flag: Bei deaktiviertem Easter Egg immer plain EUR zurückgeben
+    if not ENABLE_EASTER_EGGS:
+        return f"{eur_value:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
     if currency == "EUR €":
         return f"{eur_value:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
 

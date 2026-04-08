@@ -155,6 +155,8 @@ StockMind enthält einige versteckte Überraschungen.
 Hinweis: Schau genau hin – manchmal lohnt es sich, öfter auf dasselbe zu klicken.
 Und wer fleißig trainiert, wird belohnt... 🤫
 
+> Easter Eggs lassen sich in `.env` deaktivieren: `ENABLE_EASTER_EGGS=false`
+
 ---
 
 ## Lizenz

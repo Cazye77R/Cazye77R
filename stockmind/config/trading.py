@@ -41,3 +41,7 @@ BOLLINGER_STD: float = 2.0
 # Exploration-Konstante: höher = mehr neue Methoden testen, niedriger = mehr exploitieren
 # sqrt(2) ≈ 1.414 ist der theoretische Standardwert für UCB1
 EXPLORATION_CONSTANT: float = float(os.getenv("EXPLORATION_CONSTANT", "1.414"))
+
+# --- Feature-Flags ---
+# Easter Eggs (Lambo-Währung, Konfetti, versteckte Überraschungen)
+ENABLE_EASTER_EGGS: bool = os.getenv("ENABLE_EASTER_EGGS", "true").lower() == "true"
