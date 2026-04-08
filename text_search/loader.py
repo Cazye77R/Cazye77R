@@ -23,6 +23,8 @@ def load_file(path: Path, chunk_size: int = 300, overlap: int = 50) -> List[Chun
         return _load_pdf(path, chunk_size=chunk_size, overlap=overlap)
     if suffix == ".csv":
         return _load_csv(path)  # CSV: 1 Chunk pro Zeile, chunk_size irrelevant
+    if suffix == ".docx":
+        return _load_docx(path, chunk_size=chunk_size, overlap=overlap)
     return _load_text(path, chunk_size=chunk_size, overlap=overlap)
 
 
@@ -53,6 +55,75 @@ def _load_csv(path: Path) -> List[Chunk]:
                         line_start=row_idx + 2,  # 1-based, +1 for header
                     )
                 )
+    return chunks
+
+
+def _load_docx(path: Path, chunk_size: int = 300, overlap: int = 50) -> List[Chunk]:
+    """Load a .docx file via python-docx (lazy import).
+
+    Paragraphs are joined into a single text block; line_start tracks the
+    1-based paragraph number where each chunk begins. Page tracking is not
+    available through the python-docx API without COM automation.
+    """
+    try:
+        import docx  # type: ignore[import-untyped]
+    except ImportError as exc:
+        raise ImportError(
+            "python-docx ist nicht installiert. Bitte installieren mit:\n"
+            "  pip install python-docx"
+        ) from exc
+
+    doc = docx.Document(path)
+    # Collect non-empty paragraphs with their 1-based index
+    paragraphs: List[tuple[int, str]] = [
+        (idx, p.text.strip())
+        for idx, p in enumerate(doc.paragraphs, start=1)
+        if p.text.strip()
+    ]
+    if not paragraphs:
+        return []
+
+    # Join all paragraph text; record which paragraph index each chunk starts at
+    # by chunking paragraph-by-paragraph similar to sentence chunking.
+    chunks: List[Chunk] = []
+    chunk_id = 0
+    i = 0  # current paragraph index
+
+    while i < len(paragraphs):
+        current_texts: List[str] = []
+        word_count = 0
+        j = i
+        while j < len(paragraphs):
+            para_words = len(paragraphs[j][1].split())
+            if current_texts and word_count + para_words > chunk_size:
+                break
+            current_texts.append(paragraphs[j][1])
+            word_count += para_words
+            j += 1
+
+        chunk_text = " ".join(current_texts)
+        para_start = paragraphs[i][0]  # 1-based paragraph number
+
+        chunks.append(Chunk(
+            text=chunk_text,
+            source=path.name,
+            chunk_id=chunk_id,
+            page=None,
+            line_start=para_start,
+        ))
+        chunk_id += 1
+
+        # Overlap: rewind through paragraphs to cover ~overlap words
+        if overlap > 0 and j > i + 1:
+            overlap_counted = 0
+            k = j - 1
+            while k > i and overlap_counted < overlap:
+                overlap_counted += len(paragraphs[k][1].split())
+                k -= 1
+            i = max(i + 1, k + 1)
+        else:
+            i = j
+
     return chunks
 
 

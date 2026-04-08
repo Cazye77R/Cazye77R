@@ -596,7 +596,7 @@ def main() -> None:
         st.subheader("1. Dateien hochladen")
         uploaded_files = st.file_uploader(
             "Wähle eine oder mehrere Dateien",
-            type=["txt", "md", "csv", "pdf"],
+            type=["txt", "md", "csv", "pdf", "docx"],
             accept_multiple_files=True,
         )
 
