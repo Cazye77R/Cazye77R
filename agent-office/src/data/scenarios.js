@@ -1,13 +1,24 @@
-// Predefined office scenarios
+import { createAgentMachine } from '../agents/agentMachine';
+
+/**
+ * Startup-Szenario: 5 Agents, Heimatpositionen entsprechen den
+ * Schreibtisch-Positionen aus officeLayout.js (DESKS).
+ * Namen entsprechen AGENT_STYLES in scene/Agent.jsx.
+ */
+export const STARTUP_AGENTS = [
+  createAgentMachine('aria', 'ARIA', 'Engineer',  1, 2),
+  createAgentMachine('brix', 'BRIX', 'Designer',  3, 2),
+  createAgentMachine('cade', 'CADE', 'Developer', 6, 2),
+  createAgentMachine('dorn', 'DORN', 'DevOps',    8, 2),
+  createAgentMachine('elsa', 'ELSA', 'Manager',   1, 6),
+];
+
+// Legacy-Export (useScenario.js)
 export const SCENARIOS = {
   startup: {
     id: 'startup',
     label: 'Startup Office',
-    gridSize: { cols: 10, rows: 10 },
-    agents: [
-      { id: 'a1', name: 'Alice', role: 'Engineer', position: { col: 2, row: 2 } },
-      { id: 'a2', name: 'Bob', role: 'Designer', position: { col: 5, row: 3 } },
-      { id: 'a3', name: 'Charlie', role: 'Manager', position: { col: 7, row: 6 } },
-    ],
+    gridSize: { cols: 11, rows: 9 },
+    agents: STARTUP_AGENTS,
   },
 };
