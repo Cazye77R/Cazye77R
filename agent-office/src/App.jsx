@@ -1,105 +1,38 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
 
-import { useAgentLoop }   from './hooks/useAgentLoop';
-import { STATES }         from './agents/agentMachine';
-import { STARTUP_AGENTS } from './data/scenarios';
-import { FurnitureStyles } from './scene/Furniture';
-import Scene              from './scene/Scene';
+import { useAgentLoop }        from './hooks/useAgentLoop';
+import { useScenarioRunner }   from './hooks/useScenario';
+import { STATES }              from './agents/agentMachine';
+import { STARTUP_AGENTS }      from './data/scenarios';
+import { FurnitureStyles }     from './scene/Furniture';
+import Scene                   from './scene/Scene';
+
+import Toolbar                 from './ui/Toolbar';
+import AgentStatusBar          from './ui/AgentStatusBar';
+import ScenarioPanel           from './ui/ScenarioPanel';
+import EventLog                from './ui/EventLog';
 
 // ---------------------------------------------------------------------------
-// Agent colour palette (mirrors AGENT_STYLES in scene/Agent.jsx)
+// Constants
 // ---------------------------------------------------------------------------
-const AGENT_COLORS = {
-  ARIA: '#c0392b',
-  BRIX: '#f39c12',
-  CADE: '#27ae60',
-  DORN: '#2980b9',
-  ELSA: '#8e44ad',
-};
 
-// ---------------------------------------------------------------------------
-// AI activity destinations
-// ---------------------------------------------------------------------------
-const DESTINATIONS = [
-  (a) => ({ gx: a.homePos.gx, gy: a.homePos.gy, state: STATES.WORKING,    dur: 5000, msg: 'working',         speech: 'Coding...'       }),
-  ()  => ({ gx: 9,            gy: 4,             state: STATES.AT_COFFEE,  dur: 3500, msg: 'coffee break',    speech: 'Need coffee!'    }),
-  ()  => ({ gx: 8,            gy: 6,             state: STATES.AT_CABINET, dur: 4000, msg: 'checking files',  speech: 'Filing docs...'  }),
-  ()  => ({ gx: 4,            gy: 4,             state: STATES.IN_MEETING, dur: 7000, msg: 'in meeting',      speech: 'Meeting time...' }),
-  ()  => ({ gx: 3,            gy: 5,             state: STATES.IN_MEETING, dur: 7000, msg: 'brainstorming',   speech: 'Let\'s discuss!' }),
-  ()  => ({ gx: 5,            gy: 5,             state: STATES.IN_MEETING, dur: 7000, msg: 'sprint planning', speech: 'Sprint plan!'    }),
+const RANDOM_DESTINATIONS = [
+  (a) => ({ gx: a.homePos.gx, gy: a.homePos.gy, state: STATES.WORKING,    dur: 5000, type: 'work',    msg: 'arbeitet...',       speech: 'Fokus!' }),
+  ()  => ({ gx: 9,            gy: 4,             state: STATES.AT_COFFEE,  dur: 3500, type: 'coffee',  msg: 'kaffeepause',       speech: '☕ Pause!' }),
+  ()  => ({ gx: 8,            gy: 6,             state: STATES.AT_CABINET, dur: 4000, type: 'cabinet', msg: 'unterlagen holen',  speech: 'Archiv...' }),
+  ()  => ({ gx: 4,            gy: 4,             state: STATES.IN_MEETING, dur: 7000, type: 'meet',    msg: 'spontanmeeting',    speech: 'Meeting!' }),
+  ()  => ({ gx: 3,            gy: 5,             state: STATES.IN_MEETING, dur: 7000, type: 'meet',    msg: 'brainstorming',     speech: 'Idee!' }),
 ];
 
 // ---------------------------------------------------------------------------
-// Sidebar sub-components
+// Helpers
 // ---------------------------------------------------------------------------
 
-function AgentInfoPanel({ agent }) {
-  return (
-    <div className="agent-panel">
-      <div className="agent-panel-name">{agent.name}</div>
-      <div className="agent-panel-role">{agent.role}</div>
-      <div className="agent-panel-row">
-        <span className={`state-badge ${agent.currentState}`}>
-          {agent.currentState}
-        </span>
-        <span className="agent-pos">
-          [{agent.pos.gx}, {agent.pos.gy}]
-        </span>
-      </div>
-      {agent.speech && (
-        <div style={{ marginTop: 6, fontSize: 10, color: '#a5d6ff', fontStyle: 'italic' }}>
-          &ldquo;{agent.speech.text}&rdquo;
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AgentRoster({ agents, selectedId, onSelect }) {
-  return (
-    <div className="agent-roster">
-      <div className="section-title">Agents</div>
-      {agents.map((a) => (
-        <div
-          key={a.id}
-          className={`roster-item${a.id === selectedId ? ' active' : ''}`}
-          onClick={() => onSelect(a.id === selectedId ? null : a.id)}
-        >
-          <div className="roster-dot" style={{ background: AGENT_COLORS[a.name] ?? '#555' }} />
-          <span className="roster-name">{a.name}</span>
-          <span className="roster-state">{a.currentState}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function LogPanel({ entries }) {
-  const bottomRef = useRef(null);
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [entries.length]);
-
-  return (
-    <div className="log-panel">
-      <div className="section-title" style={{ padding: '8px 12px', borderBottom: '1px solid #30363d' }}>
-        Activity Log
-      </div>
-      <div className="log-entries">
-        {entries.map((e, i) => (
-          <div key={i} className={`log-entry${i === entries.length - 1 ? ' fresh' : ''}`}>
-            <span className="log-time">{e.time}</span>
-            <span className="log-name" style={{ color: AGENT_COLORS[e.agent] ?? '#58a6ff' }}>
-              {e.agent}
-            </span>
-            <span className="log-msg">{e.msg}</span>
-          </div>
-        ))}
-        <div ref={bottomRef} />
-      </div>
-    </div>
-  );
+function timestamp() {
+  return new Date().toLocaleTimeString('de', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -113,115 +46,151 @@ export default function App() {
   const [logEntries, setLogEntries] = useState([]);
 
   // ── Agent loop ────────────────────────────────────────────────────────
-  const { agents, moveAgent, setSpeech } = useAgentLoop(STARTUP_AGENTS, { running, speed });
+  const { agents, moveAgent, setSpeech } = useAgentLoop(
+    STARTUP_AGENTS,
+    { running, speed },
+  );
 
-  // Stable ref so the AI interval doesn't stale-close over agents
+  // Stable ref for intervals/callbacks
   const agentsRef = useRef(agents);
   useEffect(() => { agentsRef.current = agents; }, [agents]);
 
-  // ── AI behaviour loop ─────────────────────────────────────────────────
+  // ── Log helper ────────────────────────────────────────────────────────
+  const addLog = useCallback((entry) => {
+    setLogEntries((prev) => [...prev, { time: timestamp(), ...entry }].slice(-200));
+  }, []);
+
+  // ── Scenario runner ───────────────────────────────────────────────────
+  const scenario = useScenarioRunner(agents, { moveAgent, setSpeech });
+
+  // Log when scenario advances a step
+  const prevStepIdx = useRef(-1);
   useEffect(() => {
-    if (!running) return;
+    if (
+      scenario.stepIdx === prevStepIdx.current ||
+      scenario.stepIdx < 0 ||
+      !scenario.scenario
+    ) return;
+    prevStepIdx.current = scenario.stepIdx;
+
+    const step = scenario.scenario.steps[scenario.stepIdx];
+    const who  = step.agents
+      ? step.agents.map((id) => id.toUpperCase()).join('+')
+      : step.agent?.toUpperCase() ?? '?';
+
+    addLog({
+      type: step.type,
+      agent: who,
+      msg:  step.topic ?? step.message ?? step.type,
+    });
+  }, [scenario.stepIdx, scenario.scenario, addLog]);
+
+  // ── AI free-roam loop (active when no scenario is running) ────────────
+  useEffect(() => {
+    if (scenario.scenarioId || !running) return;
 
     const iv = setInterval(() => {
       const idle = agentsRef.current.filter((a) => a.currentState === STATES.IDLE);
-      if (idle.length === 0) return;
+      if (!idle.length) return;
 
       const agent = idle[Math.floor(Math.random() * idle.length)];
-      const dest  = DESTINATIONS[Math.floor(Math.random() * DESTINATIONS.length)](agent);
+      const dest  = RANDOM_DESTINATIONS[
+        Math.floor(Math.random() * RANDOM_DESTINATIONS.length)
+      ](agent);
 
       moveAgent(agent.id, dest.gx, dest.gy, dest.state, dest.dur);
       setSpeech(agent.id, dest.speech, 3000);
-
-      const time = new Date().toLocaleTimeString('de', {
-        hour: '2-digit', minute: '2-digit', second: '2-digit',
-      });
-      setLogEntries((prev) =>
-        [...prev, { time, agent: agent.name, msg: dest.msg }].slice(-80),
-      );
-    }, 2800);
+      addLog({ type: dest.type, agent: agent.name, msg: dest.msg });
+    }, 3000);
 
     return () => clearInterval(iv);
-  }, [running, moveAgent, setSpeech]);
+  }, [scenario.scenarioId, running, moveAgent, setSpeech, addLog]);
 
-  // ── Click-to-move ──────────────────────────────────────────────────────
+  // ── Click-to-move ─────────────────────────────────────────────────────
   function handleTileClick(gx, gy) {
     if (!selectedId) return;
     const agent = agentsRef.current.find((a) => a.id === selectedId);
     if (!agent) return;
 
     moveAgent(selectedId, gx, gy, STATES.WORKING, 4000);
-    setSpeech(selectedId, `Going to [${gx},${gy}]`, 2000);
-
-    const time = new Date().toLocaleTimeString('de', {
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-    });
-    setLogEntries((prev) =>
-      [...prev, { time, agent: agent.name, msg: `→ [${gx},${gy}]` }].slice(-80),
-    );
+    setSpeech(selectedId, `→ [${gx},${gy}]`, 2000);
+    addLog({ type: 'work', agent: agent.name, msg: `→ [${gx},${gy}]` });
   }
 
-  // ── Selected agent ────────────────────────────────────────────────────
-  const selectedAgent = agents.find((a) => a.id === selectedId) ?? null;
+  // ── Random event ──────────────────────────────────────────────────────
+  const handleRandomEvent = useCallback(() => {
+    const cur = agentsRef.current;
+    const idle = cur.filter((a) => a.currentState === STATES.IDLE);
+    if (!idle.length) return;
+
+    const roll = Math.random();
+
+    if (roll < 0.35 && idle.length >= 2) {
+      // Spontanmeeting mit 2 Agents
+      const [a1, a2] = idle.sort(() => Math.random() - 0.5).slice(0, 2);
+      moveAgent(a1.id, 4, 4, STATES.IN_MEETING, 6000);
+      moveAgent(a2.id, 3, 5, STATES.IN_MEETING, 6000);
+      setSpeech(a1.id, 'Spontanmeeting!', 3500);
+      setSpeech(a2.id, 'Kurze Absprache?', 3500);
+      addLog({ type: 'meet', agent: `${a1.name}+${a2.name}`, msg: 'spontanmeeting' });
+    } else if (roll < 0.65) {
+      const a = idle[Math.floor(Math.random() * idle.length)];
+      moveAgent(a.id, 9, 4, STATES.AT_COFFEE, 3000);
+      setSpeech(a.id, '☕ Kaffeepause!', 2500);
+      addLog({ type: 'coffee', agent: a.name, msg: 'kaffeepause!' });
+    } else {
+      const a = idle[Math.floor(Math.random() * idle.length)];
+      moveAgent(a.id, 8, 6, STATES.AT_CABINET, 4000);
+      setSpeech(a.id, 'Unterlagen holen!', 3500);
+      addLog({ type: 'cabinet', agent: a.name, msg: 'unterlagen holen' });
+    }
+  }, [moveAgent, setSpeech, addLog]);
 
   // ── Render ────────────────────────────────────────────────────────────
   return (
     <>
       <FurnitureStyles />
 
-      {/* Top bar */}
-      <div className="app-topbar">
-        <span className="app-title">agent-office</span>
+      <Toolbar
+        running={running}
+        speed={speed}
+        onToggle={useCallback(() => setRunning((r) => !r), [])}
+        onSpeedChange={setSpeed}
+        onRandomEvent={handleRandomEvent}
+      />
 
-        <button
-          className={`ctrl-btn${running ? ' active' : ''}`}
-          onClick={() => setRunning((r) => !r)}
-        >
-          {running ? '⏸ Pause' : '▶ Play'}
-        </button>
+      <AgentStatusBar
+        agents={agents}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+      />
 
-        <label className="speed-label">
-          Speed
-          <input
-            type="range"
-            className="speed-input"
-            min={1} max={8} step={0.5}
-            value={speed}
-            onChange={(e) => setSpeed(Number(e.target.value))}
-          />
-          <span className="speed-val">{speed}x</span>
-        </label>
-      </div>
-
-      {/* Main content */}
       <div className="app-body">
-        {/* Scene */}
         <div className="scene-wrap">
           <Scene
             agents={agents}
             selectedId={selectedId}
-            onAgentClick={(id) => setSelectedId((cur) => cur === id ? null : id)}
+            onAgentClick={(id) => setSelectedId((cur) => (cur === id ? null : id))}
             onTileClick={handleTileClick}
           />
         </div>
 
-        {/* Sidebar */}
         <div className="sidebar">
-          {selectedAgent && <AgentInfoPanel agent={selectedAgent} />}
-          <AgentRoster
-            agents={agents}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
+          <ScenarioPanel
+            {...scenario}
+            onStart={scenario.start}
+            onPause={scenario.pause}
+            onResume={scenario.resume}
+            onReset={scenario.reset}
           />
-          <LogPanel entries={logEntries} />
+          <EventLog entries={logEntries} />
         </div>
       </div>
 
-      {/* Hint bar */}
       <div className="hint-bar">
-        <span className="hint"><span>Click agent</span> to select</span>
-        <span className="hint"><span>Click tile</span> to move selected agent</span>
-        <span className="hint"><span>Sidebar</span> shows live state</span>
+        <span className="hint"><span>Agent klicken</span> → auswählen</span>
+        <span className="hint"><span>Tile klicken</span> → bewegen</span>
+        <span className="hint"><span>Space</span> → Play/Pause</span>
       </div>
     </>
   );
