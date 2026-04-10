@@ -4,21 +4,25 @@
  *  - Play/Pause mit [Space]-Shortcut
  *  - Geschwindigkeit: 0.5x / 1x / 2x / 4x
  *  - Zufalls-Event Button mit 5s Cooldown-Indikator
+ *  - Kamera-Fit / Screenshot / Dark-Light-Toggle
  */
 import { useEffect, useState, useRef, useCallback } from 'react';
 
 const SPEED_STEPS = [0.5, 1, 2, 4];
 
-/**
- * @param {boolean}  running
- * @param {number}   speed
- * @param {Function} onToggle
- * @param {Function} onSpeedChange  (s: number) => void
- * @param {Function} onRandomEvent
- */
-export default function Toolbar({ running, speed, onToggle, onSpeedChange, onRandomEvent }) {
-  const [cooldown, setCooldown]   = useState(0);   // remaining seconds
-  const intervalRef               = useRef(null);
+export default function Toolbar({
+  running,
+  speed,
+  darkMode,
+  onToggle,
+  onSpeedChange,
+  onRandomEvent,
+  onToggleTheme,
+  onFitScreen,
+  onScreenshot,
+}) {
+  const [cooldown, setCooldown] = useState(0);
+  const intervalRef = useRef(null);
 
   // ── Space shortcut ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -45,16 +49,12 @@ export default function Toolbar({ running, speed, onToggle, onSpeedChange, onRan
     clearInterval(intervalRef.current);
     intervalRef.current = setInterval(() => {
       setCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(intervalRef.current);
-          return 0;
-        }
+        if (prev <= 1) { clearInterval(intervalRef.current); return 0; }
         return prev - 1;
       });
     }, 1000);
   }, [cooldown, onRandomEvent]);
 
-  // cleanup on unmount
   useEffect(() => () => clearInterval(intervalRef.current), []);
 
   const hasCooldown = cooldown > 0;
@@ -104,8 +104,6 @@ export default function Toolbar({ running, speed, onToggle, onSpeedChange, onRan
       >
         <span className="toolbar-btn-icon">⚡</span>
         Zufall
-
-        {/* Cooldown bar + counter */}
         {hasCooldown && (
           <span className="toolbar-cooldown-wrap" aria-hidden="true">
             <span
@@ -115,6 +113,39 @@ export default function Toolbar({ running, speed, onToggle, onSpeedChange, onRan
             <span className="toolbar-cooldown-label">{cooldown}s</span>
           </span>
         )}
+      </button>
+
+      <div className="toolbar-divider" />
+
+      {/* Fit to screen */}
+      <button
+        className="toolbar-btn"
+        onClick={onFitScreen}
+        title="Kamera auf Standardposition zurücksetzen"
+      >
+        <span className="toolbar-btn-icon">⊡</span>
+        Fit
+      </button>
+
+      {/* Screenshot */}
+      <button
+        className="toolbar-btn"
+        onClick={onScreenshot}
+        title="Screenshot als PNG speichern"
+      >
+        <span className="toolbar-btn-icon">📷</span>
+        Shot
+      </button>
+
+      {/* Dark / Light toggle — pushed to right edge */}
+      <button
+        className={`toolbar-btn toolbar-btn--theme${darkMode ? '' : ' active'}`}
+        onClick={onToggleTheme}
+        title={darkMode ? 'Zu Light Mode wechseln' : 'Zu Dark Mode wechseln'}
+        style={{ marginLeft: 'auto' }}
+      >
+        <span className="toolbar-btn-icon">{darkMode ? '☀' : '🌙'}</span>
+        {darkMode ? 'Light' : 'Dark'}
       </button>
     </div>
   );

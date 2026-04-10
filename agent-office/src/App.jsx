@@ -5,7 +5,6 @@ import { useAgentLoop }        from './hooks/useAgentLoop';
 import { useScenarioRunner }   from './hooks/useScenario';
 import { STATES }              from './agents/agentMachine';
 import { STARTUP_AGENTS }      from './data/scenarios';
-import { FurnitureStyles }     from './scene/Furniture';
 import Scene                   from './scene/Scene';
 
 import Toolbar                 from './ui/Toolbar';
@@ -44,6 +43,15 @@ export default function App() {
   const [speed,      setSpeed]      = useState(1);
   const [selectedId, setSelectedId] = useState(null);
   const [logEntries, setLogEntries] = useState([]);
+  const [darkMode,   setDarkMode]   = useState(true);
+
+  // Ref to Scene — exposes fitScreen() and screenshot()
+  const sceneRef = useRef(null);
+
+  // ── Dark / Light mode ─────────────────────────────────────────────────
+  useEffect(() => {
+    document.body.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
 
   // ── Agent loop ────────────────────────────────────────────────────────
   const { agents, moveAgent, setSpeech } = useAgentLoop(
@@ -51,7 +59,6 @@ export default function App() {
     { running, speed },
   );
 
-  // Stable ref for intervals/callbacks
   const agentsRef = useRef(agents);
   useEffect(() => { agentsRef.current = agents; }, [agents]);
 
@@ -63,7 +70,6 @@ export default function App() {
   // ── Scenario runner ───────────────────────────────────────────────────
   const scenario = useScenarioRunner(agents, { moveAgent, setSpeech });
 
-  // Log when scenario advances a step
   const prevStepIdx = useRef(-1);
   useEffect(() => {
     if (
@@ -85,7 +91,7 @@ export default function App() {
     });
   }, [scenario.stepIdx, scenario.scenario, addLog]);
 
-  // ── AI free-roam loop (active when no scenario is running) ────────────
+  // ── AI free-roam loop ─────────────────────────────────────────────────
   useEffect(() => {
     if (scenario.scenarioId || !running) return;
 
@@ -119,14 +125,13 @@ export default function App() {
 
   // ── Random event ──────────────────────────────────────────────────────
   const handleRandomEvent = useCallback(() => {
-    const cur = agentsRef.current;
+    const cur  = agentsRef.current;
     const idle = cur.filter((a) => a.currentState === STATES.IDLE);
     if (!idle.length) return;
 
     const roll = Math.random();
 
     if (roll < 0.35 && idle.length >= 2) {
-      // Spontanmeeting mit 2 Agents
       const [a1, a2] = idle.sort(() => Math.random() - 0.5).slice(0, 2);
       moveAgent(a1.id, 4, 4, STATES.IN_MEETING, 6000);
       moveAgent(a2.id, 3, 5, STATES.IN_MEETING, 6000);
@@ -149,14 +154,16 @@ export default function App() {
   // ── Render ────────────────────────────────────────────────────────────
   return (
     <>
-      <FurnitureStyles />
-
       <Toolbar
         running={running}
         speed={speed}
+        darkMode={darkMode}
         onToggle={useCallback(() => setRunning((r) => !r), [])}
         onSpeedChange={setSpeed}
         onRandomEvent={handleRandomEvent}
+        onToggleTheme={() => setDarkMode((d) => !d)}
+        onFitScreen={() => sceneRef.current?.fitScreen()}
+        onScreenshot={() => sceneRef.current?.screenshot()}
       />
 
       <AgentStatusBar
@@ -168,6 +175,7 @@ export default function App() {
       <div className="app-body">
         <div className="scene-wrap">
           <Scene
+            ref={sceneRef}
             agents={agents}
             selectedId={selectedId}
             onAgentClick={(id) => setSelectedId((cur) => (cur === id ? null : id))}
@@ -190,6 +198,8 @@ export default function App() {
       <div className="hint-bar">
         <span className="hint"><span>Agent klicken</span> → auswählen</span>
         <span className="hint"><span>Tile klicken</span> → bewegen</span>
+        <span className="hint"><span>Drag</span> → kamera</span>
+        <span className="hint"><span>Scroll</span> → zoom</span>
         <span className="hint"><span>Space</span> → Play/Pause</span>
       </div>
     </>

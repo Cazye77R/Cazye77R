@@ -8,6 +8,7 @@
  * CSS keyframes are injected once via <FurnitureStyles />.
  */
 
+import { memo } from 'react';
 import { iso } from '../engine/iso';
 
 // ---------------------------------------------------------------------------
@@ -66,7 +67,7 @@ function IsoTop({ x, y, w, h, fill, stroke = 'none', opacity = 1 }) {
  * @param {number}  props.gy
  * @param {boolean} [props.open=false]  true while an agent is AT_CABINET
  */
-export function CabinetBox({ gx, gy, open = false }) {
+export const CabinetBox = memo(function CabinetBox({ gx, gy, open = false }) {
   const { x, y } = iso(gx, gy, 0);
 
   // Drawer slide-out: interpolated 0 → 8px (CSS transition on the group)
@@ -133,7 +134,7 @@ export function CabinetBox({ gx, gy, open = false }) {
       })}
     </g>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // DeskUnit — Schreibtisch
@@ -145,7 +146,7 @@ export function CabinetBox({ gx, gy, open = false }) {
  * @param {number}  props.gy
  * @param {string}  [props.agentName]  label on the monitor
  */
-export function DeskUnit({ gx, gy, agentName }) {
+export const DeskUnit = memo(function DeskUnit({ gx, gy, agentName }) {
   const { x, y } = iso(gx, gy, 0);
 
   return (
@@ -260,13 +261,13 @@ export function DeskUnit({ gx, gy, agentName }) {
       )}
     </g>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // CoffeeMachine — Kaffeemaschine
 // ---------------------------------------------------------------------------
 
-export function CoffeeMachine({ gx, gy }) {
+export const CoffeeMachine = memo(function CoffeeMachine({ gx, gy }) {
   const { x, y } = iso(gx, gy, 0);
 
   return (
@@ -328,7 +329,7 @@ export function CoffeeMachine({ gx, gy }) {
       </g>
     </g>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // MeetingTable — Besprechungstisch (3×2 Zellen: gx 3-5, gy 4-5)
@@ -341,7 +342,7 @@ export function CoffeeMachine({ gx, gy }) {
  * @param {number}  props.gy       anchor row    (4)
  * @param {boolean} [props.meetingActive=false]
  */
-export function MeetingTable({ gx, gy, meetingActive = false }) {
+export const MeetingTable = memo(function MeetingTable({ gx, gy, meetingActive = false }) {
   // Screen position of the anchor tile
   const { x, y } = iso(gx, gy, 0);
 
@@ -415,4 +416,4 @@ export function MeetingTable({ gx, gy, meetingActive = false }) {
       ))}
     </g>
   );
-}
+});

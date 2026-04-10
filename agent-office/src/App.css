@@ -6,13 +6,26 @@
 
 :root {
   --font-mono: 'JetBrains Mono', 'Courier New', Consolas, monospace;
-  --bg0:     #0d1117;
-  --bg1:     #161b22;
-  --bg2:     #21262d;
-  --border:  #30363d;
-  --text:    #c9d1d9;
-  --text-dim:#8b949e;
-  --accent:  #58a6ff;
+  --bg0:      #0d1117;
+  --bg1:      #161b22;
+  --bg2:      #21262d;
+  --border:   #30363d;
+  --text:     #c9d1d9;
+  --text-dim: #8b949e;
+  --accent:   #58a6ff;
+  --scene-bg: #1a1a2e;
+}
+
+/* ── Light mode ───────────────────────────────────────────────────────── */
+body[data-theme="light"] {
+  --bg0:      #f0e8d8;
+  --bg1:      #e8dbc8;
+  --bg2:      #ddd0ba;
+  --border:   #c4aa88;
+  --text:     #2c1c0c;
+  --text-dim: #6b4e2a;
+  --accent:   #1565c0;
+  --scene-bg: #d4c8b0;
 }
 
 body {
@@ -21,6 +34,15 @@ body {
   font-family: var(--font-mono);
   height: 100vh;
   overflow: hidden;
+  transition: background-color 0.4s, color 0.4s;
+}
+
+/* Smooth theme transitions on key containers */
+.toolbar, .agent-status-bar, .sidebar,
+.scenario-panel, .event-log, .hint-bar,
+.agent-card, .toolbar-btn, .toolbar-speed-btn,
+.scenario-select, .scenario-ctrl-btn, .event-log-header {
+  transition: background-color 0.4s, border-color 0.4s, color 0.4s;
 }
 
 #root { height: 100vh; display: flex; flex-direction: column; }
@@ -158,6 +180,16 @@ body {
   z-index: 1;
 }
 
+/* Theme toggle */
+.toolbar-btn--theme {
+  color: var(--text-dim);
+}
+.toolbar-btn--theme.active {
+  color: #f0a500;
+  border-color: #7a5400;
+  background: #7a540011;
+}
+
 /* ── Agent status bar ────────────────────────────────────────────────── */
 .agent-status-bar {
   display: flex;
@@ -259,8 +291,9 @@ body {
 .scene-wrap {
   position: relative;
   overflow: hidden;
-  background: #1a1a2e;
+  background: var(--scene-bg, #1a1a2e);
   min-height: 0;
+  transition: background-color 0.4s;
 }
 
 /* ── Sidebar ─────────────────────────────────────────────────────────── */
