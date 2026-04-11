@@ -8,7 +8,7 @@
 #   modules/trainer.py        → scikit-learn, pickle (stdlib)
 #   modules/predictor.py      → scikit-learn, numpy
 #   modules/backtester.py     → pandas, numpy
-#   modules/logger.py         → loguru
+#   modules/logger.py         → logging (stdlib)
 #   modules/easter_eggs.py    → (nur stdlib)
 #   config/__init__.py        → python-dotenv (optional)
 #
@@ -39,9 +39,6 @@ ta>=0.10.0                # ta.momentum.RSIIndicator, ta.trend.MACD, etc.
 
 # ── KI / LLM ─────────────────────────────────────────────────────────────────
 ollama>=0.3.0             # model_manager.py (lazy import)
-
-# ── Logging ──────────────────────────────────────────────────────────────────
-loguru>=0.6.0
 
 # ── Konfiguration ────────────────────────────────────────────────────────────
 python-dotenv>=1.0.0      # config/__init__.py (optional / graceful fallback)

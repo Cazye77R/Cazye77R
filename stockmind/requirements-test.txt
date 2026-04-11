@@ -16,9 +16,6 @@ ta>=0.10
 # --- KI / LLM (API-Calls in Tests gemockt/übersprungen) ---
 requests>=2.28
 
-# --- Logging ---
-loguru>=0.6
-
 # --- Konfiguration (optional – Tests laufen auch ohne dotenv) ---
 python-dotenv>=1.0
 
