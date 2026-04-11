@@ -52,6 +52,52 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# @st.cache_data – vermeidet redundante HTTP/IO-Calls bei jedem Rerun
+# Alle externen API-Aufrufe laufen garantiert im Hauptthread (kein Context-Loss).
+# ─────────────────────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _check_ollama() -> bool:
+    """Gecachter Ollama-Verbindungscheck (60 s TTL)."""
+    return is_ollama_running()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _ollama_status() -> dict:
+    """Gecachter erweiterter Ollama-Status (60 s TTL)."""
+    return get_ollama_status()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _models_list() -> list:
+    """Gecachte Liste installierter Modell-Namen (60 s TTL)."""
+    return get_available_models()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _models_info() -> list:
+    """Gecachte Modell-Infos inkl. Größe (60 s TTL)."""
+    return get_available_models_with_info()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _ohlcv(ticker: str, period: str) -> pd.DataFrame:
+    """Gecachte OHLCV-Daten (5 min TTL, zusätzlich zum Parquet-Datei-Cache)."""
+    return fetch_ohlcv(ticker, period=period)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _info(ticker: str) -> dict:
+    """Gecachte Stammdaten/Metadaten (1 h TTL)."""
+    return fetch_info(ticker)
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _search(query: str) -> list:
+    """Gecachte Suchergebnisse (2 min TTL)."""
+    return search_stocks(query)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Bloomberg / Trading-Terminal CSS
 # ─────────────────────────────────────────────────────────────────────────────
 _CSS = """
@@ -296,11 +342,11 @@ def _startup_check() -> None:
         return
     _ensure_data_dirs()
 
-    ollama_ok = is_ollama_running()
+    ollama_ok = _check_ollama()
     has_models = False
     if ollama_ok:
         try:
-            has_models = len(get_available_models()) > 0
+            has_models = len(_models_list()) > 0
         except Exception:
             pass
 
@@ -627,10 +673,10 @@ with st.sidebar:
             ):
                 st.session_state.ticker = hist_ticker
                 with st.spinner(f"Lade {hist_ticker}…"):
-                    df_h = fetch_ohlcv(hist_ticker, period=st.session_state.period)
+                    df_h = _ohlcv(hist_ticker, st.session_state.period)
                     if not df_h.empty:
                         st.session_state.df   = df_h
-                        st.session_state.info = fetch_info(hist_ticker)
+                        st.session_state.info = _info(hist_ticker)
                         st.session_state.prediction  = None
                         st.session_state.analysis_text = ""
                 st.rerun()
@@ -725,7 +771,7 @@ with tab1:
     # Suche ausführen
     if do_search and q:
         with st.spinner("Suche läuft…"):
-            results = search_stocks(q)
+            results = _search(q)
         if results:
             st.session_state.search_results = results
             st.session_state.search_selected_idx = 0
@@ -760,14 +806,17 @@ with tab1:
             ticker_to_load = ""
 
         if ticker_to_load:
+            # Cache für diesen Ticker invalidieren → garantiert frische Daten
+            _ohlcv.clear()
+            _info.clear()
             with st.spinner(f"Lade {ticker_to_load}…"):
-                df_new = fetch_ohlcv(ticker_to_load, period=st.session_state.period)
+                df_new = _ohlcv(ticker_to_load, st.session_state.period)
             if df_new.empty:
                 st.error(df_new.attrs.get("error", "Fehler beim Laden der Daten."))
             else:
                 st.session_state.ticker = ticker_to_load
                 st.session_state.df     = df_new
-                st.session_state.info   = fetch_info(ticker_to_load)
+                st.session_state.info   = _info(ticker_to_load)
                 st.session_state.prediction   = None
                 st.session_state.analysis_text = ""
                 # Verlauf aktualisieren
@@ -813,7 +862,7 @@ with tab1:
         with col_left:
             _section("⚙️ Konfiguration")
             # Modell-Auswahl
-            running_models = get_available_models()
+            running_models = _models_list()
             model_opts = running_models if running_models else AVAILABLE_MODELS
             try:
                 def_idx = model_opts.index(st.session_state.model)
@@ -857,7 +906,7 @@ with tab1:
                     st.caption(pred.summary[:120])
 
             # KI-Analyse
-            if is_ollama_running():
+            if _check_ollama():
                 if st.button("🤖 KI-Analyse starten", use_container_width=True,
                              key="btn_quick_ai"):
                     pred = st.session_state.prediction or predict(
@@ -941,7 +990,7 @@ with tab1:
                                       type="primary", key="btn_llm_cycle")
             with col_r:
                 if btn_cycle:
-                    if not is_ollama_running():
+                    if not _check_ollama():
                         st.error("Ollama offline – bitte `ollama serve` starten.")
                     else:
                         anim_slot = st.empty()
@@ -1020,7 +1069,7 @@ with tab1:
                                      type="primary", key="btn_auto")
             with col_y:
                 if btn_auto:
-                    if not is_ollama_running():
+                    if not _check_ollama():
                         st.error("Ollama offline.")
                     else:
                         st.markdown(_ticker_html(), unsafe_allow_html=True)
@@ -1173,7 +1222,7 @@ with tab2:
     # Aktuelle Preise für offene Positionen laden
     current_prices: dict[str, float] = {}
     for sym in pt_state.positions:
-        d = fetch_ohlcv(sym, period="5d")
+        d = _ohlcv(sym, "5d")
         current_prices[sym] = (
             float(d["Close"].iloc[-1]) if not d.empty
             else pt_state.positions[sym].get("avg_price", 0)
@@ -1348,7 +1397,7 @@ with tab2:
                 )
             if st.button("🚀 Auto-Trade starten", use_container_width=True,
                          type="primary", key="btn_auto_trade"):
-                if not is_ollama_running():
+                if not _check_ollama():
                     st.toast("Ollama offline.", icon="🚨")
                     st.error("Ollama offline.")
                 else:
@@ -1410,7 +1459,7 @@ with tab2:
 with tab3:
     _section("🔌 Ollama Status")
 
-    ollama_st = get_ollama_status()
+    ollama_st = _ollama_status()
     running   = ollama_st["running"]
 
     if running:
@@ -1441,7 +1490,7 @@ with tab3:
     _section("📦 Installierte Modelle")
 
     if running:
-        installed = get_available_models_with_info()
+        installed = _models_info()
         if installed:
             active_model = st.session_state.model
             for m in installed:
@@ -1474,7 +1523,7 @@ with tab3:
     st.divider()
     _section("⬇️ Modell herunterladen")
 
-    installed_names = set(get_available_models()) if running else set()
+    installed_names = set(_models_list()) if running else set()
     download_opts   = [m for m in AVAILABLE_MODELS if m not in installed_names]
 
     if not download_opts:
@@ -1528,6 +1577,8 @@ with tab3:
             progress_slot.empty()
             bar_slot.empty()
             if done:
+                _models_list.clear()   # Modell-Cache invalidieren → sofortige Anzeige
+                _models_info.clear()
                 st.success(
                     f"✅ **{dl_model}** erfolgreich heruntergeladen! "
                     "Seite neu laden um das Modell zu nutzen."
