@@ -3,7 +3,10 @@ StockMind – Streamlit Dashboard  (Bloomberg / Trading-Terminal Style)
 """
 from __future__ import annotations
 
+import math
+import os
 import random
+import sys
 import time
 from typing import Optional
 
@@ -12,14 +15,13 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 
-import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from config import (
     APP_TITLE, APP_ICON, APP_VERSION,
     ANALYSIS_METHODS, DEFAULT_BUDGET_EUR, DEFAULT_PERIOD,
     LAMBO_PRICE_EUR, ORDER_COST_EUR, SPREAD_PERCENT, AVAILABLE_MODELS,
-    EXPLORATION_CONSTANT, ENABLE_EASTER_EGGS,
+    EXPLORATION_CONSTANT, ENABLE_EASTER_EGGS, CACHE_TTL_HOURS,
 )
 from modules.model_manager import (
     MODEL_DESCRIPTIONS, is_ollama_running, get_ollama_status,
@@ -281,7 +283,6 @@ def _section(label: str) -> None:
 
 def _ensure_data_dirs() -> None:
     """Erstellt fehlende Daten-Ordner beim ersten Start."""
-    import os
     for d in ["data", "data/cache", "data/training_state", "data/portfolio", "data/logs"]:
         os.makedirs(d, exist_ok=True)
 
@@ -890,14 +891,13 @@ with tab1:
             show_vol = st.checkbox("Volumen", value=True, key="chk_vol")
             st.plotly_chart(
                 _candlestick_pro(df, ticker, show_volume=show_vol, show_sma=show_sma),
-                use_container_width=True,
             )
             ind_opts = ["– keiner –", "RSI", "MACD", "Bollinger Bands"]
             ind_sel  = st.selectbox("Indikator", ind_opts, key="ind_sel")
             if ind_sel != "– keiner –":
                 fig_ind = _indicator_fig(df, ind_sel)
                 if fig_ind:
-                    st.plotly_chart(fig_ind, use_container_width=True)
+                    st.plotly_chart(fig_ind)
 
     else:
         # Onboarding wenn noch keine Daten geladen
@@ -1114,7 +1114,6 @@ with tab1:
                         st.plotly_chart(
                             _equity_chart(eq_df, bt_budget,
                                           f"Equity Curve – {bt_method}"),
-                            use_container_width=True,
                         )
 
         # ── Trainings-Statistiken ────────────────────────────────────────────
@@ -1147,13 +1146,11 @@ with tab1:
                 if acc:
                     st.plotly_chart(
                         _accuracy_gauge(acc),
-                        use_container_width=True,
                     )
 
             if state.get("method_scores"):
                 st.plotly_chart(
                     _method_bars(state["method_scores"]),
-                    use_container_width=True,
                 )
 
             if state.get("insights"):
@@ -1261,7 +1258,6 @@ with tab2:
         st.plotly_chart(
             _equity_chart(perf_df, float(pt_state.start_budget),
                           "Portfolio-Wert über Zeit"),
-            use_container_width=True,
         )
 
     # ── Offene Positionen ─────────────────────────────────────────────────────
@@ -1590,19 +1586,18 @@ with tab3:
     # ── Aktive Konfiguration ──────────────────────────────────────────────────
     st.divider()
     _section("🔧 Aktive Konfiguration")
-    import math as _math
     st.markdown(
         '<div class="sm-card">'
         '<table style="width:100%;font-size:13px;color:#c9d1d9;">'
         f'<tr><td style="color:#8b949e;width:220px;">UCB1 Exploration-Konstante</td>'
         f'<td><code style="color:#00ff88;">{EXPLORATION_CONSTANT}</code>&nbsp;'
-        f'<span style="color:#8b949e;font-size:11px;">(sqrt(2) = {_math.sqrt(2):.4f})</span></td></tr>'
+        f'<span style="color:#8b949e;font-size:11px;">(sqrt(2) = {math.sqrt(2):.4f})</span></td></tr>'
         f'<tr><td style="color:#8b949e;">Ollama Host</td>'
-        f'<td><code>{__import__("os").getenv("OLLAMA_HOST", "http://localhost:11434")}</code></td></tr>'
+        f'<td><code>{os.getenv("OLLAMA_HOST", "http://localhost:11434")}</code></td></tr>'
         f'<tr><td style="color:#8b949e;">Cache TTL</td>'
-        f'<td><code>{__import__("config").CACHE_TTL_HOURS} h</code></td></tr>'
+        f'<td><code>{CACHE_TTL_HOURS} h</code></td></tr>'
         f'<tr><td style="color:#8b949e;">Log-Level</td>'
-        f'<td><code>{__import__("os").getenv("LOG_LEVEL", "INFO")}</code></td></tr>'
+        f'<td><code>{os.getenv("LOG_LEVEL", "INFO")}</code></td></tr>'
         '</table>'
         '<div style="margin-top:8px;color:#8b949e;font-size:11px;">'
         'Werte aus <code>.env</code> änderbar – App neu starten zum Übernehmen.'

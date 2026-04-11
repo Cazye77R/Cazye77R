@@ -41,5 +41,5 @@ logger.add(
     rotation="00:00",       # täglich um Mitternacht rotieren
     retention="7 days",
     encoding="utf-8",
-    enqueue=True,           # thread-sicher
+    enqueue=False,          # synchron – kein Background-Thread (Streamlit-Kompatibilität)
 )
