@@ -1,5 +1,55 @@
-pandas>=2.0
-numpy>=1.24
-torch>=2.0
-streamlit>=1.33
-plotly>=5.20
+# StockMind – vollständige Abhängigkeiten
+# Generiert aus allen Imports in stockmind/app.py und stockmind/modules/*.py
+#
+# Direkte Imports gefunden in:
+#   app.py            → streamlit, pandas, plotly
+#   modules/data_fetcher.py   → yfinance, requests, pyarrow, ta (lazy)
+#   modules/model_manager.py  → requests, ollama (lazy)
+#   modules/trainer.py        → scikit-learn, pickle (stdlib)
+#   modules/predictor.py      → scikit-learn, numpy
+#   modules/backtester.py     → pandas, numpy
+#   modules/logger.py         → loguru
+#   modules/easter_eggs.py    → (nur stdlib)
+#   config/__init__.py        → python-dotenv (optional)
+#
+# Standard-Library-Module (kein Install nötig):
+#   dataclasses, datetime, hashlib, json, logging, math,
+#   os, pathlib, pickle, random, re, subprocess, sys, time, typing
+
+# ── Dashboard ────────────────────────────────────────────────────────────────
+streamlit>=1.33.0
+
+# ── Marktdaten ───────────────────────────────────────────────────────────────
+yfinance>=0.2.40
+requests>=2.28.0
+
+# ── Datenverarbeitung ────────────────────────────────────────────────────────
+pandas>=2.0.0
+numpy>=1.24.0
+pyarrow>=11.0.0          # Parquet-Cache in data_fetcher.py
+
+# ── Maschinelles Lernen ──────────────────────────────────────────────────────
+scikit-learn>=1.2.0       # GradientBoostingClassifier, StandardScaler
+
+# ── Charts ───────────────────────────────────────────────────────────────────
+plotly>=5.20.0            # graph_objects + make_subplots
+
+# ── Technische Indikatoren ───────────────────────────────────────────────────
+ta>=0.10.0                # ta.momentum.RSIIndicator, ta.trend.MACD, etc.
+
+# ── KI / LLM ─────────────────────────────────────────────────────────────────
+ollama>=0.3.0             # model_manager.py (lazy import)
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+loguru>=0.6.0
+
+# ── Konfiguration ────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0      # config/__init__.py (optional / graceful fallback)
+
+# ── Datenvalidierung ─────────────────────────────────────────────────────────
+pydantic>=2.0.0           # transitive Dep von streamlit + zukünftige Models
+
+# ── Entwicklung & Tests ──────────────────────────────────────────────────────
+ruff>=0.4.0
+pytest>=8.0
+pytest-timeout>=2.3
