@@ -35,8 +35,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: pip install -r stockmind/requirements.txt
+      - name: Install test dependencies
+        # requirements-test.txt enthält nur die für Tests nötigen Pakete –
+        # kein Streamlit/Plotly/yfinance. Dadurch entfallen schwere Binary-Builds
+        # und python-dotenv ist garantiert installiert bevor config importiert wird.
+        run: pip install -r stockmind/requirements-test.txt
 
       - name: Run tests
         run: pytest tests/ --timeout=60 -v

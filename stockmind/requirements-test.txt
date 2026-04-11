@@ -1,0 +1,30 @@
+# Minimale Abhängigkeiten für die CI-Test-Pipeline
+# Kein Streamlit, Plotly, yfinance oder Ollama – die Tests benötigen diese nicht.
+# Aktualisieren wenn neue Test-Abhängigkeiten hinzukommen.
+
+# --- Datenverarbeitung ---
+pandas>=2.0
+numpy>=1.24
+pyarrow>=11.0
+
+# --- Maschinelles Lernen ---
+scikit-learn>=1.2
+
+# --- Technische Indikatoren ---
+ta>=0.10
+
+# --- KI / LLM (API-Calls in Tests gemockt/übersprungen) ---
+requests>=2.28
+
+# --- Logging ---
+loguru>=0.6
+
+# --- Konfiguration (optional – Tests laufen auch ohne dotenv) ---
+python-dotenv>=1.0
+
+# --- Datenvalidierung ---
+pydantic>=2.0
+
+# --- Tests ---
+pytest>=8.0
+pytest-timeout>=2.3
