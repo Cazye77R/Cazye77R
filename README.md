@@ -1,56 +1,91 @@
-# Stock Return Forecasting Model
+# Cazye77R – Tools & Utilities
 
-Dieses Repository enthält ein einfaches, trainingsfähiges KI-Modell, das auf historischen Aktienkursbewegungen basiert. Es nutzt ein LSTM, um aus vergangenen Renditefenstern die nächste Rendite abzuleiten und kann auf beliebige Kurs-CSV-Dateien angewendet werden.
+Dieses Repository enthält zwei unabhängige Python-Tools.
 
-## Funktionsumfang
-- CSV-Einlesung und Bereinigung (Sortierung nach Datum, Prozentänderungen, optionale Normalisierung).
-- Erzeugung von Sequenz-Datensätzen beliebiger Fensterlänge.
-- LSTM-Modell mit LayerNorm, Dropout und frei konfigurierbarer Hidden-Size/Layer-Anzahl.
-- Trainings-Skript mit Train/Val-Split, Loss-Reporting und Speicherung der Gewichte.
+---
 
-## Installation
+## 1. Änderungsmitteilungs-Generator
+
+Erzeugt bis zu 5000 realistische deutsche Änderungsmitteilungen (wie aus einem Konstruktionsbüro) als Textdateien – z. B. für Testdaten, KI-Training oder Demonstrationszwecke.
+
+### Themen
+| Kürzel | Thema |
+|--------|-------|
+| KF | Konstruktionsfehler |
+| KW | Kundenwunsch |
+| NA | Normänderung |
+| FF | Fertigungsfehler |
+| MA | Materialaustausch |
+| SR | Sicherheitsanforderung |
+
+### Verwendung
+```bash
+# 5000 Dateien erzeugen
+python generate_aenderungen.py --count 5000 --output-dir ./aenderungen
+
+# Reproduzierbar mit festem Seed
+python generate_aenderungen.py --count 100 --seed 42
+
+# Nur bestimmte Themen
+python generate_aenderungen.py --count 200 --topics Kundenwunsch Fertigungsfehler
+
+# Alle Optionen
+python generate_aenderungen.py --help
+```
+
+### Optionen
+| Parameter | Standard | Beschreibung |
+|-----------|----------|--------------|
+| `--count` | 100 | Anzahl Dateien (max. 9999) |
+| `--output-dir` | `./aenderungen` | Zielverzeichnis |
+| `--seed` | zufällig | Seed für Reproduzierbarkeit |
+| `--topics` | alle | Themenfilter (Leerzeichen-getrennt) |
+| `--prefix` | `aenderung` | Dateinamens-Präfix |
+| `--start-index` | 1 | Startnummer der Dateien |
+
+### Ausgabe
+Jede Datei enthält:
+- **Header**: Dok-Nr., Datum, Bearbeiter, Abteilung, Priorität, Status
+- **Bauteil-Abschnitt**: Sachnr., Zeichnungsnr., Revision, Baugruppe
+- **Beschreibung**, **Begründung**, **Maßnahmen** (variiert nach Detailstufe)
+- Optional: **Betroffene Dokumente**, **Terminplanung**, **Freigabevermerk**
+
+Detailstufen: `kurz` (~1,7 kB) / `mittel` (~2,5 kB) / `lang` (~3,1 kB) — zufällig verteilt (30/40/30 %).
+
+Keine zusätzlichen Abhängigkeiten – nur Python-Stdlib.
+
+---
+
+## 2. Stock Return Forecasting Model
+
+Trainingsfähiges KI-Modell auf Basis historischer Aktienkursbewegungen. Nutzt ein LSTM, um aus vergangenen Renditefenstern die nächste Rendite vorherzusagen.
+
+### Installation
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Datenerwartung
-Eine CSV-Datei mit mindestens zwei Spalten:
-- `date`: Zeitstempel oder Datum (wird per `pandas` geparst)
-- `close`: Schlusskurs oder Preiswert
+### Datenformat
+CSV-Datei mit mindestens zwei Spalten:
+- `date`: Datum (wird automatisch geparst und sortiert)
+- `close`: Schlusskurs
 
-Die Reihenfolge der Zeilen ist egal, das Skript sortiert automatisch nach Datum.
-
-## Training starten
+### Training
 ```bash
-python -m stock_model.train path/zum/daten.csv \
-  --window 60 \
-  --batch-size 128 \
-  --epochs 30 \
-  --lr 5e-4 \
-  --hidden-size 256 \
-  --layers 2 \
-  --dropout 0.2 \
-  --train-ratio 0.85 \
+python -m stock_model.train path/zu/daten.csv \
+  --window 60 --batch-size 128 --epochs 30 \
+  --hidden-size 256 --layers 2 --dropout 0.2 \
   --output artifacts
 ```
-Standardwerte sind im Skript hinterlegt, sodass Sie optional nur den CSV-Pfad angeben müssen.
 
-## Forecast-Oberfläche im Dark Mode
-Starte die moderne Web-Oberfläche, um Daten hochzuladen, ein Modell zu laden oder kurzfristig zu trainieren und sofort einen Forecast zu erzeugen:
-
+### Web-Oberfläche (Dark Mode)
 ```bash
 streamlit run stock_model/app.py
 ```
 
-Die App bietet:
-- Dark-Theme mit Plotly-Visualisierungen.
-- Upload von CSV-Daten sowie optional eines `.pt`-Checkpoints.
-- Wahl der Fenstergröße, Forecast-Horizont und Schnelltraining mit wenigen Epochen.
-- Anzeige der prognostizierten Renditen und fortgeschriebenen Preise.
+Bietet: CSV-Upload, Checkpoint-Laden, Schnelltraining, Forecast-Visualisierung.
 
-## Ergebnisse
-Nach dem Training wird ein Checkpoint unter `artifacts/return_lstm.pt` gespeichert, der sowohl die Modellgewichte als auch die wichtigsten Hyperparameter (inkl. Normalisierungs-Statistiken) enthält. Dieses Format kann mit PyTorch geladen und für Inferenz oder weiteres Feintuning verwendet werden.
-
-Viel Erfolg beim Experimentieren mit Ihren Kursdaten!
+### Ergebnis
+Checkpoint wird unter `artifacts/return_lstm.pt` gespeichert (Modellgewichte + Hyperparameter).
