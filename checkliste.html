@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jährliche Steuer-Checkliste</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+           background: #f5f5f5; color: #333; padding: 20px; }
+    header { text-align: center; margin-bottom: 30px; }
+    h1 { font-size: 28px; margin-bottom: 5px; }
+    header p { color: #666; font-size: 14px; }
+    main { max-width: 900px; margin: 0 auto; }
+    
+    section { background: white; border-radius: 8px; margin-bottom: 20px; 
+              box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    section header { background: #f9f9f9; padding: 15px; cursor: pointer; 
+                     border-bottom: 1px solid #eee; display: flex; 
+                     align-items: center; gap: 10px; text-align: left; 
+                     margin: 0; }
+    section header h2 { font-size: 18px; flex: 1; }
+    .chevron { font-size: 12px; transition: transform 0.25s; }
+    .chevron.open { transform: rotate(180deg); }
+    
+    .progress { display: flex; align-items: center; gap: 10px; }
+    .progress-bar { width: 60px; height: 6px; background: #e0e0e0; border-radius: 3px; overflow: hidden; }
+    .progress-fill { height: 100%; background: #4a90d9; transition: width 0.3s; }
+    .progress-label { font-size: 12px; color: #666; min-width: 35px; }
+    
+    .items { padding: 15px; max-height: 9999px; overflow: hidden; 
+             transition: max-height 0.3s, opacity 0.3s; opacity: 1; }
+    .items.hidden { max-height: 0; opacity: 0; }
+    
+    .item { display: flex; align-items: center; gap: 12px; padding: 10px 0; 
+            border-bottom: 1px solid #f0f0f0; }
+    .item:last-child { border-bottom: none; }
+    .item input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
+    .item label { flex: 1; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+    .item input[type="checkbox"]:checked ~ label { text-decoration: line-through; color: #999; }
+    .item .note { flex: 0 1 150px; border: none; border-bottom: 1px dashed #ddd; 
+                  padding: 2px 4px; font-size: 12px; outline: none; }
+    .item .note:focus { border-bottom-color: #4a90d9; }
+    .item .delete { width: 24px; height: 24px; border: none; background: transparent; 
+                    color: #ccc; cursor: pointer; font-size: 16px; }
+    .item .delete:hover { color: #e74c3c; }
+    
+    .add-item { padding: 15px; border-top: 1px solid #f0f0f0; display: flex; gap: 8px; }
+    .add-item input { flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+    .add-item button { padding: 8px 15px; background: #4a90d9; color: white; border: none; 
+                       border-radius: 4px; cursor: pointer; font-weight: 500; }
+    .add-item button:hover { background: #2e5a9a; }
+    
+    @media (max-width: 600px) {
+      header h1 { font-size: 20px; }
+      .item { font-size: 14px; }
+      .item .note { flex: 0 1 80px; font-size: 11px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📋 Jährliche Steuer-Checkliste</h1>
+    <p>Verwalten Sie Ihre Steuerdokumente und Checklisten</p>
+  </header>
+  <main id="app"></main>
+  
+  <script>
+    'use strict';
+    
+    const SECTIONS = [
+      { id: 'immobilie', title: '🏠 Immobilie', color: '#4a90d9', items: [
+        { id: 'kaufvertrag', label: 'Kaufvertrag / Grundbuchauszug vorhanden' },
+        { id: 'grundsteuer', label: 'Grundsteuerbescheid geprüft und bezahlt' },
+        { id: 'wohnungseigentum', label: 'WEG-Protokoll & Hausgeldabrechnung' },
+        { id: 'instandhaltung', label: 'Instandhaltungs- und Reparaturkosten belegt' },
+        { id: 'mieteinnahmen', label: 'Mieteinnahmen vollständig erfasst' },
+        { id: 'afa', label: 'AfA-Tabelle aktualisiert (Abschreibung auf Gebäude)' },
+        { id: 'schuldzinsen', label: 'Schuldzinsen-Bescheinigung der Bank' },
+        { id: 'nebenkosten', label: 'Nebenkostenabrechnung erstellt / erhalten' },
+        { id: 'verwaltungskosten', label: 'Hausverwaltungskosten belegt' },
+        { id: 'versicherungen_immo', label: 'Gebäudeversicherung & Haftpflicht belegt' },
+        { id: 'leerstand', label: 'Leerstandszeiten dokumentiert' },
+        { id: 'grunderwerbsteuer', label: 'Grunderwerbsteuer / Notarkosten (bei Neukauf)' },
+      ]},
+      { id: 'kapitalertraege', title: '📈 Kapitalerträge', color: '#27ae60', items: [
+        { id: 'jahressteuerbescheinigung', label: 'Jahressteuerbescheinigung aller Depots / Konten' },
+        { id: 'freistellungsauftrag', label: 'Freistellungsauftrag geprüft (max. 1.000 € / 2.000 € zusammen)' },
+        { id: 'auslaendische_ertraege', label: 'Ausländische Kapitalerträge & Quellensteuer-Nachweise' },
+        { id: 'verlustverrechnungstopf', label: 'Verlustverrechnungstöpfe geprüft (allgemein & Aktien)' },
+        { id: 'dividenden', label: 'Dividendenerträge aus Einzelaktien dokumentiert' },
+        { id: 'etf_ertraege', label: 'ETF-Erträge (ausschüttungsgleiche Erträge)' },
+        { id: 'vorabpauschale', label: 'Vorabpauschale für thesaurierende Fonds ermittelt' },
+        { id: 'zinsen', label: 'Zinserträge aus Tages-/Festgeld' },
+        { id: 'crypto', label: 'Krypto-Gewinne/-Verluste dokumentiert' },
+        { id: 'guenstiger_tarifoption', label: 'Günstigerprüfung: Abgeltungsteuer vs. persönlicher Steuersatz' },
+        { id: 'nv_bescheinigung', label: 'NV-Bescheinigung vorhanden' },
+      ]},
+      { id: 'spenden', title: '🤝 Spenden', color: '#e74c3c', items: [
+        { id: 'spendenquittungen', label: 'Spendenquittungen / Zuwendungsbestätigungen gesammelt' },
+        { id: 'kirchensteuer', label: 'Kirchensteuer-Bescheinigung vorhanden' },
+        { id: 'mitgliedsbeitraege', label: 'Mitgliedsbeiträge belegt' },
+        { id: 'parteispenden', label: 'Parteispenden dokumentiert' },
+        { id: 'online_kleinspenden', label: 'Online-Kleinspenden bis 300 €' },
+        { id: 'sachspenden', label: 'Sachspenden bewertet und quittiert' },
+        { id: 'auslaendische_hilfswerke', label: 'Spenden an EU-Hilfswerke belegt' },
+        { id: 'foerderverein', label: 'Fördervereins-Beiträge nachgewiesen' },
+        { id: 'katastrophenhilfe', label: 'Katastrophenhilfe dokumentiert' },
+        { id: 'spendengrenze', label: '20%-Spendengrenze beachtet' },
+      ]},
+      { id: 'gewerbe', title: '🏢 Gewerbe', color: '#f39c12', items: [
+        { id: 'eur', label: 'Einnahmen-Überschuss-Rechnung vollständig' },
+        { id: 'betriebsausgaben', label: 'Betriebsausgaben mit Belegen erfasst' },
+        { id: 'fahrtenbuch', label: 'Fahrtenbuch oder 1%-Regelung' },
+        { id: 'gewerbesteuer_vz', label: 'Gewerbesteuervorauszahlungen bezahlt' },
+        { id: 'ust_voranmeldung', label: 'Umsatzsteuervoranmeldungen eingereicht' },
+        { id: 'anlage_g', label: 'Anlage G / Anlage S vorbereitet' },
+        { id: 'anlagevermoegen', label: 'Anlagevermögensverzeichnis aktualisiert' },
+        { id: 'geringwertige_wg', label: 'GWG (bis 800 €) abgeschrieben' },
+        { id: 'investitionsabzug', label: 'Investitionsabzugsbetrag geprüft' },
+        { id: 'betriebsstaette', label: 'Betriebsstätten Aufwendungen belegt' },
+        { id: 'rechnungsstellung', label: 'Ausgangsrechnungen korrekt' },
+        { id: 'geschaeftskonto', label: 'Geschäftskonto-Kontoauszüge vollständig' },
+        { id: 'gewerbeummeldung', label: 'Gewerbeummeldungen dokumentiert' },
+      ]},
+      { id: 'nselbst', title: '💼 Nicht selbständige Arbeit', color: '#8e44ad', items: [
+        { id: 'lohnsteuerbescheinigung', label: 'Lohnsteuerbescheinigung vorhanden' },
+        { id: 'werbungskosten', label: 'Werbungskosten über 1.230 € geprüft' },
+        { id: 'homeoffice', label: 'Homeoffice-Pauschale dokumentiert' },
+        { id: 'arbeitsmittel', label: 'Arbeitsmittel-Belege gesammelt' },
+        { id: 'pendlerpauschale', label: 'Pendlerpauschale erfasst' },
+        { id: 'fortbildungskosten', label: 'Fortbildungskosten belegt' },
+        { id: 'gewerkschaftsbeitrag', label: 'Gewerkschaftsbeiträge nachgewiesen' },
+        { id: 'bewerbungskosten', label: 'Bewerbungskosten dokumentiert' },
+        { id: 'doppelte_haushaltsfuehrung', label: 'Doppelte Haushaltsführung belegt' },
+        { id: 'umzugskosten', label: 'Umzugskosten dokumentiert' },
+        { id: 'dienstgaenge', label: 'Dienstreise-Kosten dokumentiert' },
+        { id: 'steuerklasse', label: 'Steuerklasse und Freibeträge geprüft' },
+        { id: 'kurzarbeit', label: 'Kurzarbeitergeld erhalten' },
+      ]},
+      { id: 'sonstiges', title: '📋 Sonstiges', color: '#16a085', items: [
+        { id: 'krankenversicherung', label: 'Beitragsbescheinigung Krankenversicherung' },
+        { id: 'pflegeversicherung', label: 'Beitragsbescheinigung Pflegeversicherung' },
+        { id: 'rentenversicherung', label: 'Beitragsnachweis Rentenversicherung' },
+        { id: 'riester', label: 'Riester-Zulageantrag gestellt' },
+        { id: 'ruerup', label: 'Rürup-Beitragsnachweis vorhanden' },
+        { id: 'handwerkerleistungen', label: 'Handwerkerleistungen belegt' },
+        { id: 'haushaltsnahe_dl', label: 'Haushaltsnahe Dienstleistungen belegt' },
+        { id: 'aussergewoehnliche_belast', label: 'Außergewöhnliche Belastungen dokumentiert' },
+        { id: 'steuerberatungskosten', label: 'Steuerberatungskosten belegt' },
+        { id: 'unterhalt', label: 'Unterhaltszahlungen nachgewiesen' },
+        { id: 'kinderfreibetrag', label: 'Kinderfreibetrag vs. Kindergeld geprüft' },
+        { id: 'bescheinigung_fa', label: 'Vorauszahlungsbescheid geprüft' },
+        { id: 'elster', label: 'ELSTER-Zertifikat und Fristen notiert' },
+      ]},
+    ];
+    
+    let state;
+    
+    function defaultState() {
+      const s = { sections: {} };
+      SECTIONS.forEach(sec => {
+        s.sections[sec.id] = { collapsed: false, items: {} };
+        sec.items.forEach(it => {
+          s.sections[sec.id].items[it.id] = { checked: false, note: '' };
+        });
+      });
+      return s;
+    }
+    
+    function loadState() {
+      try {
+        const raw = localStorage.getItem('tax-checklist');
+        if (!raw) return defaultState();
+        return JSON.parse(raw);
+      } catch(e) {
+        return defaultState();
+      }
+    }
+    
+    function saveState() {
+      try {
+        localStorage.setItem('tax-checklist', JSON.stringify(state));
+      } catch(e) {}
+    }
+    
+    function render() {
+      const app = document.getElementById('app');
+      app.innerHTML = '';
+      
+      SECTIONS.forEach(sec => {
+        const secState = state.sections[sec.id];
+        const section = document.createElement('section');
+        
+        const header = document.createElement('header');
+        header.style.cursor = 'pointer';
+        
+        // Title + Progress
+        const title = document.createElement('h2');
+        title.textContent = sec.title;
+        
+        const progress = document.createElement('div');
+        progress.className = 'progress';
+        let done = 0, total = 0;
+        // Count fixed items (not deleted)
+        sec.items.forEach(it => {
+          const state = secState.items[it.id];
+          if (state && !state.deleted) {
+            total++;
+            if (state.checked) done++;
+          }
+        });
+        // Count custom items
+        Object.entries(secState.items).forEach(([id, it]) => {
+          if (!id.startsWith('custom_')) return;  // Only custom items
+          total++;
+          if (it.checked) done++;
+        });
+        const pct = total ? (done / total * 100) : 0;
+        progress.innerHTML = `
+          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${sec.color}"></div></div>
+          <span class="progress-label">${done}/${total}</span>
+          <span class="chevron ${secState.collapsed ? '' : 'open'}">▾</span>
+        `;
+        
+        header.appendChild(title);
+        header.appendChild(progress);
+        header.addEventListener('click', () => {
+          secState.collapsed = !secState.collapsed;
+          saveState();
+          render();
+        });
+        
+        const items = document.createElement('div');
+        items.className = 'items' + (secState.collapsed ? ' hidden' : '');
+        
+        // Render fixed items
+        sec.items.forEach(it => {
+          const itState = secState.items[it.id];
+          if (!itState || itState.deleted) return;  // Skip if deleted or undefined
+
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML = `
+            <input type="checkbox" id="cb-${sec.id}-${it.id}" ${itState.checked ? 'checked' : ''}>
+            <label for="cb-${sec.id}-${it.id}">${it.label}</label>
+            <input type="text" class="note" placeholder="Notiz" value="${itState.note}">
+            <button class="delete" title="Löschen">×</button>
+          `;
+
+          const cb = row.querySelector('input[type="checkbox"]');
+          cb.addEventListener('change', () => {
+            itState.checked = cb.checked;
+            saveState();
+            render();
+          });
+
+          const note = row.querySelector('.note');
+          note.addEventListener('input', () => {
+            itState.note = note.value;
+            saveState();
+          });
+
+          const btn = row.querySelector('.delete');
+          btn.addEventListener('click', () => {
+            itState.deleted = true;  // Mark as deleted instead of removing
+            saveState();
+            render();
+          });
+
+          items.appendChild(row);
+        });
+
+        // Render custom items (can be fully deleted)
+        Object.entries(secState.items).forEach(([id, itState]) => {
+          if (!id.startsWith('custom_')) return;  // Only custom items
+
+          const row = document.createElement('div');
+          row.className = 'item';
+          row.innerHTML = `
+            <input type="checkbox" ${itState.checked ? 'checked' : ''}>
+            <label>${itState.label}</label>
+            <input type="text" class="note" placeholder="Notiz" value="${itState.note}">
+            <button class="delete" title="Löschen">×</button>
+          `;
+
+          const cb = row.querySelector('input[type="checkbox"]');
+          cb.addEventListener('change', () => {
+            itState.checked = cb.checked;
+            saveState();
+            render();
+          });
+
+          const note = row.querySelector('.note');
+          note.addEventListener('input', () => {
+            itState.note = note.value;
+            saveState();
+          });
+
+          const btn = row.querySelector('.delete');
+          btn.addEventListener('click', () => {
+            delete secState.items[id];  // Delete custom items completely
+            saveState();
+            render();
+          });
+
+          items.appendChild(row);
+        });
+        
+        // Add item
+        const add = document.createElement('div');
+        add.className = 'add-item';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = '+ Neuer Punkt...';
+        const btn = document.createElement('button');
+        btn.textContent = '+';
+        btn.addEventListener('click', () => {
+          const label = input.value.trim();
+          if (!label) return;
+          const id = 'custom_' + Date.now();
+          secState.items[id] = { checked: false, note: '', label };
+          input.value = '';
+          saveState();
+          render();
+        });
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') btn.click();
+        });
+        add.appendChild(input);
+        add.appendChild(btn);
+        
+        section.appendChild(header);
+        section.appendChild(items);
+        section.appendChild(add);
+        app.appendChild(section);
+      });
+    }
+    
+    state = loadState();
+    render();
+  </script>
+</body>
+</html>
