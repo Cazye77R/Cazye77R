@@ -321,11 +321,14 @@ def _fetch_yf_history(symbol: str, period: str, interval: str) -> Optional[pd.Da
     try:
         raw = yf.Ticker(symbol).history(
             period=period, interval=interval,
-            auto_adjust=True, raise_errors=False,
+            auto_adjust=True,
         )
+        if raw is None or raw.empty:
+            logger.warning(f"yf.Ticker.history: keine Daten für {symbol} (period={period})")
+            return None
         return _normalize_raw(raw)
     except Exception as exc:
-        logger.debug(f"yf.Ticker.history fehlgeschlagen ({symbol}): {exc}")
+        logger.warning(f"yf.Ticker.history fehlgeschlagen ({symbol}): {exc}")
         return None
 
 
@@ -336,9 +339,12 @@ def _fetch_yf_download(symbol: str, period: str, interval: str) -> Optional[pd.D
             symbol, period=period, interval=interval,
             progress=False, auto_adjust=True,
         )
+        if raw is None or raw.empty:
+            logger.warning(f"yf.download: keine Daten für {symbol} (period={period})")
+            return None
         return _normalize_raw(raw)
     except Exception as exc:
-        logger.debug(f"yf.download fehlgeschlagen ({symbol}): {exc}")
+        logger.warning(f"yf.download fehlgeschlagen ({symbol}): {exc}")
         return None
 
 
@@ -440,15 +446,18 @@ def fetch_ohlcv(
             if raw is not None:
                 symbol = xetra
             else:
+                logger.warning(f"Alle Quellen erfolglos für {symbol} + {xetra}")
                 return _empty_df(
                     f"Keine Daten für '{symbol}' (auch '{xetra}' erfolglos). "
-                    f"period={period}, interval={interval}."
+                    f"Bitte Ticker prüfen – Xetra-Symbole enden auf '.DE'."
                 )
         else:
+            logger.warning(f"Alle Quellen erfolglos für {symbol} (period={period})")
             return _empty_df(
-                f"Keine Daten für '{symbol}' verfügbar "
+                f"Keine Daten für '{symbol}' — alle Quellen erfolglos "
                 f"(period={period}, interval={interval}). "
-                "Ticker korrekt? Xetra-Ticker enden meist auf '.DE', Krypto auf '-USD'."
+                "Ticker prüfen: Aktien = SYMBOL.DE, Krypto = SYMBOL-USD (z. B. BTC-USD), "
+                "US-Aktien = AAPL / MSFT, Indizes = ^GDAXI / ^DJI."
             )
 
     df = raw.copy()

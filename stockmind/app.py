@@ -1332,6 +1332,7 @@ with tab2:
     ])
 
     with t_manual:
+        st.caption("Simulierter Handel – kein echtes Geld. Kauf/Verkauf wird sofort zum aktuellen Schlusskurs ausgeführt.")
         if st.session_state.df is not None and st.session_state.ticker:
             ticker_pt = st.session_state.ticker
             df_pt     = st.session_state.df
@@ -1381,9 +1382,11 @@ with tab2:
             st.info("Bitte im Tab **📊 Analyse** zuerst eine Aktie laden.")
 
     with t_auto:
-        st.markdown(
-            "KI analysiert die gewählte Aktie und platziert automatisch "
-            "Paper-Orders basierend auf LLM-Vorhersagen."
+        st.info(
+            "**Wann wird fiktiv gekauft?**  \n"
+            "- **KAUF** → KI-Signal = **UP** + Konfidenz **≥ 50 %** + keine offene Position + genug Cash  \n"
+            "- **VERKAUF** → KI-Signal = **DOWN** + Konfidenz **≥ 50 %** + offene Position vorhanden  \n"
+            "- **HALTEN** → Konfidenz zu niedrig, bereits investiert oder kein Signal"
         )
         if st.session_state.ticker:
             aa1, aa2, aa3 = st.columns(3)
@@ -1416,13 +1419,43 @@ with tab2:
                             method=at_method,
                             invest_pct=at_invest,
                         )
+                        _HOLD_LABELS = {
+                            "HOLD_ALREADY_IN":  "Bereits in Position – kein Neukauf",
+                            "HOLD_LOW_CASH":    "Zu wenig Cash",
+                            "HOLD_NO_POSITION": "Keine Position zum Verkaufen",
+                            "HOLD_NEUTRAL":     "Konfidenz < 50 % – kein Signal",
+                            "BUY_FAILED":       "Kauf fehlgeschlagen",
+                            "SELL_FAILED":      "Verkauf fehlgeschlagen",
+                            "SKIP":             "Übersprungen (Fehler)",
+                        }
                         for entry in log:
-                            action = entry.get("action", "?")
-                            icon = "🟢" if action == "BUY" else "🔴" if action == "SELL" else "⚪"
+                            decision = entry.get("decision", "?")
+                            pred     = entry.get("prediction", "?")
+                            conf     = entry.get("confidence", 0.0)
+                            price    = entry.get("current_price")
+                            pval     = entry.get("portfolio_value")
+
+                            if decision == "BUY":
+                                icon  = "🟢"
+                                label = f"**KAUF** · {pred} ({conf:.0%})"
+                            elif decision == "SELL":
+                                icon  = "🔴"
+                                pnl   = entry.get("pnl", 0.0)
+                                label = f"**VERKAUF** · {pred} ({conf:.0%}) · PnL {pnl:+.2f} €"
+                            elif decision == "SKIP":
+                                icon  = "❌"
+                                label = f"Fehler: {entry.get('reason', '?')}"
+                            else:
+                                icon  = "⚪"
+                                label = _HOLD_LABELS.get(decision, f"HALTEN ({decision})")
+                                if pred and pred != "?":
+                                    label += f" · Signal: {pred} ({conf:.0%})"
+
+                            price_str = f" · Kurs {price:.2f} €" if price else ""
+                            pval_str  = f" · Portfolio {pval:,.0f} €" if pval else ""
                             st.write(
                                 f"{icon} Zyklus {entry.get('cycle','?')}: "
-                                f"**{action}** · {entry.get('prediction','?')} "
-                                f"({entry.get('confidence', 0):.0%})"
+                                f"{label}{price_str}{pval_str}"
                             )
                         at_status.update(label="Auto-Trade abgeschlossen!",
                                          state="complete")
