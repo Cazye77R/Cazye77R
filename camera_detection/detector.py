@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from threading import Lock
+from threading import Lock, RLock
 from typing import Optional
 
 import cv2
@@ -74,6 +74,7 @@ class CameraDetector:
         confidence: float = 0.5,
     ):
         self._lock = Lock()
+        self._model_lock = RLock()
         self.model_size = model_size
         self.mode = mode
         self.show_boxes = show_boxes
@@ -125,7 +126,8 @@ class CameraDetector:
         with self._lock:
             if model_size is not None and model_size != self.model_size:
                 self.model_size = model_size
-                self._yolo = None  # force reload
+                with self._model_lock:
+                    self._yolo = None  # force reload
             if mode is not None:
                 self.mode = mode
             if show_boxes is not None:
@@ -151,12 +153,14 @@ class CameraDetector:
             confidence = self.confidence
             model_size = self.model_size
 
-        # Load YOLO lazily
-        if self._yolo is None:
-            self._yolo = _load_yolo(model_size)
+        # Load YOLO lazily and run inference — held together under _model_lock
+        # so a concurrent update_settings() cannot null out self._yolo mid-inference.
+        with self._model_lock:
+            if self._yolo is None:
+                self._yolo = _load_yolo(model_size)
+            detections = self._run_yolo(frame, mode, confidence)
 
         annotated = frame.copy()
-        detections = self._run_yolo(frame, mode, confidence)
 
         person_detections = [d for d in detections if d.class_id == self.PERSON_CLASS_ID]
         object_detections = [d for d in detections if d.class_id != self.PERSON_CLASS_ID]
