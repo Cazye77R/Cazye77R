@@ -10,6 +10,7 @@ Start: streamlit run camera_detection/app.py
 """
 from __future__ import annotations
 
+import logging
 import threading
 
 import av
@@ -17,6 +18,17 @@ import streamlit as st
 from streamlit_webrtc import VideoProcessorBase, webrtc_streamer, WebRtcMode
 
 from camera_detection.detector import CameraDetector
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Module-level constants
+# ---------------------------------------------------------------------------
+MODE_MAP: dict[str, str] = {
+    "Objekterkennung": "objects",
+    "Personenerkennung": "persons",
+    "Beides": "both",
+}
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -48,6 +60,22 @@ st.markdown(
 )
 
 # ---------------------------------------------------------------------------
+# Session state defaults — initialised once per session so sidebar values
+# survive Streamlit reruns triggered by widget interaction.
+# ---------------------------------------------------------------------------
+_DEFAULTS: dict[str, object] = {
+    "mode_label": "Beides",
+    "show_boxes": True,
+    "show_labels": True,
+    "show_pose": True,
+    "model_size": "yolov8n",
+    "confidence": 0.50,
+}
+for _key, _val in _DEFAULTS.items():
+    if _key not in st.session_state:
+        st.session_state[_key] = _val
+
+# ---------------------------------------------------------------------------
 # Shared detector instance (created once per session)
 # ---------------------------------------------------------------------------
 @st.cache_resource
@@ -57,6 +85,7 @@ def get_detector() -> CameraDetector:
 
 try:
     detector = get_detector()
+    logger.info("CameraDetector initialisiert (Modell: %s)", detector.model_size)
 except ImportError as exc:
     st.error(
         f"**Fehlende Abhängigkeit:** {exc}\n\n"
@@ -82,25 +111,20 @@ with st.sidebar:
 
     mode_label = st.radio(
         "Erkennungsmodus",
-        options=["Objekterkennung", "Personenerkennung", "Beides"],
-        index=2,
+        options=list(MODE_MAP.keys()),
+        key="mode_label",
     )
-    mode_map = {
-        "Objekterkennung": "objects",
-        "Personenerkennung": "persons",
-        "Beides": "both",
-    }
-    mode = mode_map[mode_label]
+    mode = MODE_MAP[mode_label]
 
     st.markdown("---")
     st.subheader("Anzeige")
-    show_boxes = st.toggle("Rahmen anzeigen", value=True)
-    show_labels = st.toggle("Beschriftung anzeigen", value=True)
+    show_boxes = st.toggle("Rahmen anzeigen", key="show_boxes")
+    show_labels = st.toggle("Beschriftung anzeigen", key="show_labels")
 
     pose_disabled = mode == "objects"
     show_pose = st.toggle(
         "Körper-Tracking (Skeleton)",
-        value=True,
+        key="show_pose",
         disabled=pose_disabled,
         help="Nur verfügbar bei Personenerkennung oder 'Beides'",
     )
@@ -112,6 +136,7 @@ with st.sidebar:
     model_size = st.selectbox(
         "Modellgröße",
         options=["yolov8n", "yolov8s", "yolov8m"],
+        key="model_size",
         format_func=lambda x: {
             "yolov8n": "YOLOv8n — schnell",
             "yolov8s": "YOLOv8s — ausgewogen",
@@ -122,7 +147,7 @@ with st.sidebar:
         "Konfidenzschwelle",
         min_value=0.1,
         max_value=0.95,
-        value=0.50,
+        key="confidence",
         step=0.05,
         format="%.2f",
     )
@@ -173,13 +198,17 @@ class VideoProcessor(VideoProcessorBase):
         # Discard all but the newest frame to avoid queue buildup when
         # YOLO inference is slower than the incoming camera framerate.
         frame = frames[-1]
-        img = frame.to_ndarray(format="bgr24")
-        annotated, stats = detector.detect(img)
+        try:
+            img = frame.to_ndarray(format="bgr24")
+            annotated, stats = detector.detect(img)
 
-        with self._stats_lock:
-            self.latest_stats = stats
+            with self._stats_lock:
+                self.latest_stats = stats
 
-        return [av.VideoFrame.from_ndarray(annotated, format="bgr24")]
+            return [av.VideoFrame.from_ndarray(annotated, format="bgr24")]
+        except Exception:
+            logger.exception("Fehler bei der Frame-Verarbeitung in recv_queued")
+            return [frame]
 
 
 # ---------------------------------------------------------------------------

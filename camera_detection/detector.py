@@ -3,6 +3,7 @@ Core detection logic: YOLOv8 object/person detection + MediaPipe full-body pose 
 """
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from threading import Lock, RLock
@@ -10,6 +11,8 @@ from typing import Optional
 
 import cv2
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # Lazy imports — loaded on first use so the module can be imported without GPU/model weights
 _yolo_model_cache: dict[str, object] = {}
@@ -125,6 +128,9 @@ class CameraDetector:
     ) -> None:
         with self._lock:
             if model_size is not None and model_size != self.model_size:
+                logger.info(
+                    "Modellgröße geändert: %s -> %s", self.model_size, model_size
+                )
                 self.model_size = model_size
                 with self._model_lock:
                     self._yolo = None  # force reload
