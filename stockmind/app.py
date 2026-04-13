@@ -29,7 +29,7 @@ from modules.model_manager import (
     analyze_stock,
 )
 from modules.data_fetcher import (
-    search_stocks, fetch_ohlcv, fetch_info, is_valid_ticker,
+    search_stocks, fetch_ohlcv, fetch_info,
 )
 from modules.trainer import StockTrainer, load_state, load_model, train, list_trained_stocks
 from modules.predictor import predict, build_context_string, SIGNAL_FUNCTIONS
@@ -775,6 +775,7 @@ with tab1:
         if results:
             st.session_state.search_results = results
             st.session_state.search_selected_idx = 0
+            st.session_state.search_query = q
         else:
             st.warning("Keine Ergebnisse gefunden.")
 
@@ -795,7 +796,7 @@ with tab1:
     # Daten laden
     if do_load:
         # Ticker bestimmen: aus Suchergebnis oder direkt aus Text-Input
-        if st.session_state.search_results and not (q and is_valid_ticker(q)):
+        if st.session_state.search_results and st.session_state.search_query == q:
             sel = st.session_state.search_results[
                 st.session_state.search_selected_idx
             ]
