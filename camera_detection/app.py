@@ -169,14 +169,17 @@ class VideoProcessor(VideoProcessorBase):
         with self._stats_lock:
             return dict(self.latest_stats)
 
-    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+    def recv_queued(self, frames: list[av.VideoFrame]) -> list[av.VideoFrame]:
+        # Discard all but the newest frame to avoid queue buildup when
+        # YOLO inference is slower than the incoming camera framerate.
+        frame = frames[-1]
         img = frame.to_ndarray(format="bgr24")
         annotated, stats = detector.detect(img)
 
         with self._stats_lock:
             self.latest_stats = stats
 
-        return av.VideoFrame.from_ndarray(annotated, format="bgr24")
+        return [av.VideoFrame.from_ndarray(annotated, format="bgr24")]
 
 
 # ---------------------------------------------------------------------------
