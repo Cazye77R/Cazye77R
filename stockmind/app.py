@@ -815,15 +815,17 @@ with tab1:
             if df_new.empty:
                 st.error(df_new.attrs.get("error", "Fehler beim Laden der Daten."))
             else:
-                st.session_state.ticker = ticker_to_load
+                # Tatsächlich geladener Ticker (kann nach .DE-Fallback abweichen)
+                actual_ticker = df_new.attrs.get("symbol", ticker_to_load)
+                st.session_state.ticker = actual_ticker
                 st.session_state.df     = df_new
-                st.session_state.info   = _info(ticker_to_load)
+                st.session_state.info   = _info(actual_ticker)
                 st.session_state.prediction   = None
                 st.session_state.analysis_text = ""
                 # Verlauf aktualisieren
                 hist = st.session_state.history
-                if ticker_to_load not in hist:
-                    hist.append(ticker_to_load)
+                if actual_ticker not in hist:
+                    hist.append(actual_ticker)
                 if len(hist) > 10:
                     st.session_state.history = hist[-10:]
                 st.toast(f"📊 {len(df_new)} Kerzen geladen", icon="✅")

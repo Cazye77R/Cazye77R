@@ -144,6 +144,19 @@ def _yahoo_search(query: str) -> list[dict]:
             "type": _TYPE_MAP.get(q.get("quoteType", ""), q.get("quoteType", "–")),
             "wkn": "",      # Yahoo liefert keine WKN; Feld für Konsistenz
         })
+
+    # XETRA (.DE) vor deutschen Regionalbörsen (.F, .MU, .BE, …) vor Rest.
+    # Stabile Sortierung: Reihenfolge innerhalb jeder Gruppe bleibt erhalten.
+    _DE_SFXS = frozenset({"F", "MU", "BE", "HM", "DU", "HA"})
+
+    def _xetra_rank(r: dict) -> int:
+        sym = r.get("symbol", "")
+        if sym.endswith(".DE"):
+            return 0
+        sfx = sym.rsplit(".", 1)[-1] if "." in sym else ""
+        return 1 if sfx in _DE_SFXS else 2
+
+    out.sort(key=_xetra_rank)
     return out
 
 
@@ -265,11 +278,31 @@ def fetch_ohlcv(
         return _empty_df(f"yfinance Download fehlgeschlagen: {exc}")
 
     if raw is None or raw.empty:
-        return _empty_df(
-            f"Keine Daten für '{symbol}' verfügbar "
-            f"(period={period}, interval={interval}). "
-            "Ticker korrekt? Xetra-Ticker enden meist auf '.DE'."
-        )
+        # Fallback: deutsche Regionalbörse (z. B. BMW3.F) → XETRA (BMW.DE) probieren
+        _DE_SFXS = frozenset({"F", "MU", "BE", "HM", "DU", "HA"})
+        _parts = symbol.rsplit(".", 1)
+        if len(_parts) == 2 and _parts[1] in _DE_SFXS:
+            _xetra = _parts[0] + ".DE"
+            try:
+                raw = yf.download(
+                    _xetra, period=period, interval=interval,
+                    progress=False, auto_adjust=True,
+                )
+            except Exception:
+                raw = None
+            if raw is not None and not raw.empty:
+                symbol = _xetra     # Weiterverarbeitung + Cache unter XETRA-Ticker
+            else:
+                return _empty_df(
+                    f"Keine Daten für '{symbol}' (auch '{_xetra}' erfolglos). "
+                    f"period={period}, interval={interval}."
+                )
+        else:
+            return _empty_df(
+                f"Keine Daten für '{symbol}' verfügbar "
+                f"(period={period}, interval={interval}). "
+                "Ticker korrekt? Xetra-Ticker enden meist auf '.DE'."
+            )
 
     # Index bereinigen
     raw.index = pd.to_datetime(raw.index).tz_localize(None)
@@ -292,6 +325,10 @@ def fetch_ohlcv(
 
     # Indikatoren berechnen
     df = _add_indicators(df)
+
+    # Tatsächlich verwendeten Ticker im DataFrame-Attribut speichern
+    # (kann nach Fallback von z. B. BMW3.F → BMW.DE abweichen)
+    df.attrs["symbol"] = symbol
 
     # Cachen
     _save_cache(symbol, period, interval, df)
