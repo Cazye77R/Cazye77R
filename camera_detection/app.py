@@ -55,7 +55,23 @@ def get_detector() -> CameraDetector:
     return CameraDetector()
 
 
-detector = get_detector()
+try:
+    detector = get_detector()
+except ImportError as exc:
+    st.error(
+        f"**Fehlende Abhängigkeit:** {exc}\n\n"
+        "Bitte alle Pakete installieren:\n"
+        "```\npip install opencv-python-headless ultralytics mediapipe "
+        "streamlit-webrtc av\n```"
+    )
+    st.stop()
+except Exception as exc:
+    st.error(
+        f"**Die App konnte nicht gestartet werden.**\n\n{exc}\n\n"
+        "Stelle sicher, dass folgende Pakete korrekt installiert sind: "
+        "`opencv-python-headless`, `ultralytics`, `mediapipe`, `streamlit-webrtc`, `av`."
+    )
+    st.stop()
 
 # ---------------------------------------------------------------------------
 # Sidebar — settings

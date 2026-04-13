@@ -88,6 +88,27 @@ class CameraDetector:
         # FPS tracking
         self._prev_time: float = 0.0
 
+        # Probe required packages at construction time so failures surface early
+        try:
+            from ultralytics import YOLO  # noqa: F401
+        except ImportError as exc:
+            raise RuntimeError(
+                f"Paket 'ultralytics' nicht gefunden – bitte installieren: "
+                f"pip install ultralytics  ({exc})"
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(f"Fehler beim Laden von YOLO (ultralytics): {exc}") from exc
+
+        try:
+            import mediapipe  # noqa: F401
+        except ImportError as exc:
+            raise RuntimeError(
+                f"Paket 'mediapipe' nicht gefunden – bitte installieren: "
+                f"pip install mediapipe  ({exc})"
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(f"Fehler beim Laden von MediaPipe (mediapipe): {exc}") from exc
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
