@@ -149,6 +149,10 @@ class VideoProcessor(VideoProcessorBase):
         self._stats_lock = threading.Lock()
         self.latest_stats: dict = {"fps": 0.0, "person_count": 0, "object_count": 0}
 
+    def get_stats(self) -> dict:
+        with self._stats_lock:
+            return dict(self.latest_stats)
+
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
         annotated, stats = detector.detect(img)
@@ -177,18 +181,19 @@ ctx = webrtc_streamer(
 # Live stats display
 # ---------------------------------------------------------------------------
 if ctx.state.playing and ctx.video_processor:
-    with ctx.video_processor._stats_lock:
-        stats = dict(ctx.video_processor.latest_stats)
+    stats = ctx.video_processor.get_stats()
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("FPS", stats.get("fps", 0))
-    with col2:
-        st.metric("Personen", stats.get("person_count", 0))
-    with col3:
-        st.metric("Objekte", stats.get("object_count", 0))
+    with stats_placeholder.container():
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("FPS", stats.get("fps", 0))
+        with col2:
+            st.metric("Personen", stats.get("person_count", 0))
+        with col3:
+            st.metric("Objekte", stats.get("object_count", 0))
 else:
-    st.info("Kamera starten, um die Erkennung zu aktivieren.")
+    with stats_placeholder.container():
+        st.info("Kamera starten, um die Erkennung zu aktivieren.")
 
 # ---------------------------------------------------------------------------
 # Legend
