@@ -1,12 +1,22 @@
+# Versions are pinned with ~= (compatible release) to allow patch updates
+# within the same minor series while preventing breaking changes from major
+# or minor version bumps. This matters because:
+#   - streamlit and streamlit-webrtc have coupled internal APIs
+#   - ultralytics model file formats change between minor versions
+#   - mediapipe C++ bindings are ABI-sensitive across minor releases
+#   - av (PyAV) wraps FFmpeg and can break on minor bumps
+
 pandas>=2.0
 numpy>=1.24
 torch>=2.0
-streamlit>=1.33
 plotly>=5.20
 
+# Core UI
+streamlit~=1.35
+
 # Camera detection & tracking
-opencv-python-headless>=4.8
-ultralytics>=8.0
-mediapipe>=0.10
-streamlit-webrtc>=0.47
-av>=10.0
+opencv-python-headless~=4.9
+ultralytics~=8.2
+mediapipe~=0.10
+streamlit-webrtc~=0.47
+av~=12.0
