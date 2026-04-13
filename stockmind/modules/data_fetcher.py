@@ -62,6 +62,44 @@ _TYPE_MAP: dict[str, str] = {
 # Bekannte deutsche Xetra-Suffixe für WKN-Mapping-Fallback
 _DE_SUFFIX = ".DE"
 
+# Deutsche Regionalbörsen-Suffixe (niedrigere Priorität als XETRA)
+_DE_SFXS = frozenset({"F", "MU", "BE", "HM", "DU", "HA"})
+
+# Binance REST API für Crypto-OHLCV
+_BINANCE_URL = "https://api.binance.com/api/v3/klines"
+_BINANCE_PERIOD_LIMIT: dict[str, int] = {
+    "1mo": 30, "3mo": 90, "6mo": 180,
+    "1y": 365, "2y": 730, "5y": 1825,
+}
+_BINANCE_INTERVAL_MAP: dict[str, str] = {
+    "1d": "1d", "1h": "1h", "1wk": "1w", "1mo": "1M",
+}
+
+# Statische Liste der wichtigsten Kryptowährungen (Fallback wenn Yahoo-Suche nichts liefert)
+_CRYPTO_STATIC: list[dict] = [
+    {"symbol": "BTC-USD",  "name": "Bitcoin",       "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "ETH-USD",  "name": "Ethereum",      "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "BNB-USD",  "name": "BNB",           "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "XRP-USD",  "name": "XRP",           "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "SOL-USD",  "name": "Solana",        "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "ADA-USD",  "name": "Cardano",       "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "DOGE-USD", "name": "Dogecoin",      "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "AVAX-USD", "name": "Avalanche",     "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "DOT-USD",  "name": "Polkadot",      "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "LINK-USD", "name": "Chainlink",     "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "LTC-USD",  "name": "Litecoin",      "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "MATIC-USD","name": "Polygon (MATIC)","exchange": "Binance",         "type": "Krypto", "wkn": ""},
+    {"symbol": "UNI-USD",  "name": "Uniswap",       "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "ATOM-USD", "name": "Cosmos",        "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "XLM-USD",  "name": "Stellar",       "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "TRX-USD",  "name": "TRON",          "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "TON-USD",  "name": "Toncoin",       "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "SHIB-USD", "name": "Shiba Inu",     "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+]
+
+# Schlüsselwörter die ALLE Kryptowährungen zurückgeben (generische Suchanfragen)
+_CRYPTO_KEYWORDS = frozenset({"krypto", "crypto", "cryptocurrency", "coin", "token", "defi"})
+
 
 # ---------------------------------------------------------------------------
 # 1. Ticker-Suche
@@ -100,7 +138,17 @@ def search_stocks(query: str) -> list[dict]:
 
     # Standard-Yahoo-Suche (Freitext, ISIN, Ticker)
     results = _yahoo_search(query)
-    return results
+
+    # Krypto-Suche: statische Liste ergänzen wenn Yahoo-Suche nichts liefert
+    # oder Suchanfrage eindeutig auf Krypto hinweist
+    crypto_hits = _search_crypto_static(query)
+    if crypto_hits:
+        seen = {r.get("symbol") for r in results if "error" not in r}
+        for c in crypto_hits:
+            if c["symbol"] not in seen:
+                results.append(c)
+
+    return [r for r in results if "error" not in r] or results
 
 
 def _yahoo_search(query: str) -> list[dict]:
@@ -158,6 +206,23 @@ def _yahoo_search(query: str) -> list[dict]:
 
     out.sort(key=_xetra_rank)
     return out
+
+
+def _search_crypto_static(query: str) -> list[dict]:
+    """Sucht in der statischen Krypto-Liste. Gibt Treffer bei Ticker- oder Namensübereinstimmung zurück."""
+    q = query.strip().upper()
+    q_lower = query.strip().lower()
+
+    # Generische Krypto-Suche: alle zeigen
+    if q_lower in _CRYPTO_KEYWORDS:
+        return list(_CRYPTO_STATIC)
+
+    matches = []
+    for c in _CRYPTO_STATIC:
+        base = c["symbol"].replace("-USD", "")   # z. B. "BTC" aus "BTC-USD"
+        if q == base or c["name"].upper().startswith(q) or q in c["name"].upper():
+            matches.append(c)
+    return matches
 
 
 # Rückwärtskompatibilität für ui_components.py
@@ -233,7 +298,92 @@ def get_wkn_symbol(wkn: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 3. OHLCV + Technische Indikatoren (mit Cache)
+# 3. OHLCV-Download-Helfer
+# ---------------------------------------------------------------------------
+
+def _normalize_raw(raw: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """Normalisiert einen rohen yfinance-DataFrame auf OHLCV-Spalten ohne Zeitzone."""
+    if raw is None or raw.empty:
+        return None
+    raw = raw.copy()
+    raw.index = pd.to_datetime(raw.index).tz_localize(None)
+    if isinstance(raw.columns, pd.MultiIndex):
+        raw.columns = raw.columns.get_level_values(0)
+    ohlcv = [c for c in ("Open", "High", "Low", "Close", "Volume") if c in raw.columns]
+    if len(ohlcv) < 5:
+        return None
+    df = raw[list(ohlcv)].dropna(subset=["Close"])
+    return df if len(df) >= 2 else None
+
+
+def _fetch_yf_history(symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
+    """Primärer yfinance-Download via Ticker.history() – robuster als yf.download()."""
+    try:
+        raw = yf.Ticker(symbol).history(
+            period=period, interval=interval,
+            auto_adjust=True, raise_errors=False,
+        )
+        return _normalize_raw(raw)
+    except Exception as exc:
+        logger.debug(f"yf.Ticker.history fehlgeschlagen ({symbol}): {exc}")
+        return None
+
+
+def _fetch_yf_download(symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
+    """Fallback-Download via yf.download() mit MultiIndex-Normalisierung."""
+    try:
+        raw = yf.download(
+            symbol, period=period, interval=interval,
+            progress=False, auto_adjust=True,
+        )
+        return _normalize_raw(raw)
+    except Exception as exc:
+        logger.debug(f"yf.download fehlgeschlagen ({symbol}): {exc}")
+        return None
+
+
+def _fetch_binance_ohlcv(symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
+    """
+    OHLCV von Binance REST API für Krypto-Symbole (Format: BTC-USD → BTCUSDT).
+    Kein API-Key erforderlich für öffentliche Kurs-Daten.
+    """
+    if not symbol.endswith("-USD"):
+        return None
+    base = symbol[:-4]   # "BTC" aus "BTC-USD"
+    binance_sym = base + "USDT"
+    limit = _BINANCE_PERIOD_LIMIT.get(period, 365)
+    b_interval = _BINANCE_INTERVAL_MAP.get(interval, "1d")
+    try:
+        resp = requests.get(
+            _BINANCE_URL,
+            params={"symbol": binance_sym, "interval": b_interval, "limit": limit},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        klines = resp.json()
+        if not klines or not isinstance(klines, list):
+            return None
+        rows = [
+            {
+                "Date":   pd.Timestamp(k[0], unit="ms"),
+                "Open":   float(k[1]),
+                "High":   float(k[2]),
+                "Low":    float(k[3]),
+                "Close":  float(k[4]),
+                "Volume": float(k[5]),
+            }
+            for k in klines
+        ]
+        df = pd.DataFrame(rows).set_index("Date")
+        df.index = pd.to_datetime(df.index).tz_localize(None)
+        return df if len(df) >= 2 else None
+    except Exception as exc:
+        logger.debug(f"Binance fetch fehlgeschlagen ({binance_sym}): {exc}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# 4. OHLCV + Technische Indikatoren (mit Cache)
 # ---------------------------------------------------------------------------
 
 def fetch_ohlcv(
@@ -244,13 +394,12 @@ def fetch_ohlcv(
     """
     Lädt OHLCV-Daten und berechnet technische Indikatoren.
 
-    Berechnet automatisch:
-    - RSI(14)
-    - MACD(12/26/9): macd, macd_signal, macd_diff
-    - Bollinger Bands(20, 2σ): bb_upper, bb_lower, bb_mid, bb_pband, bb_wband
-    - SMA(20), SMA(50), SMA(200)
-    - EMA(12), EMA(26)
+    Download-Strategie:
+    - Krypto (endet auf -USD): Binance API → yf.Ticker.history() → yf.download()
+    - Aktien/ETFs/Indizes:     yf.Ticker.history() → yf.download()
+    - Deutsche Regionalbörse (z. B. BMW3.F): automatischer XETRA-Fallback (.DE)
 
+    Berechnet automatisch RSI, MACD, Bollinger Bands, SMA, EMA.
     Ergebnisse werden 24h lokal gecacht (data/cache/).
 
     Returns:
@@ -264,70 +413,50 @@ def fetch_ohlcv(
     if cached is not None:
         return cached
 
-    # Download
-    try:
-        raw = yf.download(
-            symbol,
-            period=period,
-            interval=interval,
-            progress=False,
-            auto_adjust=True,
-        )
-    except Exception as exc:
-        logger.error(f"yfinance Download fehlgeschlagen ({symbol}): {exc}")
-        return _empty_df(f"yfinance Download fehlgeschlagen: {exc}")
+    # Download: Reihenfolge je Asset-Typ
+    raw: Optional[pd.DataFrame] = None
+    if symbol.endswith("-USD"):
+        # Krypto: Binance zuerst (zuverlässiger für Crypto), dann yfinance
+        raw = _fetch_binance_ohlcv(symbol, period, interval)
+        if raw is None:
+            raw = _fetch_yf_history(symbol, period, interval)
+        if raw is None:
+            raw = _fetch_yf_download(symbol, period, interval)
+    else:
+        # Aktien/ETFs/Indizes: yf.Ticker.history() zuerst (robuster gegen Auth-Änderungen),
+        # yf.download() als Fallback
+        raw = _fetch_yf_history(symbol, period, interval)
+        if raw is None:
+            raw = _fetch_yf_download(symbol, period, interval)
 
-    if raw is None or raw.empty:
+    if raw is None:
         # Fallback: deutsche Regionalbörse (z. B. BMW3.F) → XETRA (BMW.DE) probieren
-        _DE_SFXS = frozenset({"F", "MU", "BE", "HM", "DU", "HA"})
-        _parts = symbol.rsplit(".", 1)
-        if len(_parts) == 2 and _parts[1] in _DE_SFXS:
-            _xetra = _parts[0] + ".DE"
-            try:
-                raw = yf.download(
-                    _xetra, period=period, interval=interval,
-                    progress=False, auto_adjust=True,
-                )
-            except Exception:
-                raw = None
-            if raw is not None and not raw.empty:
-                symbol = _xetra     # Weiterverarbeitung + Cache unter XETRA-Ticker
+        parts = symbol.rsplit(".", 1)
+        if len(parts) == 2 and parts[1] in _DE_SFXS:
+            xetra = parts[0] + ".DE"
+            raw = _fetch_yf_history(xetra, period, interval)
+            if raw is None:
+                raw = _fetch_yf_download(xetra, period, interval)
+            if raw is not None:
+                symbol = xetra
             else:
                 return _empty_df(
-                    f"Keine Daten für '{symbol}' (auch '{_xetra}' erfolglos). "
+                    f"Keine Daten für '{symbol}' (auch '{xetra}' erfolglos). "
                     f"period={period}, interval={interval}."
                 )
         else:
             return _empty_df(
                 f"Keine Daten für '{symbol}' verfügbar "
                 f"(period={period}, interval={interval}). "
-                "Ticker korrekt? Xetra-Ticker enden meist auf '.DE'."
+                "Ticker korrekt? Xetra-Ticker enden meist auf '.DE', Krypto auf '-USD'."
             )
 
-    # Index bereinigen
-    raw.index = pd.to_datetime(raw.index).tz_localize(None)
-
-    # MultiIndex-Spalten normalisieren (yfinance ≥0.2)
-    if isinstance(raw.columns, pd.MultiIndex):
-        raw.columns = raw.columns.get_level_values(0)
-
-    # Sicherstellen dass alle OHLCV-Spalten vorhanden sind
-    required = {"Open", "High", "Low", "Close", "Volume"}
-    missing = required - set(raw.columns)
-    if missing:
-        return _empty_df(f"Fehlende Spalten im Download: {missing}")
-
-    df = raw[["Open", "High", "Low", "Close", "Volume"]].copy()
-    df = df.dropna(subset=["Close"])
-
-    if len(df) < 2:
-        return _empty_df(f"Zu wenige Datenpunkte für '{symbol}' ({len(df)})")
+    df = raw.copy()
 
     # Indikatoren berechnen
     df = _add_indicators(df)
 
-    # Tatsächlich verwendeten Ticker im DataFrame-Attribut speichern
-    # (kann nach Fallback von z. B. BMW3.F → BMW.DE abweichen)
+    # Tatsächlich verwendeten Ticker speichern (nach möglichem .DE-Fallback)
     df.attrs["symbol"] = symbol
 
     # Cachen
