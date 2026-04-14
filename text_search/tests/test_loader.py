@@ -1,7 +1,10 @@
 """Tests for file loading and chunking (loader.py)."""
 import sys
-import tempfile
+import warnings
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -58,3 +61,57 @@ def test_load_file_csv(tmp_path: Path):
     chunks = load_file(f)
     assert len(chunks) == 3
     assert "alpha" in chunks[0].text
+
+
+def test_load_pdf_corrupt_file_raises(tmp_path: Path):
+    """pdfplumber.open() error on a corrupt file is wrapped in RuntimeError."""
+    bad_pdf = tmp_path / "corrupt.pdf"
+    bad_pdf.write_bytes(b"this is not a pdf file at all")
+
+    # Inject a mock so the test doesn't require a working pdfplumber install.
+    mock_plumber = MagicMock()
+    mock_plumber.open.side_effect = Exception("PDF parse error")
+    sys.modules["pdfplumber"] = mock_plumber
+    try:
+        with pytest.raises(RuntimeError, match="konnte nicht als PDF geöffnet werden"):
+            load_file(bad_pdf)
+    finally:
+        sys.modules.pop("pdfplumber", None)
+
+
+def test_load_pdf_nonexistent_raises():
+    """FileNotFoundError from pdfplumber.open() is wrapped in RuntimeError."""
+    mock_plumber = MagicMock()
+    mock_plumber.open.side_effect = FileNotFoundError("no such file")
+    sys.modules["pdfplumber"] = mock_plumber
+    try:
+        with pytest.raises(RuntimeError, match="konnte nicht als PDF geöffnet werden"):
+            load_file(Path("/tmp/does_not_exist_xyz.pdf"))
+    finally:
+        sys.modules.pop("pdfplumber", None)
+
+
+def test_load_pdf_bad_page_skipped_with_warning(tmp_path: Path):
+    """When page.extract_text() raises, the page is skipped with a warning — no crash."""
+    mock_page = MagicMock()
+    mock_page.extract_text.side_effect = ValueError("simulated page parse error")
+
+    mock_pdf = MagicMock()
+    mock_pdf.pages = [mock_page]
+    mock_pdf.__enter__ = lambda s: s
+    mock_pdf.__exit__ = MagicMock(return_value=False)
+
+    mock_plumber = MagicMock()
+    mock_plumber.open.return_value = mock_pdf
+    sys.modules["pdfplumber"] = mock_plumber
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            chunks = load_file(tmp_path / "fake.pdf")
+    finally:
+        sys.modules.pop("pdfplumber", None)
+
+    assert chunks == [], "bad page must be skipped, result must be empty"
+    assert any("konnte nicht gelesen werden" in str(w.message) for w in caught), (
+        "expected a warning about the unreadable page"
+    )

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
@@ -130,11 +131,24 @@ def _load_docx(path: Path, chunk_size: int = 300, overlap: int = 50) -> List[Chu
 def _load_pdf(path: Path, chunk_size: int = 300, overlap: int = 50) -> List[Chunk]:
     import pdfplumber
 
+    try:
+        pdf_ctx = pdfplumber.open(path)
+    except Exception as exc:
+        raise RuntimeError(
+            f"{path.name} konnte nicht als PDF geöffnet werden: {exc}"
+        ) from exc
+
     chunks: List[Chunk] = []
     chunk_id = 0
-    with pdfplumber.open(path) as pdf:
+    with pdf_ctx as pdf:
         for page_num, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text() or ""
+            try:
+                text = page.extract_text() or ""
+            except Exception as exc:
+                warnings.warn(
+                    f"Seite {page_num} in {path.name} konnte nicht gelesen werden: {exc}"
+                )
+                continue
             page_chunks = _chunk_text(
                 text,
                 source=path.name,
