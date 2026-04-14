@@ -1,7 +1,7 @@
 """Streamlit UI for the lightweight text search tool."""
 from __future__ import annotations
 
-VERSION = "v1.0.5"
+VERSION = "v1.0.6"
 
 import hashlib
 import re
@@ -41,16 +41,6 @@ MODEL_INFO: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 # Caching helpers
 # ---------------------------------------------------------------------------
-
-@st.cache_resource(show_spinner="Embedding-Modell wird geladen...")
-def _cached_model(model_name: str, offline: bool) -> None:
-    import os
-    from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
-    if offline:
-        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-        os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
-    return SentenceTransformer(model_name)
-
 
 def _files_hash(file_bytes_map: dict[str, bytes]) -> str:
     """MD5 over all file contents (sorted by name) — first 8 hex chars.
@@ -458,10 +448,6 @@ def main() -> None:
                 f"Geschwindigkeit: {info['speed']} · MTEB: {info['score']}  \n"
                 f"{network_line}"
             )
-        try:
-            _cached_model(effective_model, offline)
-        except Exception:
-            pass
     else:
         st.sidebar.info("⚡ Keyword-Modus: kein Modell nötig, 100% lokal.")
 
