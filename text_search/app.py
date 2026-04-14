@@ -1,6 +1,7 @@
 """Streamlit UI for the lightweight text search tool."""
 from __future__ import annotations
 
+import hashlib
 import re
 import tempfile
 from pathlib import Path
@@ -49,6 +50,19 @@ def _cached_model(model_name: str, offline: bool) -> None:
     return SentenceTransformer(model_name)
 
 
+def _files_hash(file_bytes_map: dict[str, bytes]) -> str:
+    """MD5 over all file contents (sorted by name) — first 8 hex chars.
+
+    Used as an explicit cache-key component so that uploading a file with
+    the same filename but different content always busts the cached index.
+    """
+    h = hashlib.md5()
+    for name in sorted(file_bytes_map):
+        h.update(name.encode())
+        h.update(file_bytes_map[name])
+    return h.hexdigest()[:8]
+
+
 @st.cache_data(show_spinner="Index wird aufgebaut...")
 def _cached_index(
     file_bytes_map: dict[str, bytes],
@@ -58,6 +72,7 @@ def _cached_index(
     overlap: int,
     batch_size: int,
     offline: bool,
+    content_hash: str,  # MD5 of file contents — ensures cache busts on same-name re-upload
 ) -> SearchIndex:
     chunks: List[Chunk] = []
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -630,6 +645,7 @@ def main() -> None:
                 overlap=overlap,
                 batch_size=batch_size,
                 offline=offline,
+                content_hash=_files_hash(file_bytes_map),
             )
             st.subheader("2. Index aufbauen")
             preset_hint = f"Preset: **{preset_name}** · Chunk-Größe: {chunk_size} · Overlap: {overlap}"
