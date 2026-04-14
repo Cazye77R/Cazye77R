@@ -1,6 +1,8 @@
 """Streamlit UI for the lightweight text search tool."""
 from __future__ import annotations
 
+VERSION = "v1.0.0"
+
 import hashlib
 import re
 import tempfile
@@ -313,6 +315,11 @@ def _ollama_setup_wizard(config: "ChatConfig") -> bool:  # type: ignore[name-def
 
 def main() -> None:
     st.set_page_config(page_title="Text Search", page_icon="🔍", layout="wide")
+    st.markdown(
+        f'<div style="position:fixed;top:0.5rem;right:1rem;z-index:9999;'
+        f'font-size:0.75rem;color:#888;background:transparent">{VERSION}</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(_DARK_CSS, unsafe_allow_html=True)
     st.title("🔍 Lightweight Text Search")
 
