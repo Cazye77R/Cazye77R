@@ -1,7 +1,7 @@
 """Streamlit UI for the lightweight text search tool."""
 from __future__ import annotations
 
-VERSION = "v1.0.6"
+VERSION = "v1.0.7"
 
 import hashlib
 import re
@@ -55,9 +55,22 @@ def _files_hash(file_bytes_map: dict[str, bytes]) -> str:
     return h.hexdigest()[:8]
 
 
+def _write_files_to_dir(file_bytes_map: dict[str, bytes], content_hash: str) -> str:
+    """Persist uploaded file bytes to a stable temp directory keyed by content hash.
+
+    Uses /tmp/text_search_files_{hash}/ so the directory survives st.rerun()
+    and can be read by _cached_index() without passing bytes through the cache key.
+    """
+    files_dir = Path(tempfile.gettempdir()) / f"text_search_files_{content_hash}"
+    files_dir.mkdir(exist_ok=True)
+    for filename, data in file_bytes_map.items():
+        (files_dir / filename).write_bytes(data)
+    return str(files_dir)
+
+
 @st.cache_data(show_spinner="Index wird aufgebaut...")
 def _cached_index(
-    file_bytes_map: dict[str, bytes],
+    files_dir: str,      # path written by _write_files_to_dir — stable across reruns
     semantic: bool,
     effective_model: str,
     chunk_size: int,
@@ -67,11 +80,8 @@ def _cached_index(
     content_hash: str,  # MD5 of file contents — ensures cache busts on same-name re-upload
 ) -> SearchIndex:
     chunks: List[Chunk] = []
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        for filename, data in file_bytes_map.items():
-            tmp_path = Path(tmp_dir) / filename
-            tmp_path.write_bytes(data)
-            chunks.extend(load_file(tmp_path, chunk_size=chunk_size, overlap=overlap))
+    for p in sorted(Path(files_dir).iterdir()):
+        chunks.extend(load_file(p, chunk_size=chunk_size, overlap=overlap))
     return build_search_index(
         chunks,
         semantic=semantic,
@@ -630,24 +640,28 @@ def main() -> None:
                     )
 
             file_bytes_map = {f.name: f.getvalue() for f in uploaded_files}
-            index_params = dict(
-                file_bytes_map=file_bytes_map,
-                semantic=use_semantic,
-                effective_model=effective_model,
-                chunk_size=chunk_size,
-                overlap=overlap,
-                batch_size=batch_size,
-                offline=offline,
-                content_hash=_files_hash(file_bytes_map),
-            )
+            content_hash = _files_hash(file_bytes_map)
             st.subheader("2. Index aufbauen")
             preset_hint = f"Preset: **{preset_name}** · Chunk-Größe: {chunk_size} · Overlap: {overlap}"
             st.info(f"{len(uploaded_files)} Datei(en) bereit. {preset_hint}")
 
             if st.button("Index aufbauen", type="primary", disabled=bool(_oversized)):
                 try:
+                    # Write files once to a persistent dir; only the path enters the cache key
+                    files_dir = _write_files_to_dir(file_bytes_map, content_hash)
+                    index_params = dict(
+                        files_dir=files_dir,
+                        semantic=use_semantic,
+                        effective_model=effective_model,
+                        chunk_size=chunk_size,
+                        overlap=overlap,
+                        batch_size=batch_size,
+                        offline=offline,
+                        content_hash=content_hash,
+                    )
                     _cached_index(**index_params)
-                    # Persist params and file bytes for subsequent reruns
+                    # index_params is lightweight (no bytes); file_bytes_map stored
+                    # separately — only needed for download buttons, not as cache key
                     st.session_state["index_params"] = index_params
                     st.session_state["file_bytes_map"] = file_bytes_map
                     st.rerun()
