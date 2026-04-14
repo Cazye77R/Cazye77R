@@ -22,6 +22,7 @@ class InvertedIndex:
     df: Dict[str, int]          # document frequency per term
     tf: List[Dict[str, int]]    # term frequency per chunk
     avg_dl: float               # average document length in tokens
+    doc_lengths: List[int]      # token count per chunk — precomputed for O(1) BM25 lookup
     k1: float = 1.5
     b: float = 0.75
 
@@ -43,7 +44,8 @@ def build_index(chunks: List[Chunk]) -> InvertedIndex:
             df[term] += 1
 
     avg_dl = total_len / len(chunks) if chunks else 1.0
-    return InvertedIndex(chunks=chunks, df=dict(df), tf=tf, avg_dl=avg_dl)
+    doc_lengths = [sum(tf_doc.values()) for tf_doc in tf]
+    return InvertedIndex(chunks=chunks, df=dict(df), tf=tf, avg_dl=avg_dl, doc_lengths=doc_lengths)
 
 
 def search_keyword(
@@ -69,7 +71,7 @@ def search_keyword(
             tf_t = tf_doc.get(term, 0)
             if tf_t == 0:
                 continue
-            dl = sum(tf_doc.values())
+            dl = index.doc_lengths[doc_id]
             numerator = tf_t * (index.k1 + 1)
             denominator = tf_t + index.k1 * (1 - index.b + index.b * dl / index.avg_dl)
             scores[doc_id] = scores.get(doc_id, 0.0) + idf * numerator / denominator

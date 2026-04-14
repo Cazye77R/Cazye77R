@@ -150,6 +150,7 @@ def save_index(index: SearchIndex, path: Path) -> None:
         "avg_dl": index.keyword_index.avg_dl,
         "df": index.keyword_index.df,
         "tf": index.keyword_index.tf,
+        "doc_lengths": index.keyword_index.doc_lengths,
         "chunks": [
             {
                 "text": c.text,
@@ -197,11 +198,17 @@ def load_index(path: Path) -> SearchIndex:
             for c in bm25_data["chunks"]
         ]
 
+        tf_list = [{k: v for k, v in tf.items()} for tf in bm25_data["tf"]]
+        # doc_lengths added in format_version 2; fall back to computing from tf for old ZIPs
+        doc_lengths = bm25_data.get(
+            "doc_lengths", [sum(tf_doc.values()) for tf_doc in tf_list]
+        )
         kw_index = InvertedIndex(
             chunks=chunks,
             df=bm25_data["df"],
-            tf=[{k: v for k, v in tf.items()} for tf in bm25_data["tf"]],
+            tf=tf_list,
             avg_dl=bm25_data["avg_dl"],
+            doc_lengths=doc_lengths,
             k1=bm25_data["k1"],
             b=bm25_data["b"],
         )
