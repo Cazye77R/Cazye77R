@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+
+# Index artefacts — binary/large, locally generated
+*.pkl
+*.index
+*.npy
+
+# Model cache — downloaded automatically, never commit
+hf_cache/
+
+# Secrets — must never be committed
+.env
+.env.*
+
+# Logs
+*.log
