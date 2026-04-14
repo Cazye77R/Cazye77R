@@ -68,11 +68,15 @@ def search(
     """
     if mode == "keyword" or index.embedding_index is None:
         kw_results = search_keyword(index.keyword_index, query, top_k=top_k)
-        return [SearchResult(chunk=r.chunk, score=r.score, mode="keyword") for r in kw_results]
+        return deduplicate_results(
+            [SearchResult(chunk=r.chunk, score=r.score, mode="keyword") for r in kw_results]
+        )
 
     if mode == "semantic":
         sem_results = search_semantic(index.embedding_index, query, top_k=top_k, offline=offline)
-        return [SearchResult(chunk=r.chunk, score=r.score, mode="semantic") for r in sem_results]
+        return deduplicate_results(
+            [SearchResult(chunk=r.chunk, score=r.score, mode="semantic") for r in sem_results]
+        )
 
     # Hybrid: Reciprocal Rank Fusion (RRF)
     # RRF score = Σ weight_i / (k + rank_i)  where k=60 dampens the impact of
@@ -102,10 +106,32 @@ def search(
         rrf_scores[cid] = kw_contrib + sem_contrib
 
     combined = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
-    return [
+    return deduplicate_results([
         SearchResult(chunk=chunk_by_id[cid], score=score, mode="hybrid")
         for cid, score in combined[:top_k]
-    ]
+    ])
+
+
+def deduplicate_results(results: List[SearchResult]) -> List[SearchResult]:
+    """Remove near-duplicate chunks from the same source file.
+
+    Iterates results in score order (highest first) and skips any result
+    whose chunk_id is within 1 of an already-accepted chunk from the same
+    source. This prevents overlapping sentence-window chunks from flooding
+    the top results.
+    """
+    accepted: list[SearchResult] = []
+    seen: dict[str, list[int]] = {}  # source → accepted chunk_ids
+
+    for r in results:
+        source = r.chunk.source
+        accepted_ids = seen.get(source, [])
+        if any(abs(r.chunk.chunk_id - aid) < 2 for aid in accepted_ids):
+            continue
+        accepted.append(r)
+        seen.setdefault(source, []).append(r.chunk.chunk_id)
+
+    return accepted
 
 
 def save_index(index: SearchIndex, path: Path) -> None:
