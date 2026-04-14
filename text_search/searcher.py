@@ -210,7 +210,7 @@ def load_index(path: Path) -> SearchIndex:
         if meta.get("has_embeddings"):
             from .semantic import EmbeddingIndex
             buf = io.BytesIO(zf.read("embeddings.npy"))
-            emb_np = np.load(buf)
+            emb_np = np.load(buf, allow_pickle=False)
             emb_index = EmbeddingIndex(
                 chunks=chunks,
                 embeddings=torch.from_numpy(emb_np),
