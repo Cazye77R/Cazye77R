@@ -1,7 +1,7 @@
 """Streamlit UI for the lightweight text search tool."""
 from __future__ import annotations
 
-VERSION = "v1.0.0"
+VERSION = "v1.0.2"
 
 import hashlib
 import re
