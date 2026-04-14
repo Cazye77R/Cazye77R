@@ -4,13 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Generator, List, Tuple
 
-try:
-    from .searcher import SearchIndex, SearchResult, search
-except ImportError:
-    import sys
-    from pathlib import Path as _Path
-    sys.path.insert(0, str(_Path(__file__).parent.parent))
-    from text_search.searcher import SearchIndex, SearchResult, search  # type: ignore[no-redef]
+from .searcher import SearchIndex, SearchResult, search
 
 # ---------------------------------------------------------------------------
 # Configuration

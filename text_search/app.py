@@ -1,7 +1,7 @@
 """Streamlit UI for the lightweight text search tool."""
 from __future__ import annotations
 
-VERSION = "v1.0.9"
+VERSION = "v1.0.10"
 
 import hashlib
 import re
@@ -13,15 +13,15 @@ import streamlit as st
 
 try:
     from .loader import Chunk, load_file
-    from .searcher import SearchIndex, SearchMode, SearchResult, build_search_index, load_index, save_index
-    from .chat import ChatConfig, answer_question, DEFAULT_SMALL_MODEL
+    from .searcher import SearchIndex, SearchMode, SearchResult, build_search_index, load_index, save_index, search
+    from .chat import ChatConfig, answer_question, DEFAULT_SMALL_MODEL, MODEL_CATALOG, check_ollama_status
 except ImportError:
     import sys
     from pathlib import Path as _Path
     sys.path.insert(0, str(_Path(__file__).parent.parent))
     from text_search.loader import Chunk, load_file  # type: ignore[no-redef]
-    from text_search.searcher import SearchIndex, SearchMode, SearchResult, build_search_index, load_index, save_index  # type: ignore[no-redef]
-    from text_search.chat import ChatConfig, answer_question, DEFAULT_SMALL_MODEL  # type: ignore[no-redef]
+    from text_search.searcher import SearchIndex, SearchMode, SearchResult, build_search_index, load_index, save_index, search  # type: ignore[no-redef]
+    from text_search.chat import ChatConfig, answer_question, DEFAULT_SMALL_MODEL, MODEL_CATALOG, check_ollama_status  # type: ignore[no-redef]
 
 # ---------------------------------------------------------------------------
 # Speed presets
@@ -241,11 +241,6 @@ def _run_ollama_pull(model: str, host: str) -> None:
 
 
 def _show_model_picker(config: "ChatConfig") -> None:  # type: ignore[name-defined]
-    try:
-        from .chat import MODEL_CATALOG, DEFAULT_SMALL_MODEL
-    except ImportError:
-        from text_search.chat import MODEL_CATALOG, DEFAULT_SMALL_MODEL  # type: ignore[no-redef]
-
     st.markdown("### Modell herunterladen")
     model_options = list(MODEL_CATALOG.keys())
     default_idx = model_options.index(DEFAULT_SMALL_MODEL) if DEFAULT_SMALL_MODEL in model_options else 0
@@ -265,10 +260,6 @@ def _show_model_picker(config: "ChatConfig") -> None:  # type: ignore[name-defin
 def _ollama_setup_wizard(config: "ChatConfig") -> bool:  # type: ignore[name-defined]
     """Show Ollama setup UI. Returns True if Ollama + model are ready."""
     import platform
-    try:
-        from .chat import check_ollama_status
-    except ImportError:
-        from text_search.chat import check_ollama_status  # type: ignore[no-redef]
 
     status = check_ollama_status(config.ollama_host, config.model)
     if status.model_ready:
@@ -579,12 +570,7 @@ def main() -> None:
                 except Exception as exc:
                     st.error(f"Fehler: {exc}")
             else:
-                try:
-                    from .searcher import search as do_search
-                except ImportError:
-                    from text_search.searcher import search as do_search  # type: ignore[no-redef]
-
-                results = do_search(
+                results = search(
                     search_index,
                     query=query,
                     mode=mode,
