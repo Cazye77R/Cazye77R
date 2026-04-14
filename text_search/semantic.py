@@ -85,15 +85,18 @@ def search_semantic(
 def _get_model(model_name: str, offline: bool = False) -> object:
     """Return a cached SentenceTransformer instance.
 
-    When offline=True, sets TRANSFORMERS_OFFLINE=1 and HF_DATASETS_OFFLINE=1
-    so the library never attempts a network connection. The model must already
-    be present in the local HuggingFace cache (~/.cache/huggingface/) or at
-    the path given as model_name.
+    Sets or clears TRANSFORMERS_OFFLINE / HF_DATASETS_OFFLINE on every call
+    so that toggling offline=False after a prior offline=True call actually
+    re-enables network access (os.environ.setdefault would have left the vars
+    set permanently for the process lifetime).
     """
+    if offline:
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        os.environ["HF_DATASETS_OFFLINE"] = "1"
+    else:
+        os.environ.pop("TRANSFORMERS_OFFLINE", None)
+        os.environ.pop("HF_DATASETS_OFFLINE", None)
     if model_name not in _MODEL_CACHE:
-        if offline:
-            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-            os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
         from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
         _MODEL_CACHE[model_name] = SentenceTransformer(model_name)
     return _MODEL_CACHE[model_name]
