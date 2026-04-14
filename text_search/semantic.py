@@ -78,7 +78,8 @@ def search_semantic(
 
     scores = (index.embeddings @ query_vec).tolist()  # [N]
     ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:top_k]
-    return [SemanticResult(chunk=index.chunks[i], score=float(s)) for i, s in ranked]
+    # cos_sim returns -1..1, clamp to 0..1 for fair hybrid weighting
+    return [SemanticResult(chunk=index.chunks[i], score=max(0.0, float(s))) for i, s in ranked]
 
 
 def _get_model(model_name: str, offline: bool = False) -> object:
