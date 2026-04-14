@@ -86,17 +86,20 @@ def search(
     chunk_by_id: dict[int, Chunk] = {r.chunk.chunk_id: r.chunk for r in kw_results}
     chunk_by_id.update({r.chunk.chunk_id: r.chunk for r in sem_results})
 
-    rrf_scores: dict[int, float] = {}
-    kw_weight = 1.0 - semantic_weight
+    kw_weight  = 1.0 - semantic_weight
     sem_weight = semantic_weight
 
-    for rank, r in enumerate(kw_results, start=1):
-        cid = r.chunk.chunk_id
-        rrf_scores[cid] = rrf_scores.get(cid, 0.0) + kw_weight / (_RRF_K + rank)
+    # Build rank-position maps so each chunk's contribution from both methods
+    # can be computed explicitly in a single pass.
+    kw_ranks:  dict[int, int] = {r.chunk.chunk_id: rank for rank, r in enumerate(kw_results,  1)}
+    sem_ranks: dict[int, int] = {r.chunk.chunk_id: rank for rank, r in enumerate(sem_results, 1)}
 
-    for rank, r in enumerate(sem_results, start=1):
-        cid = r.chunk.chunk_id
-        rrf_scores[cid] = rrf_scores.get(cid, 0.0) + sem_weight / (_RRF_K + rank)
+    rrf_scores: dict[int, float] = {}
+    for cid in chunk_by_id:
+        # Chunks absent from one pool get 0.0 from that method — explicit, not implicit.
+        kw_contrib  = kw_weight  / (_RRF_K + kw_ranks[cid])  if cid in kw_ranks  else 0.0
+        sem_contrib = sem_weight / (_RRF_K + sem_ranks[cid]) if cid in sem_ranks else 0.0
+        rrf_scores[cid] = kw_contrib + sem_contrib
 
     combined = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
     return [
