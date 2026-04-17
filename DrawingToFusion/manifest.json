@@ -1,0 +1,11 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "DrawingToFusion",
+  "author": "Markus",
+  "description": "Technische Zeichnungen mit KI in Fusion 360 nachbauen",
+  "version": "1.0.0",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

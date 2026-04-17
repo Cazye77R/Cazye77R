@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drawing to Fusion 360</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 16px;
+    }
+    h1 { font-size: 1rem; color: #569cd6; margin-bottom: 16px; }
+    label { display: block; font-size: 0.8rem; color: #9cdcfe; margin-bottom: 4px; }
+    input[type="text"] {
+      width: 100%;
+      padding: 6px 8px;
+      background: #2d2d2d;
+      border: 1px solid #444;
+      border-radius: 4px;
+      color: #d4d4d4;
+      font-size: 0.85rem;
+      margin-bottom: 12px;
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+      font-size: 0.85rem;
+    }
+    button {
+      width: 100%;
+      padding: 8px;
+      background: #0e639c;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    button:hover { background: #1177bb; }
+    #status {
+      margin-top: 14px;
+      font-size: 0.8rem;
+      min-height: 20px;
+      color: #ce9178;
+    }
+    #result {
+      margin-top: 12px;
+      background: #2d2d2d;
+      border-radius: 4px;
+      padding: 10px;
+      font-size: 0.78rem;
+      white-space: pre-wrap;
+      max-height: 300px;
+      overflow-y: auto;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>Drawing to Fusion 360</h1>
+
+  <label for="imagePath">Pfad zur technischen Zeichnung</label>
+  <input type="text" id="imagePath" placeholder="C:\Zeichnungen\teil.png" />
+
+  <div class="checkbox-row">
+    <input type="checkbox" id="autoModel" checked />
+    <label for="autoModel" style="margin:0">Modell automatisch erstellen</label>
+  </div>
+
+  <button id="analyzeBtn">Zeichnung analysieren</button>
+
+  <div id="status"></div>
+  <pre id="result"></pre>
+
+  <script>
+    const adsk = window.adsk;
+
+    document.getElementById("analyzeBtn").addEventListener("click", () => {
+      const imagePath = document.getElementById("imagePath").value.trim();
+      const autoModel = document.getElementById("autoModel").checked;
+
+      if (!imagePath) {
+        setStatus("Bitte einen Bildpfad eingeben.");
+        return;
+      }
+
+      setStatus("Analysiere…");
+
+      adsk.fusionSendData("analyze", JSON.stringify({ imagePath, autoModel }))
+        .then((result) => {
+          setStatus("Fertig.");
+          const resultEl = document.getElementById("result");
+          resultEl.style.display = "block";
+          resultEl.textContent = result;
+        })
+        .catch((err) => {
+          setStatus("Fehler: " + err);
+        });
+    });
+
+    function setStatus(msg) {
+      document.getElementById("status").textContent = msg;
+    }
+  </script>
+</body>
+</html>
