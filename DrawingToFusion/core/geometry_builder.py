@@ -342,3 +342,90 @@ class GeometryBuilder:
         for edge in self._top_face(body).edges:
             edges.add(edge)
         return edges
+
+    _EDGE_Z_TOL = 1e-6   # cm — tolerance for Z-level edge grouping
+
+    def _get_top_edges(self, body) -> adsk.core.ObjectCollection:
+        """Return all body edges whose both vertices lie at the highest Z level."""
+        try:
+            edges = adsk.core.ObjectCollection.create()
+            max_z = float('-inf')
+
+            for edge in body.edges:
+                for v in (edge.startVertex, edge.endVertex):
+                    z = v.geometry.z
+                    if z > max_z:
+                        max_z = z
+
+            for edge in body.edges:
+                zs = edge.startVertex.geometry.z
+                ze = edge.endVertex.geometry.z
+                if abs(zs - max_z) < self._EDGE_Z_TOL and abs(ze - max_z) < self._EDGE_Z_TOL:
+                    edges.add(edge)
+
+            return edges
+        except Exception as exc:
+            adsk.core.Application.get().userInterface.messageBox(
+                f"_get_top_edges fehlgeschlagen:\n{exc}"
+            )
+            return adsk.core.ObjectCollection.create()
+
+    def _get_bottom_edges(self, body) -> adsk.core.ObjectCollection:
+        """Return all body edges whose both vertices lie at the lowest Z level."""
+        try:
+            edges = adsk.core.ObjectCollection.create()
+            min_z = float('inf')
+
+            for edge in body.edges:
+                for v in (edge.startVertex, edge.endVertex):
+                    z = v.geometry.z
+                    if z < min_z:
+                        min_z = z
+
+            for edge in body.edges:
+                zs = edge.startVertex.geometry.z
+                ze = edge.endVertex.geometry.z
+                if abs(zs - min_z) < self._EDGE_Z_TOL and abs(ze - min_z) < self._EDGE_Z_TOL:
+                    edges.add(edge)
+
+            return edges
+        except Exception as exc:
+            adsk.core.Application.get().userInterface.messageBox(
+                f"_get_bottom_edges fehlgeschlagen:\n{exc}"
+            )
+            return adsk.core.ObjectCollection.create()
+
+    def _get_largest_face(self, body) -> adsk.fusion.BRepFace:
+        """Return the face with the greatest surface area."""
+        try:
+            best, best_area = None, -1.0
+            for face in body.faces:
+                if face.area > best_area:
+                    best_area = face.area
+                    best = face
+            if best is None:
+                raise RuntimeError("Body enthält keine Faces.")
+            return best
+        except Exception as exc:
+            adsk.core.Application.get().userInterface.messageBox(
+                f"_get_largest_face fehlgeschlagen:\n{exc}"
+            )
+            return None
+
+    def _find_face_at_z(self, body, z_value: float) -> adsk.fusion.BRepFace:
+        """Return the face whose centroid Z is closest to z_value."""
+        try:
+            best, best_dist = None, float('inf')
+            for face in body.faces:
+                dist = abs(face.centroid.z - z_value)
+                if dist < best_dist:
+                    best_dist = dist
+                    best = face
+            if best is None:
+                raise RuntimeError("Body enthält keine Faces.")
+            return best
+        except Exception as exc:
+            adsk.core.Application.get().userInterface.messageBox(
+                f"_find_face_at_z fehlgeschlagen:\n{exc}"
+            )
+            return None
