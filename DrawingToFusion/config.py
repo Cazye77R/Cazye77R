@@ -1,9 +1,9 @@
 ADDIN_NAME = "DrawingToFusion"
 COMPANY_NAME = "Markus"
 
-OPENAI_API_KEY = ""  # Set via environment variable OPENAI_API_KEY
-VISION_MODEL = "gpt-4o"
-MAX_TOKENS = 4096
+ANTHROPIC_API_KEY = "sk-ant-..."  # Hier eintragen oder via Umgebungsvariable ANTHROPIC_API_KEY
+DEFAULT_MODEL = "claude-opus-4-5"
+MAX_TOKENS = 2000
 
 PALETTE_ID = "DrawingToFusionPalette"
 PALETTE_TITLE = "Drawing to Fusion 360"
