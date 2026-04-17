@@ -99,6 +99,37 @@ class VisionAnalyzer:
         """Convenience wrapper — returns a typed DrawingAnalysis."""
         return DrawingAnalysis.from_dict(self.analyze_image(image_path))
 
+    def analyze_image_from_base64(
+        self, base64_str: str, media_type: str = "image/png"
+    ) -> dict:
+        """Accept a pre-encoded base64 string (from the HTML palette) and return raw JSON dict.
+
+        Used instead of analyze_image() when the image is already in memory
+        (loaded via FileReader in the browser) rather than on disk.
+        """
+        if not base64_str:
+            raise ValueError("base64_str darf nicht leer sein.")
+
+        valid = set(_MIME_TYPES.values())
+        if media_type not in valid:
+            raise ValueError(
+                f"Nicht unterstützter MIME-Typ: '{media_type}'. "
+                f"Erlaubt: {', '.join(sorted(valid))}"
+            )
+
+        payload = self._build_payload(base64_str, media_type)
+        raw = self._post(payload)
+        data = self._extract_json(raw)
+
+        if not self.validate_response(data):
+            raise ValueError(
+                f"API-Antwort enthält nicht alle Pflichtfelder {_REQUIRED_FIELDS}. "
+                f"Erhaltene Schlüssel: {set(data.keys())}"
+            )
+
+        self._log_result(data)
+        return data
+
     def validate_response(self, data: dict) -> bool:
         """Return True when all required top-level fields are present and well-formed."""
         if not isinstance(data, dict):

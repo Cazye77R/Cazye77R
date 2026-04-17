@@ -1,48 +1,13 @@
 import adsk.core
 import adsk.fusion
-import os
 import traceback
 
 from . import config
+from .commands.analyzeDrawing.entry import PaletteCommandCreatedHandler
+from .commands.analyzeDrawing import entry as analyzeDrawing
 
 handlers = []
 _cmd_def = None
-
-
-class _ButtonCreatedHandler(adsk.core.CommandCreatedEventHandler):
-    def __init__(self, ui):
-        super().__init__()
-        self._ui = ui
-
-    def notify(self, args):
-        try:
-            _open_palette(self._ui)
-        except Exception:
-            self._ui.messageBox(
-                f"Fehler beim Öffnen der Palette:\n{traceback.format_exc()}"
-            )
-
-
-def _open_palette(ui):
-    palette = ui.palettes.itemById(config.PALETTE_ID)
-    if palette:
-        palette.isVisible = True
-        return
-
-    html_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        config.PALETTE_URL,
-    )
-    ui.palettes.add(
-        config.PALETTE_ID,
-        config.PALETTE_TITLE,
-        html_path,
-        True,   # isVisible
-        True,   # showCloseButton
-        True,   # isResizable
-        config.PALETTE_WIDTH,
-        config.PALETTE_HEIGHT,
-    )
 
 
 def _get_sketch_panel(ui):
@@ -70,7 +35,7 @@ def run(context):
             config.CMD_ANALYZE_TOOLTIP,
         )
 
-        on_created = _ButtonCreatedHandler(ui)
+        on_created = PaletteCommandCreatedHandler(ui)
         _cmd_def.commandCreated.add(on_created)
         handlers.append(on_created)
 
@@ -91,9 +56,8 @@ def stop(context):
         app = adsk.core.Application.get()
         ui = app.userInterface
 
-        palette = ui.palettes.itemById(config.PALETTE_ID)
-        if palette:
-            palette.deleteMe()
+        # entry.stop() deletes the palette and clears HTML handlers
+        analyzeDrawing.stop()
 
         panel = _get_sketch_panel(ui)
         ctrl = panel.controls.itemById(config.CMD_ANALYZE_ID)

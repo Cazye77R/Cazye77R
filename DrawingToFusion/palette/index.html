@@ -845,6 +845,14 @@
       return (n / 1048576).toFixed(1) + ' MB';
     }
 
+    // ── Fusion → JS bridge ────────────────────────────────────────
+    // Called by Fusion when Python invokes palette.sendInfoToHTML(action, data)
+    window.fusionData = function(action, data) {
+      if (action === 'status' && typeof window.handleFusionResponse === 'function') {
+        window.handleFusionResponse(data);
+      }
+    };
+
     // ── Test simulation (no Fusion environment) ────────────────────
     function simulateResponse() {
       const fake = {

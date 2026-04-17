@@ -1,1 +1,1 @@
-from .entry import start, stop
+from .entry import PaletteCommandCreatedHandler, HTMLEventHandler, stop

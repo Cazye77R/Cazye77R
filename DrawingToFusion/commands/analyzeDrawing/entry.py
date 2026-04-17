@@ -1,112 +1,176 @@
+from __future__ import annotations
+
 import adsk.core
 import adsk.fusion
+import json
 import os
 import traceback
 
 from ... import config
 from ...core.vision_analyzer import VisionAnalyzer
+from ...core.models import DrawingAnalysis
 from ...core.geometry_builder import GeometryBuilder
 
-ui = None
-cmd_def = None
-handlers = []
+# Kept alive at module level so Fusion's GC doesn't collect them
+_handlers: list = []
+_palette = None
+
+# MIME types accepted by the Claude messages API (images field)
+_VALID_MIME = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 
 
-class AnalyzeDrawingCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
-    def __init__(self):
+# ──────────────────────────────────────────────────────────────────────────────
+# Command created handler — opens the palette when the toolbar button is clicked
+# ──────────────────────────────────────────────────────────────────────────────
+
+class PaletteCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
+    def __init__(self, ui):
         super().__init__()
+        self._ui = ui
 
     def notify(self, args):
         try:
-            cmd = args.command
-            cmd.isRepeatable = False
-
-            on_execute = AnalyzeDrawingCommandExecuteHandler()
-            cmd.execute.add(on_execute)
-            handlers.append(on_execute)
-
-            inputs = cmd.commandInputs
-
-            inputs.addStringValueInput(
-                "imagePath",
-                "Bildpfad",
-                "",
-            )
-            inputs.addBoolValueInput(
-                "autoModel",
-                "Modell automatisch erstellen",
-                True,
-                "",
-                True,
-            )
-
+            _show_palette(self._ui)
         except Exception:
-            if ui:
-                ui.messageBox(f"Command created failed:\n{traceback.format_exc()}")
+            self._ui.messageBox(
+                f"Palette konnte nicht geöffnet werden:\n{traceback.format_exc()}"
+            )
 
 
-class AnalyzeDrawingCommandExecuteHandler(adsk.core.CommandEventHandler):
-    def __init__(self):
+# ──────────────────────────────────────────────────────────────────────────────
+# HTML event handler — receives messages from the JavaScript palette
+# ──────────────────────────────────────────────────────────────────────────────
+
+class HTMLEventHandler(adsk.core.HTMLEventHandler):
+    def __init__(self, palette, ui):
         super().__init__()
+        self._palette = palette
+        self._ui = ui
 
     def notify(self, args):
         try:
-            inputs = args.command.commandInputs
-            image_path = inputs.itemById("imagePath").value
-            auto_model = inputs.itemById("autoModel").value
-
-            if not image_path or not os.path.isfile(image_path):
-                ui.messageBox("Bitte einen gültigen Bildpfad angeben.")
+            html_args = adsk.core.HTMLEventArgs.cast(args)
+            if html_args.action != "analyzeImage":
                 return
-
-            analyzer = VisionAnalyzer()
-            drawing_data = analyzer.analyze(image_path)
-
-            if auto_model and drawing_data:
-                builder = GeometryBuilder()
-                builder.build(drawing_data)
-
+            data = json.loads(html_args.data)
+            self._run_pipeline(data)
         except Exception:
-            if ui:
-                ui.messageBox(f"Execute failed:\n{traceback.format_exc()}")
+            self._send({"type": "error", "message": traceback.format_exc()})
+
+    # ── Pipeline ──────────────────────────────────────────────────────────────
+
+    def _run_pipeline(self, data: dict) -> None:
+        api_key        = data.get("apiKey", "").strip()
+        image_base64   = data.get("imageBase64", "")
+        image_mime     = data.get("imageMime", "image/png")
+        build_holes    = bool(data.get("buildHoles", True))
+        build_chamfers = bool(data.get("buildChamfers", True))
+
+        # ── Validate inputs ───────────────────────────────────────────────────
+        if not api_key:
+            self._send({"type": "error", "message": "API-Key fehlt. Bitte in den Einstellungen eintragen."})
+            return
+        if not image_base64:
+            self._send({"type": "error", "message": "Kein Bild übermittelt."})
+            return
+        if image_mime not in _VALID_MIME:
+            self._send({
+                "type": "error",
+                "message": (
+                    f"MIME-Typ '{image_mime}' wird von der Claude API nicht unterstützt. "
+                    "Bitte PNG, JPEG oder WEBP verwenden."
+                ),
+            })
+            return
+
+        # ── Step 1: Vision analysis ───────────────────────────────────────────
+        self._send({"type": "progress", "step": "Bild wird analysiert …", "percent": 30})
+        try:
+            result_dict = VisionAnalyzer(api_key).analyze_image_from_base64(
+                image_base64, image_mime
+            )
+        except Exception as exc:
+            self._send({"type": "error", "message": f"Analyse fehlgeschlagen: {exc}"})
+            return
+
+        # ── Step 2: Parse + honour UI settings ───────────────────────────────
+        analysis = DrawingAnalysis.from_dict(result_dict)
+        if not build_holes:
+            analysis.holes = []
+        if not build_chamfers:
+            analysis.chamfers = []
+
+        # ── Step 3: Build geometry ────────────────────────────────────────────
+        self._send({"type": "progress", "step": "Geometrie wird aufgebaut …", "percent": 70})
+        try:
+            GeometryBuilder().build(analysis)
+        except Exception as exc:
+            self._send({"type": "error", "message": f"Geometrie-Aufbau fehlgeschlagen: {exc}"})
+            return
+
+        # ── Done ──────────────────────────────────────────────────────────────
+        self._send({
+            "type":       "success",
+            "analysis":   result_dict,
+            "confidence": result_dict.get("confidence", 0.0),
+        })
+
+    # ── Send helper ───────────────────────────────────────────────────────────
+
+    def _send(self, message: dict) -> None:
+        """Send a status/progress/success/error message to the HTML palette."""
+        try:
+            self._palette.sendInfoToHTML("status", json.dumps(message))
+        except Exception:
+            pass   # palette may have been closed; silently ignore
 
 
-def start():
-    global ui, cmd_def
+# ──────────────────────────────────────────────────────────────────────────────
+# Palette lifecycle
+# ──────────────────────────────────────────────────────────────────────────────
 
-    app = adsk.core.Application.get()
-    ui = app.userInterface
+def _show_palette(ui) -> None:
+    global _palette
 
-    cmd_def = ui.commandDefinitions.addButtonDefinition(
-        config.CMD_ANALYZE_ID,
-        config.CMD_ANALYZE_NAME,
-        config.CMD_ANALYZE_TOOLTIP,
+    html_path = os.path.normpath(
+        os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "..",
+            config.PALETTE_URL,
+        )
     )
 
-    on_created = AnalyzeDrawingCommandCreatedHandler()
-    cmd_def.commandCreated.add(on_created)
-    handlers.append(on_created)
+    _palette = ui.palettes.itemById(config.PALETTE_ID)
 
-    workspace = ui.workspaces.itemById(config.WORKSPACE_ID)
-    tab = workspace.toolbarTabs.itemById(config.TOOLBAR_TAB_ID)
-    panel = tab.toolbarPanels.itemById(config.TOOLBAR_PANEL_ID)
-    panel.controls.addCommand(cmd_def)
+    if not _palette:
+        _palette = ui.palettes.add(
+            config.PALETTE_ID,
+            config.PALETTE_TITLE,
+            html_path,
+            True,   # isVisible
+            True,   # showCloseButton
+            True,   # isResizable
+            config.PALETTE_WIDTH,
+            config.PALETTE_HEIGHT,
+        )
+        # Register HTML handler once at creation time
+        on_html = HTMLEventHandler(_palette, ui)
+        _palette.incomingFromHTML.add(on_html)
+        _handlers.append(on_html)
+
+    _palette.dockingState = adsk.core.PaletteDockingStates.PaletteDockStateRight
+    _palette.isVisible = True
 
 
-def stop():
+def stop() -> None:
+    """Remove the palette and release all event handler references."""
+    global _palette
     try:
         app = adsk.core.Application.get()
-        ui_local = app.userInterface
-
-        workspace = ui_local.workspaces.itemById(config.WORKSPACE_ID)
-        tab = workspace.toolbarTabs.itemById(config.TOOLBAR_TAB_ID)
-        panel = tab.toolbarPanels.itemById(config.TOOLBAR_PANEL_ID)
-        ctrl = panel.controls.itemById(config.CMD_ANALYZE_ID)
-        if ctrl:
-            ctrl.deleteMe()
-
-        if cmd_def:
-            cmd_def.deleteMe()
-
+        palette = app.userInterface.palettes.itemById(config.PALETTE_ID)
+        if palette:
+            palette.deleteMe()
+        _palette = None
     except Exception:
         pass
+    _handlers.clear()
