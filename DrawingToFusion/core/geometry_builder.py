@@ -2,9 +2,7 @@ import adsk.core
 import adsk.fusion
 import traceback
 
-from .models import DrawingData, Shape
-
-CM = 0.1  # mm to cm conversion (Fusion 360 uses cm internally)
+from .models import DrawingAnalysis, RectangleProfile, CircleProfile, LProfile, TProfile
 
 
 class GeometryBuilder:
@@ -14,64 +12,53 @@ class GeometryBuilder:
         design = adsk.fusion.Design.cast(self._app.activeProduct)
         self._root = design.rootComponent
 
-    def build(self, drawing: DrawingData):
-        for shape in drawing.shapes:
-            try:
-                self._build_shape(shape)
-            except Exception:
-                self._ui.messageBox(
-                    f"Fehler beim Erstellen von '{shape.shape_type}':\n{traceback.format_exc()}"
-                )
-
-    def _build_shape(self, shape: Shape):
-        if shape.shape_type == "rectangle":
-            self._build_box(shape)
-        elif shape.shape_type == "circle":
-            self._build_cylinder(shape)
-        else:
+    def build(self, drawing: DrawingAnalysis):
+        f = drawing.to_cm_factor()
+        try:
+            self._build_profile(drawing, f)
+        except Exception:
             self._ui.messageBox(
-                f"Form '{shape.shape_type}' wird noch nicht unterstützt."
+                f"Fehler beim Erstellen des Profils:\n{traceback.format_exc()}"
             )
 
-    def _get_dim(self, shape: Shape, label: str, fallback: float = 10.0) -> float:
-        for d in shape.dimensions:
-            if d.label.lower() == label.lower():
-                return d.value * CM
-        return fallback * CM
+    def _build_profile(self, drawing: DrawingAnalysis, f: float):
+        profile = drawing.base_profile
+        depth = drawing.extrusion_depth * f
 
-    def _build_box(self, shape: Shape):
-        width = self._get_dim(shape, "width", 10)
-        height = self._get_dim(shape, "height", 10)
-        depth = self._get_dim(shape, "depth", 10)
+        if isinstance(profile, RectangleProfile):
+            self._extrude_rect(profile.width * f, profile.height * f, depth)
+        elif isinstance(profile, CircleProfile):
+            self._extrude_circle(profile.radius * f, depth)
+        elif isinstance(profile, (LProfile, TProfile)):
+            self._ui.messageBox(
+                f"{type(profile).__name__} wird in einer späteren Version unterstützt."
+            )
+        else:
+            self._ui.messageBox("Unbekanntes Profil — kein Körper erstellt.")
 
-        sketches = self._root.sketches
-        xy_plane = self._root.xYConstructionPlane
-        sketch = sketches.add(xy_plane)
+    # ------------------------------------------------------------------
+    # Sketch + extrude helpers
+    # ------------------------------------------------------------------
 
-        lines = sketch.sketchCurves.sketchLines
-        lines.addTwoPointRectangle(
-            adsk.core.Point3D.create(shape.x * CM, shape.y * CM, 0),
-            adsk.core.Point3D.create(shape.x * CM + width, shape.y * CM + height, 0),
+    def _extrude_rect(self, width: float, height: float, depth: float):
+        sketch = self._root.sketches.add(self._root.xYConstructionPlane)
+        sketch.sketchCurves.sketchLines.addTwoPointRectangle(
+            adsk.core.Point3D.create(0, 0, 0),
+            adsk.core.Point3D.create(width, height, 0),
         )
+        self._extrude(sketch, depth)
 
+    def _extrude_circle(self, radius: float, depth: float):
+        sketch = self._root.sketches.add(self._root.xYConstructionPlane)
+        sketch.sketchCurves.sketchCircles.addByCenterRadius(
+            adsk.core.Point3D.create(0, 0, 0), radius
+        )
+        self._extrude(sketch, depth)
+
+    def _extrude(self, sketch, depth: float):
         profile = sketch.profiles.item(0)
-        extrudes = self._root.features.extrudeFeatures
-        dist = adsk.core.ValueInput.createByReal(depth)
-        extrudes.addSimple(profile, dist, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-
-    def _build_cylinder(self, shape: Shape):
-        radius = self._get_dim(shape, "radius", 5)
-        height = self._get_dim(shape, "height", 10)
-
-        sketches = self._root.sketches
-        xy_plane = self._root.xYConstructionPlane
-        sketch = sketches.add(xy_plane)
-
-        circles = sketch.sketchCurves.sketchCircles
-        center = adsk.core.Point3D.create(shape.x * CM, shape.y * CM, 0)
-        circles.addByCenterRadius(center, radius)
-
-        profile = sketch.profiles.item(0)
-        extrudes = self._root.features.extrudeFeatures
-        dist = adsk.core.ValueInput.createByReal(height)
-        extrudes.addSimple(profile, dist, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+        self._root.features.extrudeFeatures.addSimple(
+            profile,
+            adsk.core.ValueInput.createByReal(depth),
+            adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
+        )

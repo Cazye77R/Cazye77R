@@ -2,8 +2,35 @@ import base64
 import json
 import os
 
-from .models import DrawingData, Shape, Dimension
+from .models import DrawingAnalysis
 from .. import config
+
+_SYSTEM_PROMPT = """Du bist ein Experte für technische Zeichnungen.
+Analysiere die Zeichnung und antworte ausschließlich mit gültigem JSON.
+
+JSON-Schema:
+{
+  "unit": "mm|cm|inch",
+  "view": "front|top|side|isometric|...",
+  "base_profile": {
+    "type": "rectangle|circle|l|t",
+    "width": <float>, "height": <float>, "thickness": <float>,
+    "radius": <float>,
+    "flange_width": <float>, "flange_height": <float>, "web_thickness": <float>
+  },
+  "extrusion_depth": <float>,
+  "holes": [
+    {"x": <float>, "y": <float>, "diameter": <float>,
+     "depth": "through|blind", "depth_value": <float|null>,
+     "countersink": <bool>, "countersink_angle": <float|null>}
+  ],
+  "chamfers": [{"edge": "<beschreibung>", "distance": <float>}],
+  "fillets":  [{"edge": "<beschreibung>", "radius": <float>}],
+  "confidence": <0.0–1.0>,
+  "notes": "<freitext>"
+}
+
+Fehlende Felder mit sinnvollen Defaults füllen. Nur JSON zurückgeben, kein Fließtext."""
 
 
 class VisionAnalyzer:
@@ -16,25 +43,17 @@ class VisionAnalyzer:
         except ImportError:
             raise RuntimeError("openai package not installed. Run: pip install openai")
 
-    def analyze(self, image_path: str) -> DrawingData:
+    def analyze(self, image_path: str) -> DrawingAnalysis:
         encoded = self._encode_image(image_path)
         response = self._client.chat.completions.create(
             model=config.VISION_MODEL,
             max_tokens=config.MAX_TOKENS,
             messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                "Analysiere diese technische Zeichnung. "
-                                "Gib die Ergebnisse als JSON zurück mit den Feldern: "
-                                "title, scale, unit, shapes (Liste mit shape_type, dimensions, x, y, z, notes), "
-                                "raw_description. "
-                                "Maße in der angegebenen Einheit (Standard: mm)."
-                            ),
-                        },
+                        {"type": "text", "text": "Analysiere diese technische Zeichnung:"},
                         {
                             "type": "image_url",
                             "image_url": {
@@ -43,7 +62,7 @@ class VisionAnalyzer:
                             },
                         },
                     ],
-                }
+                },
             ],
         )
 
@@ -54,39 +73,11 @@ class VisionAnalyzer:
         with open(path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
 
-    def _parse_response(self, raw: str) -> DrawingData:
+    def _parse_response(self, raw: str) -> DrawingAnalysis:
         try:
             start = raw.find("{")
             end = raw.rfind("}") + 1
             data = json.loads(raw[start:end])
+            return DrawingAnalysis.from_dict(data)
         except (ValueError, json.JSONDecodeError):
-            return DrawingData(raw_description=raw)
-
-        shapes = []
-        for s in data.get("shapes", []):
-            dims = [
-                Dimension(
-                    label=d.get("label", ""),
-                    value=float(d.get("value", 0)),
-                    unit=d.get("unit", data.get("unit", "mm")),
-                )
-                for d in s.get("dimensions", [])
-            ]
-            shapes.append(
-                Shape(
-                    shape_type=s.get("shape_type", "unknown"),
-                    dimensions=dims,
-                    x=float(s.get("x", 0)),
-                    y=float(s.get("y", 0)),
-                    z=float(s.get("z", 0)),
-                    notes=s.get("notes", ""),
-                )
-            )
-
-        return DrawingData(
-            title=data.get("title", ""),
-            scale=data.get("scale", "1:1"),
-            unit=data.get("unit", "mm"),
-            shapes=shapes,
-            raw_description=data.get("raw_description", raw),
-        )
+            return DrawingAnalysis(notes=raw)
