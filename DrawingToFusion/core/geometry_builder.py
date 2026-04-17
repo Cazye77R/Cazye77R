@@ -1,8 +1,19 @@
+from __future__ import annotations
+
 import adsk.core
 import adsk.fusion
-import traceback
+import math
 
-from .models import DrawingAnalysis, RectangleProfile, CircleProfile, LProfile, TProfile
+from .models import (
+    DrawingAnalysis,
+    RectangleProfile,
+    CircleProfile,
+    LProfile,
+    TProfile,
+    HoleSpec,
+    ChamferSpec,
+    FilletSpec,
+)
 
 
 class GeometryBuilder:
@@ -12,53 +23,322 @@ class GeometryBuilder:
         design = adsk.fusion.Design.cast(self._app.activeProduct)
         self._root = design.rootComponent
 
-    def build(self, drawing: DrawingAnalysis):
-        f = drawing.to_cm_factor()
-        try:
-            self._build_profile(drawing, f)
-        except Exception:
-            self._ui.messageBox(
-                f"Fehler beim Erstellen des Profils:\n{traceback.format_exc()}"
+    # ──────────────────────────────────────────────────────────────────────
+    # Public
+    # ──────────────────────────────────────────────────────────────────────
+
+    def build(self, analysis: DrawingAnalysis) -> None:
+        if analysis.base_profile is None:
+            raise ValueError(
+                "DrawingAnalysis enthält kein base_profile — Aufbau abgebrochen."
+            )
+        if analysis.extrusion_depth <= 0:
+            raise ValueError(
+                f"extrusion_depth muss > 0 sein, ist {analysis.extrusion_depth!r}."
             )
 
-    def _build_profile(self, drawing: DrawingAnalysis, f: float):
-        profile = drawing.base_profile
-        depth = drawing.extrusion_depth * f
+        factor = analysis.to_cm_factor()
 
-        if isinstance(profile, RectangleProfile):
-            self._extrude_rect(profile.width * f, profile.height * f, depth)
-        elif isinstance(profile, CircleProfile):
-            self._extrude_circle(profile.radius * f, depth)
-        elif isinstance(profile, (LProfile, TProfile)):
-            self._ui.messageBox(
-                f"{type(profile).__name__} wird in einer späteren Version unterstützt."
-            )
+        occ = self._root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
+        comp = occ.component
+
+        sketch = self._create_base_sketch(comp, analysis, factor)
+        extrude = self._extrude(comp, sketch, self._cm(analysis.extrusion_depth, factor))
+        body = extrude.bodies.item(0)
+
+        self._add_holes(comp, body, analysis.holes, factor)
+        self._add_chamfers(comp, body, analysis.chamfers, factor)
+        self._add_fillets(comp, body, analysis.fillets, factor)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Unit conversion
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _cm(self, value: float, factor: float) -> float:
+        """Convert a value in the drawing's unit to Fusion's internal cm."""
+        return value * factor
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Sketch creation
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _create_base_sketch(
+        self, comp, analysis: DrawingAnalysis, factor: float
+    ) -> adsk.fusion.Sketch:
+        sketch = comp.sketches.add(comp.xYConstructionPlane)
+        p = analysis.base_profile
+
+        if isinstance(p, RectangleProfile):
+            self._sketch_rectangle(sketch, p, factor)
+        elif isinstance(p, CircleProfile):
+            self._sketch_circle(sketch, p, factor)
+        elif isinstance(p, LProfile):
+            self._sketch_l_profile(sketch, p, factor)
+        elif isinstance(p, TProfile):
+            self._sketch_t_profile(sketch, p, factor)
         else:
-            self._ui.messageBox("Unbekanntes Profil — kein Körper erstellt.")
+            raise ValueError(f"Unbekannter Profiltyp: {type(p).__name__}")
 
-    # ------------------------------------------------------------------
-    # Sketch + extrude helpers
-    # ------------------------------------------------------------------
+        return sketch
 
-    def _extrude_rect(self, width: float, height: float, depth: float):
-        sketch = self._root.sketches.add(self._root.xYConstructionPlane)
-        sketch.sketchCurves.sketchLines.addTwoPointRectangle(
+    def _sketch_rectangle(
+        self, sketch, profile: RectangleProfile, factor: float
+    ) -> None:
+        w = self._cm(profile.width,  factor)
+        h = self._cm(profile.height, factor)
+        t = self._cm(profile.thickness, factor)
+
+        lines = sketch.sketchCurves.sketchLines
+        lines.addTwoPointRectangle(
             adsk.core.Point3D.create(0, 0, 0),
-            adsk.core.Point3D.create(width, height, 0),
+            adsk.core.Point3D.create(w, h, 0),
         )
-        self._extrude(sketch, depth)
+        # When thickness > 0 the rectangle is hollow (box section / shell)
+        if t > 0 and t < min(w, h) / 2:
+            lines.addTwoPointRectangle(
+                adsk.core.Point3D.create(t, t, 0),
+                adsk.core.Point3D.create(w - t, h - t, 0),
+            )
 
-    def _extrude_circle(self, radius: float, depth: float):
-        sketch = self._root.sketches.add(self._root.xYConstructionPlane)
+    def _sketch_circle(self, sketch, profile: CircleProfile, factor: float) -> None:
+        r = self._cm(profile.radius, factor)
         sketch.sketchCurves.sketchCircles.addByCenterRadius(
-            adsk.core.Point3D.create(0, 0, 0), radius
+            adsk.core.Point3D.create(0, 0, 0), r
         )
-        self._extrude(sketch, depth)
 
-    def _extrude(self, sketch, depth: float):
-        profile = sketch.profiles.item(0)
-        self._root.features.extrudeFeatures.addSimple(
-            profile,
-            adsk.core.ValueInput.createByReal(depth),
-            adsk.fusion.FeatureOperations.NewBodyFeatureOperation,
+    def _sketch_l_profile(self, sketch, profile: LProfile, factor: float) -> None:
+        """
+        L-profile (angle iron), origin at bottom-left:
+
+            (0,h) ──── (wt,h)
+              │              │
+              │         (wt,fh) ──── (w,fh)
+              │                          │
+            (0,0) ──────────────── (w,0)
+
+        wt = web_thickness  (vertical leg wall)
+        fh = flange_height  (horizontal leg wall)
+        """
+        w  = self._cm(profile.width,         factor)
+        h  = self._cm(profile.height,        factor)
+        fh = self._cm(profile.flange_height, factor)
+        wt = self._cm(profile.web_thickness, factor)
+
+        pts = [
+            (0,  0 ),
+            (w,  0 ),
+            (w,  fh),
+            (wt, fh),
+            (wt, h ),
+            (0,  h ),
+        ]
+        self._add_closed_polyline(sketch, pts)
+
+    def _sketch_t_profile(self, sketch, profile: TProfile, factor: float) -> None:
+        """
+        T-profile, web pointing down, flange at top, symmetric around x = w/2:
+
+            (0,h) ────────────────────── (w,h)
+              │                               │
+            (0,wh) ──(cx-hwt,wh)   (cx+hwt,wh)── (w,wh)
+                          │                   │
+                       (cx-hwt,0)  (cx+hwt,0)
+
+        wh  = web_height = height - flange_height
+        cx  = width / 2
+        hwt = web_thickness / 2
+        """
+        w   = self._cm(profile.width,         factor)
+        h   = self._cm(profile.height,        factor)
+        fh  = self._cm(profile.flange_height, factor)
+        wt  = self._cm(profile.web_thickness, factor)
+
+        cx  = w / 2
+        hwt = wt / 2
+        wh  = h - fh          # height of the vertical web below the flange
+
+        pts = [
+            (cx - hwt, 0 ),
+            (cx + hwt, 0 ),
+            (cx + hwt, wh),
+            (w,        wh),
+            (w,        h ),
+            (0,        h ),
+            (0,        wh),
+            (cx - hwt, wh),
+        ]
+        self._add_closed_polyline(sketch, pts)
+
+    def _add_closed_polyline(self, sketch, pts: list) -> None:
+        lines = sketch.sketchCurves.sketchLines
+        n = len(pts)
+        for i in range(n):
+            x0, y0 = pts[i]
+            x1, y1 = pts[(i + 1) % n]
+            lines.addByTwoPoints(
+                adsk.core.Point3D.create(x0, y0, 0),
+                adsk.core.Point3D.create(x1, y1, 0),
+            )
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Extrude
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _extrude(
+        self, comp, sketch, depth_cm: float
+    ) -> adsk.fusion.ExtrudeFeature:
+        profile = self._largest_profile(sketch)
+        extrudes = comp.features.extrudeFeatures
+        ext_input = extrudes.createInput(
+            profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation
         )
+        extent = adsk.fusion.DistanceExtentDefinition.create(
+            adsk.core.ValueInput.createByReal(depth_cm)
+        )
+        ext_input.setOneSideExtent(
+            extent, adsk.fusion.ExtentDirections.PositiveExtentDirection
+        )
+        return extrudes.add(ext_input)
+
+    def _largest_profile(self, sketch) -> adsk.fusion.Profile:
+        """Select the profile with the greatest area (outermost closed loop)."""
+        profiles = sketch.profiles
+        if profiles.count == 1:
+            return profiles.item(0)
+        best, best_area = None, -1.0
+        for i in range(profiles.count):
+            p = profiles.item(i)
+            try:
+                area = p.areaProperties().area
+            except Exception:
+                continue
+            if area > best_area:
+                best_area = area
+                best = p
+        if best is None:
+            raise RuntimeError("Kein gültiges Skizzenprofil für die Extrusion gefunden.")
+        return best
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Holes
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _add_holes(self, comp, body, holes: list, factor: float) -> None:
+        if not holes:
+            return
+        top_face = self._top_face(body)
+        hole_feats = comp.features.holeFeatures
+
+        for spec in holes:
+            try:
+                self._add_hole(comp, hole_feats, top_face, body, spec, factor)
+            except Exception as exc:
+                self._ui.messageBox(
+                    f"Loch bei ({spec.x}, {spec.y}) übersprungen:\n{exc}"
+                )
+
+    def _add_hole(
+        self, comp, hole_feats, top_face, body, spec: HoleSpec, factor: float
+    ) -> None:
+        dia = self._cm(spec.diameter, factor)
+
+        # Sketch point on the top face defines the hole centre
+        hole_sk = comp.sketches.add(top_face)
+        pt_col = adsk.core.ObjectCollection.create()
+        sp = hole_sk.sketchPoints.add(
+            adsk.core.Point3D.create(
+                self._cm(spec.x, factor), self._cm(spec.y, factor), 0
+            )
+        )
+        pt_col.add(sp)
+
+        if spec.countersink:
+            hole_input = hole_feats.createCountersinkInput(
+                adsk.core.ValueInput.createByReal(dia)
+            )
+            if spec.countersink_angle is not None:
+                hole_input.counterSinkAngle = adsk.core.ValueInput.createByReal(
+                    math.radians(spec.countersink_angle)
+                )
+        else:
+            hole_input = hole_feats.createSimpleInput(
+                adsk.core.ValueInput.createByReal(dia)
+            )
+
+        hole_input.setPositionBySketchPoints(pt_col)
+        hole_input.isDefaultDirection = True
+        hole_input.participantBodies = adsk.core.ObjectCollection.createWithArray([body])
+
+        if spec.depth == "blind":
+            hole_input.depth = adsk.core.ValueInput.createByReal(
+                self._cm(spec.depth_value, factor)
+            )
+
+        hole_feats.add(hole_input)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Chamfers
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _add_chamfers(self, comp, body, chamfers: list, factor: float) -> None:
+        if not chamfers:
+            return
+        edges = self._top_face_edges(body)
+        if edges.count == 0:
+            return
+
+        for spec in chamfers:
+            try:
+                dist = adsk.core.ValueInput.createByReal(
+                    self._cm(spec.distance, factor)
+                )
+                chamfer_input = comp.features.chamferFeatures.createInput(edges, True)
+                chamfer_input.setToEqualDistance(dist)
+                comp.features.chamferFeatures.add(chamfer_input)
+            except Exception as exc:
+                self._ui.messageBox(f"Chamfer '{spec.edge}' übersprungen:\n{exc}")
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Fillets
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _add_fillets(self, comp, body, fillets: list, factor: float) -> None:
+        if not fillets:
+            return
+        edges = self._top_face_edges(body)
+        if edges.count == 0:
+            return
+
+        for spec in fillets:
+            try:
+                radius = adsk.core.ValueInput.createByReal(
+                    self._cm(spec.radius, factor)
+                )
+                fillet_input = comp.features.filletFeatures.createInput()
+                fillet_input.addConstantRadiusEdgeSet(edges, radius, True)
+                comp.features.filletFeatures.add(fillet_input)
+            except Exception as exc:
+                self._ui.messageBox(f"Fillet '{spec.edge}' übersprungen:\n{exc}")
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Body / face utilities
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _top_face(self, body) -> adsk.fusion.BRepFace:
+        """Return the face whose centroid has the highest Z — the extruded top."""
+        top, max_z = None, float('-inf')
+        for face in body.faces:
+            z = face.centroid.z
+            if z > max_z:
+                max_z = z
+                top = face
+        if top is None:
+            raise RuntimeError("Kein Face auf dem Body gefunden.")
+        return top
+
+    def _top_face_edges(self, body) -> adsk.core.ObjectCollection:
+        """Collect all edges of the top face into an ObjectCollection."""
+        edges = adsk.core.ObjectCollection.create()
+        for edge in self._top_face(body).edges:
+            edges.add(edge)
+        return edges
