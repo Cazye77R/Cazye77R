@@ -87,22 +87,23 @@ def start():
     cmd_def.commandCreated.add(on_created)
     handlers.append(on_created)
 
-    panel = ui.allToolbarPanels.itemById(config.CMD_ANALYZE_PANEL)
-    if panel:
-        panel.controls.addCommand(cmd_def)
+    workspace = ui.workspaces.itemById(config.WORKSPACE_ID)
+    tab = workspace.toolbarTabs.itemById(config.TOOLBAR_TAB_ID)
+    panel = tab.toolbarPanels.itemById(config.TOOLBAR_PANEL_ID)
+    panel.controls.addCommand(cmd_def)
 
 
 def stop():
-    panel = None
     try:
         app = adsk.core.Application.get()
         ui_local = app.userInterface
 
-        panel = ui_local.allToolbarPanels.itemById(config.CMD_ANALYZE_PANEL)
-        if panel:
-            ctrl = panel.controls.itemById(config.CMD_ANALYZE_ID)
-            if ctrl:
-                ctrl.deleteMe()
+        workspace = ui_local.workspaces.itemById(config.WORKSPACE_ID)
+        tab = workspace.toolbarTabs.itemById(config.TOOLBAR_TAB_ID)
+        panel = tab.toolbarPanels.itemById(config.TOOLBAR_PANEL_ID)
+        ctrl = panel.controls.itemById(config.CMD_ANALYZE_ID)
+        if ctrl:
+            ctrl.deleteMe()
 
         if cmd_def:
             cmd_def.deleteMe()
