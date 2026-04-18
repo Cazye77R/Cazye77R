@@ -2,3 +2,18 @@ __pycache__/
 *.py[cod]
 *.pyo
 .env
+
+# Umgebungsvariablen — niemals committen!
+.env
+config_local.py
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Fusion 360 Add-In Runtime
+*.pyc
+DrawingToFusion/__pycache__/

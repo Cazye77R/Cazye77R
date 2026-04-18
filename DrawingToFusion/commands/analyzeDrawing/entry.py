@@ -180,8 +180,11 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
         """Send a status/progress/success/error message to the HTML palette."""
         try:
             self._palette.sendInfoToHTML("status", json.dumps(message))
-        except Exception:
-            pass   # palette may have been closed; silently ignore
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "DrawingToFusion: _send() fehlgeschlagen — Palette möglicherweise geschlossen. Fehler: %s", exc
+            )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
