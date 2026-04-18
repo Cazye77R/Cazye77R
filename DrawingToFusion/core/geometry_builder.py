@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import adsk.core
 import adsk.fusion
+import datetime
 import math
+import os
 
 from .models import (
     DrawingAnalysis,
@@ -429,3 +431,88 @@ class GeometryBuilder:
                 f"_find_face_at_z fehlgeschlagen:\n{exc}"
             )
             return None
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Debug
+    # ──────────────────────────────────────────────────────────────────────
+
+    # debug.log is written next to the add-in root (DrawingToFusion/)
+    _DEBUG_LOG = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "debug.log",
+    )
+
+    def debug_dump(self, body) -> None:
+        """Dump face/edge/bounding-box info for body to debug.log and the Fusion event log."""
+        lines: list[str] = []
+
+        def w(s: str = "") -> None:
+            lines.append(s)
+
+        ts = datetime.datetime.now().isoformat(timespec="seconds")
+        w("=" * 64)
+        w(f"debug_dump  {ts}  —  Body: {body.name}")
+        w("=" * 64)
+
+        # ── Bounding box ──────────────────────────────────────────────────
+        bb    = body.boundingBox
+        lo    = bb.minPoint
+        hi    = bb.maxPoint
+        sx    = (hi.x - lo.x) * 10   # cm → mm
+        sy    = (hi.y - lo.y) * 10
+        sz    = (hi.z - lo.z) * 10
+        w("")
+        w("BoundingBox (mm):")
+        w(f"  min   X={lo.x*10:>10.3f}  Y={lo.y*10:>10.3f}  Z={lo.z*10:>10.3f}")
+        w(f"  max   X={hi.x*10:>10.3f}  Y={hi.y*10:>10.3f}  Z={hi.z*10:>10.3f}")
+        w(f"  size  {sx:.3f} × {sy:.3f} × {sz:.3f} mm")
+
+        # ── Faces ─────────────────────────────────────────────────────────
+        w("")
+        w(f"Faces ({body.faces.count}):")
+        w(f"  {'#':>3}  {'Area cm²':>10}  {'Area mm²':>10}  {'Centroid Z mm':>14}")
+        w(f"  {'-'*3}  {'-'*10}  {'-'*10}  {'-'*14}")
+        for i in range(body.faces.count):
+            face     = body.faces.item(i)
+            area_cm2 = face.area
+            area_mm2 = area_cm2 * 100          # 1 cm² = 100 mm²
+            cz_mm    = face.centroid.z * 10
+            w(f"  {i:>3}  {area_cm2:>10.4f}  {area_mm2:>10.2f}  {cz_mm:>14.3f}")
+
+        # ── Edges ─────────────────────────────────────────────────────────
+        w("")
+        w(f"Edges ({body.edges.count}):")
+        w(f"  {'#':>3}  {'Length mm':>10}  {'Start Z mm':>12}  {'End Z mm':>10}")
+        w(f"  {'-'*3}  {'-'*10}  {'-'*12}  {'-'*10}")
+        for i in range(body.edges.count):
+            edge   = body.edges.item(i)
+            length = edge.length * 10
+            zs     = edge.startVertex.geometry.z * 10
+            ze     = edge.endVertex.geometry.z   * 10
+            w(f"  {i:>3}  {length:>10.3f}  {zs:>12.3f}  {ze:>10.3f}")
+
+        w("")
+
+        # ── Write to debug.log ────────────────────────────────────────────
+        text = "\n".join(lines) + "\n"
+        try:
+            with open(self._DEBUG_LOG, "a", encoding="utf-8") as fh:
+                fh.write(text)
+        except Exception as exc:
+            self._ui.messageBox(
+                f"debug_dump: Log-Datei konnte nicht geschrieben werden:\n"
+                f"{self._DEBUG_LOG}\n{exc}"
+            )
+            return
+
+        # ── Fusion event log (one-line summary) ───────────────────────────
+        summary = (
+            f"[DrawingToFusion] debug_dump: {body.faces.count} Faces, "
+            f"{body.edges.count} Edges, "
+            f"BBox {sx:.1f}×{sy:.1f}×{sz:.1f} mm "
+            f"→ {self._DEBUG_LOG}"
+        )
+        try:
+            self._app.log(summary)
+        except Exception:
+            pass

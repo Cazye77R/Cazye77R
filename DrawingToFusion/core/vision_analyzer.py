@@ -1,4 +1,5 @@
 import base64
+import datetime
 import json
 import os
 import urllib.error
@@ -260,3 +261,37 @@ class VisionAnalyzer:
             adsk.core.Application.get().log(message)
         except Exception:
             pass
+        self.save_last_response(data)
+
+    # last_response.json is written next to the add-in root (DrawingToFusion/)
+    _LAST_RESPONSE_PATH = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "last_response.json",
+    )
+
+    def save_last_response(self, response_dict: dict) -> None:
+        """Persist response_dict as last_response.json next to the add-in.
+
+        Allows re-running geometry construction from the cached result without
+        a repeated (and billable) API call:
+
+            import json
+            from DrawingToFusion.core.vision_analyzer import VisionAnalyzer
+            data = json.loads(open(VisionAnalyzer._LAST_RESPONSE_PATH).read())["data"]
+        """
+        payload = {
+            "_saved_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "_model":    config.DEFAULT_MODEL,
+            "data":      response_dict,
+        }
+        try:
+            with open(self._LAST_RESPONSE_PATH, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            try:
+                import adsk.core
+                adsk.core.Application.get().log(
+                    f"[DrawingToFusion] save_last_response fehlgeschlagen: {exc}"
+                )
+            except Exception:
+                pass
