@@ -20,6 +20,19 @@ _palette = None
 _VALID_MIME = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"})
 
 
+def _resolve_api_key(ui_key: str) -> str:
+    """
+    Ermittelt den API-Key in folgender Priorität:
+    1. Umgebungsvariable ANTHROPIC_API_KEY
+    2. Key aus der Palette-UI (ui_key)
+    Gibt leeren String zurück wenn keiner gefunden.
+    """
+    env_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if env_key:
+        return env_key
+    return ui_key.strip()
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Command created handler — opens the palette when the toolbar button is clicked
 # ──────────────────────────────────────────────────────────────────────────────
@@ -61,7 +74,7 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
     # ── Pipeline ──────────────────────────────────────────────────────────────
 
     def _run_pipeline(self, data: dict) -> None:
-        api_key        = data.get("apiKey", "").strip()
+        api_key        = _resolve_api_key(data.get("apiKey", ""))
         image_base64   = data.get("imageBase64", "")
         image_mime     = data.get("imageMime", "image/png")
         build_holes    = bool(data.get("buildHoles", True))
