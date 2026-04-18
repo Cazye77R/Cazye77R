@@ -17,6 +17,9 @@ from .models import (
     FilletSpec,
 )
 
+# Fusion 360 user-parameter unit strings for each drawing unit
+_UNIT_MAP = {"mm": "mm", "cm": "cm", "inch": "in"}
+
 
 class GeometryBuilder:
     def __init__(self):
@@ -40,17 +43,37 @@ class GeometryBuilder:
             )
 
         factor = analysis.to_cm_factor()
+        design = adsk.fusion.Design.cast(self._app.activeProduct)
+
+        # Create DTF_* user parameters; fall back to raw values if the design
+        # is in DirectEdit mode or parameter creation fails for any reason.
+        try:
+            p_names = self._create_all_parameters(design, analysis)
+        except Exception as exc:
+            self._app.log(f"[DrawingToFusion] Parameter-Erstellung übersprungen: {exc}")
+            p_names = {
+                "depth": None,
+                "holes":    [{} for _ in analysis.holes],
+                "chamfers": [None] * len(analysis.chamfers),
+                "fillets":  [None] * len(analysis.fillets),
+            }
 
         occ = self._root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
         comp = occ.component
 
-        sketch = self._create_base_sketch(comp, analysis, factor)
-        extrude = self._extrude(comp, sketch, self._cm(analysis.extrusion_depth, factor))
+        sketch = self._create_base_sketch(comp, analysis, factor, p_names)
+
+        depth_vi = (
+            adsk.core.ValueInput.createByString(p_names["depth"])
+            if p_names.get("depth")
+            else adsk.core.ValueInput.createByReal(self._cm(analysis.extrusion_depth, factor))
+        )
+        extrude = self._extrude(comp, sketch, depth_vi)
         body = extrude.bodies.item(0)
 
-        self._add_holes(comp, body, analysis.holes, factor)
-        self._add_chamfers(comp, body, analysis.chamfers, factor)
-        self._add_fillets(comp, body, analysis.fillets, factor)
+        self._add_holes(comp, body, analysis.holes, factor, p_names.get("holes", []))
+        self._add_chamfers(comp, body, analysis.chamfers, factor, p_names.get("chamfers", []))
+        self._add_fillets(comp, body, analysis.fillets, factor, p_names.get("fillets", []))
 
     # ──────────────────────────────────────────────────────────────────────
     # Unit conversion
@@ -61,19 +84,119 @@ class GeometryBuilder:
         return value * factor
 
     # ──────────────────────────────────────────────────────────────────────
+    # User parameters
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _ensure_param(
+        self, design, name: str, value: float, unit: str, comment: str = ""
+    ) -> str:
+        """Create or update a DTF_* user parameter; return the parameter name.
+
+        ``value`` is in the drawing's own unit (mm/cm/inch) so the Parameters
+        dialog shows human-readable numbers.  Existing parameters are updated
+        so that re-running the add-in on a new drawing refreshes the values.
+        """
+        fu = _UNIT_MAP.get(unit, "mm")
+        params = design.userParameters
+        existing = params.itemByName(name)
+        if existing:
+            existing.value = value
+        else:
+            params.add(name, adsk.core.ValueInput.createByReal(value), fu, comment)
+        return name
+
+    def _create_all_parameters(self, design, analysis: DrawingAnalysis) -> dict:
+        """Register all DTF_* user parameters and return a name-lookup dict.
+
+        Return structure::
+
+            {
+                "depth":    "DTF_Depth",
+                "width":    "DTF_Width",   # profile-specific
+                "height":   "DTF_Height",
+                "radius":   "DTF_Radius",
+                ...
+                "holes":    [{"dia": "DTF_HoleDia_1", "x": "DTF_HoleX_1",
+                               "y": "DTF_HoleY_1"}, ...],
+                "chamfers": ["DTF_ChamferDist_1", ...],
+                "fillets":  ["DTF_FilletRad_1", ...],
+            }
+        """
+        u  = analysis.unit
+        p  = analysis.base_profile
+        ep = self._ensure_param   # shorthand
+        pn: dict = {}
+
+        # ── Extrusion depth ────────────────────────────────────────────────
+        pn["depth"] = ep(design, "DTF_Depth", analysis.extrusion_depth, u,
+                         "DrawingToFusion: extrusion depth")
+
+        # ── Profile dimensions ─────────────────────────────────────────────
+        if isinstance(p, RectangleProfile):
+            pn["width"]  = ep(design, "DTF_Width",  p.width,  u, "DrawingToFusion: profile width")
+            pn["height"] = ep(design, "DTF_Height", p.height, u, "DrawingToFusion: profile height")
+            if p.thickness > 0:
+                pn["thickness"] = ep(design, "DTF_Thickness", p.thickness, u,
+                                     "DrawingToFusion: wall thickness")
+        elif isinstance(p, CircleProfile):
+            pn["radius"] = ep(design, "DTF_Radius", p.radius, u, "DrawingToFusion: circle radius")
+        elif isinstance(p, (LProfile, TProfile)):
+            pn["width"]         = ep(design, "DTF_Width",        p.width,         u,
+                                     "DrawingToFusion: profile width")
+            pn["height"]        = ep(design, "DTF_Height",       p.height,        u,
+                                     "DrawingToFusion: profile height")
+            pn["flange_height"] = ep(design, "DTF_FlangeHeight", p.flange_height, u,
+                                     "DrawingToFusion: flange height")
+            pn["web_thickness"] = ep(design, "DTF_WebThickness", p.web_thickness, u,
+                                     "DrawingToFusion: web thickness")
+
+        # ── Holes ──────────────────────────────────────────────────────────
+        hole_names = []
+        for i, hole in enumerate(analysis.holes, 1):
+            hpn = {
+                "dia": ep(design, f"DTF_HoleDia_{i}", hole.diameter, u,
+                          f"DrawingToFusion: hole {i} diameter"),
+                "x":   ep(design, f"DTF_HoleX_{i}",   hole.x,        u,
+                          f"DrawingToFusion: hole {i} X position"),
+                "y":   ep(design, f"DTF_HoleY_{i}",   hole.y,        u,
+                          f"DrawingToFusion: hole {i} Y position"),
+            }
+            if hole.depth == "blind" and hole.depth_value is not None:
+                hpn["depth"] = ep(design, f"DTF_HoleDepth_{i}", hole.depth_value, u,
+                                  f"DrawingToFusion: hole {i} blind depth")
+            hole_names.append(hpn)
+        pn["holes"] = hole_names
+
+        # ── Chamfers ───────────────────────────────────────────────────────
+        pn["chamfers"] = [
+            ep(design, f"DTF_ChamferDist_{i}", ch.distance, u,
+               f"DrawingToFusion: chamfer {i} distance")
+            for i, ch in enumerate(analysis.chamfers, 1)
+        ]
+
+        # ── Fillets ────────────────────────────────────────────────────────
+        pn["fillets"] = [
+            ep(design, f"DTF_FilletRad_{i}", fi.radius, u,
+               f"DrawingToFusion: fillet {i} radius")
+            for i, fi in enumerate(analysis.fillets, 1)
+        ]
+
+        return pn
+
+    # ──────────────────────────────────────────────────────────────────────
     # Sketch creation
     # ──────────────────────────────────────────────────────────────────────
 
     def _create_base_sketch(
-        self, comp, analysis: DrawingAnalysis, factor: float
+        self, comp, analysis: DrawingAnalysis, factor: float, p_names: dict
     ) -> adsk.fusion.Sketch:
         sketch = comp.sketches.add(comp.xYConstructionPlane)
         p = analysis.base_profile
 
         if isinstance(p, RectangleProfile):
-            self._sketch_rectangle(sketch, p, factor)
+            self._sketch_rectangle(sketch, p, factor, p_names)
         elif isinstance(p, CircleProfile):
-            self._sketch_circle(sketch, p, factor)
+            self._sketch_circle(sketch, p, factor, p_names)
         elif isinstance(p, LProfile):
             self._sketch_l_profile(sketch, p, factor)
         elif isinstance(p, TProfile):
@@ -84,29 +207,72 @@ class GeometryBuilder:
         return sketch
 
     def _sketch_rectangle(
-        self, sketch, profile: RectangleProfile, factor: float
+        self, sketch, profile: RectangleProfile, factor: float, p_names: dict
     ) -> None:
         w = self._cm(profile.width,  factor)
         h = self._cm(profile.height, factor)
         t = self._cm(profile.thickness, factor)
 
         lines = sketch.sketchCurves.sketchLines
-        lines.addTwoPointRectangle(
+        rect_lines = lines.addTwoPointRectangle(
             adsk.core.Point3D.create(0, 0, 0),
             adsk.core.Point3D.create(w, h, 0),
         )
-        # When thickness > 0 the rectangle is hollow (box section / shell)
+
+        # ── Sketch constraints ─────────────────────────────────────────────
+        # addTwoPointRectangle returns 4 lines: bottom(0), right(1), top(2), left(3).
+        # Pin the origin corner so the profile stays anchored when params change.
+        try:
+            sketch.geometricConstraints.addFixed(rect_lines.item(0).startSketchPoint)
+            dims = sketch.sketchDimensions
+            HO = adsk.fusion.DimensionOrientations.HorizontalDimensionOrientation
+            VO = adsk.fusion.DimensionOrientations.VerticalDimensionOrientation
+
+            # Width: horizontal span of the bottom line
+            if p_names.get("width"):
+                dim_w = dims.addDistanceDimension(
+                    rect_lines.item(0).startSketchPoint,
+                    rect_lines.item(0).endSketchPoint,
+                    HO,
+                    adsk.core.Point3D.create(w / 2, -0.3, 0),
+                )
+                dim_w.parameter.expression = p_names["width"]
+
+            # Height: vertical span of the right line
+            if p_names.get("height"):
+                dim_h = dims.addDistanceDimension(
+                    rect_lines.item(1).startSketchPoint,
+                    rect_lines.item(1).endSketchPoint,
+                    VO,
+                    adsk.core.Point3D.create(w + 0.3, h / 2, 0),
+                )
+                dim_h.parameter.expression = p_names["height"]
+        except Exception as exc:
+            self._app.log(f"[DrawingToFusion] Rechteck-Constraints übersprungen: {exc}")
+
+        # Hollow shell: inner rectangle (no sketch constraints — geometry only)
         if t > 0 and t < min(w, h) / 2:
             lines.addTwoPointRectangle(
                 adsk.core.Point3D.create(t, t, 0),
                 adsk.core.Point3D.create(w - t, h - t, 0),
             )
 
-    def _sketch_circle(self, sketch, profile: CircleProfile, factor: float) -> None:
+    def _sketch_circle(
+        self, sketch, profile: CircleProfile, factor: float, p_names: dict
+    ) -> None:
         r = self._cm(profile.radius, factor)
-        sketch.sketchCurves.sketchCircles.addByCenterRadius(
+        circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(
             adsk.core.Point3D.create(0, 0, 0), r
         )
+        try:
+            if p_names.get("radius"):
+                dim = sketch.sketchDimensions.addRadialDimension(
+                    circle,
+                    adsk.core.Point3D.create(r * 0.7, r * 0.7, 0),
+                )
+                dim.parameter.expression = p_names["radius"]
+        except Exception as exc:
+            self._app.log(f"[DrawingToFusion] Kreis-Constraint übersprungen: {exc}")
 
     def _sketch_l_profile(self, sketch, profile: LProfile, factor: float) -> None:
         """
@@ -187,16 +353,14 @@ class GeometryBuilder:
     # ──────────────────────────────────────────────────────────────────────
 
     def _extrude(
-        self, comp, sketch, depth_cm: float
+        self, comp, sketch, depth_vi: adsk.core.ValueInput
     ) -> adsk.fusion.ExtrudeFeature:
         profile = self._largest_profile(sketch)
         extrudes = comp.features.extrudeFeatures
         ext_input = extrudes.createInput(
             profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation
         )
-        extent = adsk.fusion.DistanceExtentDefinition.create(
-            adsk.core.ValueInput.createByReal(depth_cm)
-        )
+        extent = adsk.fusion.DistanceExtentDefinition.create(depth_vi)
         ext_input.setOneSideExtent(
             extent, adsk.fusion.ExtentDirections.PositiveExtentDirection
         )
@@ -225,56 +389,92 @@ class GeometryBuilder:
     # Holes
     # ──────────────────────────────────────────────────────────────────────
 
-    def _add_holes(self, comp, body, holes: list, factor: float) -> None:
+    def _add_holes(
+        self, comp, body, holes: list, factor: float, hole_p_names: list
+    ) -> None:
         if not holes:
             return
         top_face = self._top_face(body)
         hole_feats = comp.features.holeFeatures
 
-        for spec in holes:
+        for i, spec in enumerate(holes):
+            pn = hole_p_names[i] if i < len(hole_p_names) else {}
             try:
-                self._add_hole(comp, hole_feats, top_face, body, spec, factor)
+                self._add_hole(comp, hole_feats, top_face, body, spec, factor, pn)
             except Exception as exc:
                 self._ui.messageBox(
                     f"Loch bei ({spec.x}, {spec.y}) übersprungen:\n{exc}"
                 )
 
     def _add_hole(
-        self, comp, hole_feats, top_face, body, spec: HoleSpec, factor: float
+        self,
+        comp,
+        hole_feats,
+        top_face,
+        body,
+        spec: HoleSpec,
+        factor: float,
+        p_names_hole: dict,
     ) -> None:
-        dia = self._cm(spec.diameter, factor)
+        x_cm = self._cm(spec.x,        factor)
+        y_cm = self._cm(spec.y,        factor)
 
-        # Sketch point on the top face defines the hole centre
+        # Sketch on the top face — one point per hole centre
         hole_sk = comp.sketches.add(top_face)
+        sp = hole_sk.sketchPoints.add(adsk.core.Point3D.create(x_cm, y_cm, 0))
+
+        # Positional constraints driven by DTF_HoleX_n / DTF_HoleY_n
+        try:
+            if p_names_hole.get("x") and p_names_hole.get("y"):
+                origin = hole_sk.originPoint
+                dims   = hole_sk.sketchDimensions
+                HO     = adsk.fusion.DimensionOrientations.HorizontalDimensionOrientation
+                VO     = adsk.fusion.DimensionOrientations.VerticalDimensionOrientation
+
+                dim_x = dims.addDistanceDimension(
+                    origin, sp, HO,
+                    adsk.core.Point3D.create(x_cm / 2, -0.3, 0),
+                )
+                dim_x.parameter.expression = p_names_hole["x"]
+
+                dim_y = dims.addDistanceDimension(
+                    origin, sp, VO,
+                    adsk.core.Point3D.create(-0.3, y_cm / 2, 0),
+                )
+                dim_y.parameter.expression = p_names_hole["y"]
+        except Exception as exc:
+            self._app.log(f"[DrawingToFusion] Loch-Position-Constraint übersprungen: {exc}")
+
         pt_col = adsk.core.ObjectCollection.create()
-        sp = hole_sk.sketchPoints.add(
-            adsk.core.Point3D.create(
-                self._cm(spec.x, factor), self._cm(spec.y, factor), 0
-            )
-        )
         pt_col.add(sp)
 
+        # Diameter — parameter expression preferred over raw value
+        dia_vi = (
+            adsk.core.ValueInput.createByString(p_names_hole["dia"])
+            if p_names_hole.get("dia")
+            else adsk.core.ValueInput.createByReal(self._cm(spec.diameter, factor))
+        )
+
         if spec.countersink:
-            hole_input = hole_feats.createCountersinkInput(
-                adsk.core.ValueInput.createByReal(dia)
-            )
+            hole_input = hole_feats.createCountersinkInput(dia_vi)
             if spec.countersink_angle is not None:
                 hole_input.counterSinkAngle = adsk.core.ValueInput.createByReal(
                     math.radians(spec.countersink_angle)
                 )
         else:
-            hole_input = hole_feats.createSimpleInput(
-                adsk.core.ValueInput.createByReal(dia)
-            )
+            hole_input = hole_feats.createSimpleInput(dia_vi)
 
         hole_input.setPositionBySketchPoints(pt_col)
         hole_input.isDefaultDirection = True
         hole_input.participantBodies = adsk.core.ObjectCollection.createWithArray([body])
 
         if spec.depth == "blind":
-            hole_input.depth = adsk.core.ValueInput.createByReal(
-                self._cm(spec.depth_value, factor)
+            depth_vi = (
+                adsk.core.ValueInput.createByString(p_names_hole["depth"])
+                if p_names_hole.get("depth")
+                else adsk.core.ValueInput.createByReal(self._cm(spec.depth_value, factor))
             )
+            hole_input.depth = depth_vi
 
         hole_feats.add(hole_input)
 
@@ -282,17 +482,22 @@ class GeometryBuilder:
     # Chamfers
     # ──────────────────────────────────────────────────────────────────────
 
-    def _add_chamfers(self, comp, body, chamfers: list, factor: float) -> None:
+    def _add_chamfers(
+        self, comp, body, chamfers: list, factor: float, chamfer_p_names: list
+    ) -> None:
         if not chamfers:
             return
         edges = self._top_face_edges(body)
         if edges.count == 0:
             return
 
-        for spec in chamfers:
+        for i, spec in enumerate(chamfers):
+            pn = chamfer_p_names[i] if i < len(chamfer_p_names) else None
             try:
-                dist = adsk.core.ValueInput.createByReal(
-                    self._cm(spec.distance, factor)
+                dist = (
+                    adsk.core.ValueInput.createByString(pn)
+                    if pn
+                    else adsk.core.ValueInput.createByReal(self._cm(spec.distance, factor))
                 )
                 chamfer_input = comp.features.chamferFeatures.createInput(edges, True)
                 chamfer_input.setToEqualDistance(dist)
@@ -304,17 +509,22 @@ class GeometryBuilder:
     # Fillets
     # ──────────────────────────────────────────────────────────────────────
 
-    def _add_fillets(self, comp, body, fillets: list, factor: float) -> None:
+    def _add_fillets(
+        self, comp, body, fillets: list, factor: float, fillet_p_names: list
+    ) -> None:
         if not fillets:
             return
         edges = self._top_face_edges(body)
         if edges.count == 0:
             return
 
-        for spec in fillets:
+        for i, spec in enumerate(fillets):
+            pn = fillet_p_names[i] if i < len(fillet_p_names) else None
             try:
-                radius = adsk.core.ValueInput.createByReal(
-                    self._cm(spec.radius, factor)
+                radius = (
+                    adsk.core.ValueInput.createByString(pn)
+                    if pn
+                    else adsk.core.ValueInput.createByReal(self._cm(spec.radius, factor))
                 )
                 fillet_input = comp.features.filletFeatures.createInput()
                 fillet_input.addConstantRadiusEdgeSet(edges, radius, True)
