@@ -1,8 +1,11 @@
+# API-Key wird NICHT hier gespeichert.
+# Setze die Umgebungsvariable ANTHROPIC_API_KEY oder trage den Key
+# direkt in der Palette-UI ein. Niemals in config.py eintragen!
+
 ADDIN_NAME = "DrawingToFusion"
 COMPANY_NAME = "Markus"
 
-ANTHROPIC_API_KEY = "sk-ant-..."  # Hier eintragen oder via Umgebungsvariable ANTHROPIC_API_KEY
-DEFAULT_MODEL = "claude-opus-4-5"
+DEFAULT_MODEL = "claude-opus-4-6"
 MAX_TOKENS = 2000
 
 PALETTE_ID = "DrawingToFusionPalette"
