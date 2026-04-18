@@ -1,0 +1,202 @@
+"""
+test_geometry.py — DrawingToFusion GeometryBuilder Test-Script
+==============================================================
+Kann direkt als Fusion 360 Script ausgeführt werden:
+  Utilities → Scripts and Add-Ins → Scripts → [+] → diese Datei wählen → Run
+
+Was wird getestet:
+  1. DrawingAnalysis mit Testdaten bauen (kein API-Call nötig)
+  2. GeometryBuilder.build() aufrufen
+  3. Prüfen, dass eine Occurrence + mindestens 1 Body erstellt wurden
+  4. Face- / Edge-Anzahl des Bodys protokollieren
+
+Testdaten: 100×60 mm Rechteck, 20 mm tief, 2 Bohrungen Ø8 mm, 1 Fase 2 mm
+"""
+
+import adsk.core
+import adsk.fusion
+import os
+import sys
+import traceback
+
+# ── Paket-Pfad einrichten ─────────────────────────────────────────────────────
+# Dieses Script liegt im Repo-Root, DrawingToFusion/ ist das Unterverzeichnis.
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from DrawingToFusion.core.models import (
+    DrawingAnalysis,
+    RectangleProfile,
+    HoleSpec,
+    ChamferSpec,
+)
+from DrawingToFusion.core.geometry_builder import GeometryBuilder
+
+
+# ── Testdaten ─────────────────────────────────────────────────────────────────
+
+def _make_analysis() -> DrawingAnalysis:
+    """Erstellt eine DrawingAnalysis mit realistischen Testdaten."""
+    return DrawingAnalysis(
+        unit="mm",
+        view="front",
+        base_profile=RectangleProfile(width=100.0, height=60.0, thickness=0.0),
+        extrusion_depth=20.0,
+        holes=[
+            HoleSpec(x=15.0, y=15.0, diameter=8.0, depth="through"),
+            HoleSpec(x=85.0, y=15.0, diameter=8.0, depth="through"),
+        ],
+        chamfers=[ChamferSpec(edge="top_all", distance=2.0)],
+        fillets=[],
+        confidence=1.0,
+        notes="Automatisch generierter Test — kein API-Call",
+    )
+
+
+# ── Assertion-Helfer ──────────────────────────────────────────────────────────
+
+class _AssertionError(Exception):
+    pass
+
+
+def _check(condition: bool, message: str) -> None:
+    if not condition:
+        raise _AssertionError(message)
+
+
+# ── Haupttest ─────────────────────────────────────────────────────────────────
+
+def run(context):
+    app = adsk.core.Application.get()
+    ui  = app.userInterface
+    log_lines: list = []
+
+    def log(msg: str) -> None:
+        full = f"[test_geometry] {msg}"
+        app.log(full)          # Fusion-Eventlog
+        log_lines.append(msg)
+
+    try:
+        # ── Voraussetzungen prüfen ────────────────────────────────────────
+        design = adsk.fusion.Design.cast(app.activeProduct)
+        if design is None:
+            ui.messageBox(
+                "Kein aktives Design gefunden.\n"
+                "Bitte zuerst ein neues Fusion 360 Design öffnen.",
+                "DrawingToFusion — Test abgebrochen",
+            )
+            return
+
+        if design.designType == adsk.fusion.DesignTypes.DirectDesignType:
+            ui.messageBox(
+                "Test benötigt den Parametrisch-Modus.\n"
+                "Design → Change Design Type → Parametric Design.",
+                "DrawingToFusion — Test abgebrochen",
+            )
+            return
+
+        root = design.rootComponent
+        occs_before = root.occurrences.count
+        log(f"Ausgangszustand — Occurrences: {occs_before}")
+
+        # ── Testdaten aufbauen ────────────────────────────────────────────
+        log("Erstelle DrawingAnalysis …")
+        analysis = _make_analysis()
+
+        log(f"  Profil     : {type(analysis.base_profile).__name__} "
+            f"{analysis.base_profile.width}×{analysis.base_profile.height} mm")
+        log(f"  Tiefe      : {analysis.extrusion_depth} mm")
+        log(f"  Einheit    : {analysis.unit}")
+        log(f"  Bohrungen  : {len(analysis.holes)}×  "
+            + ", ".join(f"Ø{h.diameter}mm@({h.x},{h.y})" for h in analysis.holes))
+        log(f"  Fasen      : {len(analysis.chamfers)}×  "
+            + ", ".join(f"{c.distance}mm ({c.edge})" for c in analysis.chamfers))
+
+        # ── GeometryBuilder ausführen ─────────────────────────────────────
+        log("Starte GeometryBuilder.build() …")
+        try:
+            builder = GeometryBuilder()
+            builder.build(analysis)
+        except Exception as exc:
+            raise _AssertionError(
+                f"GeometryBuilder.build() hat eine Exception geworfen:\n{exc}\n\n"
+                + traceback.format_exc()
+            )
+        log("GeometryBuilder.build() — abgeschlossen ohne Exception  ✓")
+
+        # ── Assertion 1: Neue Occurrence erstellt ─────────────────────────
+        occs_after = root.occurrences.count
+        _check(
+            occs_after > occs_before,
+            f"Keine neue Occurrence erstellt "
+            f"(vorher: {occs_before}, nachher: {occs_after}).",
+        )
+        log(f"Neue Occurrence erstellt ({occs_before} → {occs_after})  ✓")
+
+        # ── Assertion 2: Body in der neuen Komponente ─────────────────────
+        new_occ  = root.occurrences.item(occs_after - 1)
+        comp     = new_occ.component
+        body_count = comp.bBodies.count
+        _check(
+            body_count > 0,
+            f"Keine Bodies in der neuen Komponente (bBodies.count = {body_count}).",
+        )
+        log(f"Bodies in neuer Komponente: {body_count}  ✓")
+
+        # ── Informationen zum erzeugten Body ─────────────────────────────
+        body = comp.bBodies.item(0)
+        log(f"Body-Name    : {body.name}")
+        log(f"Faces        : {body.faces.count}")
+        log(f"Edges        : {body.edges.count}")
+        log(f"Vertices     : {body.vertices.count}")
+
+        # Bounding-Box für Plausibilitätsprüfung
+        bb = body.boundingBox
+        size_x = round((bb.maxPoint.x - bb.minPoint.x) * 10, 2)   # cm → mm
+        size_y = round((bb.maxPoint.y - bb.minPoint.y) * 10, 2)
+        size_z = round((bb.maxPoint.z - bb.minPoint.z) * 10, 2)
+        log(f"Bounding-Box : {size_x}×{size_y}×{size_z} mm (±Fasenmaß)")
+
+        # Breite und Höhe sollten in der Nähe von 100×60 mm liegen
+        _check(
+            90 <= size_x <= 110,
+            f"Bounding-Box X erwartet ~100 mm, ist {size_x} mm.",
+        )
+        _check(
+            50 <= size_y <= 70,
+            f"Bounding-Box Y erwartet ~60 mm, ist {size_y} mm.",
+        )
+        _check(
+            15 <= size_z <= 25,
+            f"Bounding-Box Z erwartet ~20 mm, ist {size_z} mm.",
+        )
+        log("Bounding-Box-Prüfung (100×60×20 mm ±Toleranz)  ✓")
+
+        # ── Ergebnis-Dialog ───────────────────────────────────────────────
+        log_text = "\n".join(f"  {l}" for l in log_lines)
+        ui.messageBox(
+            f"Alle Tests bestanden!\n\n"
+            f"Log:\n{log_text}",
+            "DrawingToFusion — Test OK",
+            adsk.core.MessageBoxButtonTypes.OKButtonType,
+            adsk.core.MessageBoxIconTypes.InformationIconType,
+        )
+
+    except _AssertionError as exc:
+        log_text = "\n".join(f"  {l}" for l in log_lines)
+        ui.messageBox(
+            f"Assertion fehlgeschlagen:\n{exc}\n\nLog:\n{log_text}",
+            "DrawingToFusion — Test FAILED",
+            adsk.core.MessageBoxButtonTypes.OKButtonType,
+            adsk.core.MessageBoxIconTypes.CriticalIconType,
+        )
+
+    except Exception:
+        log_text = "\n".join(f"  {l}" for l in log_lines)
+        ui.messageBox(
+            f"Unerwarteter Fehler:\n{traceback.format_exc()}\n\nLog:\n{log_text}",
+            "DrawingToFusion — Test ERROR",
+            adsk.core.MessageBoxButtonTypes.OKButtonType,
+            adsk.core.MessageBoxIconTypes.CriticalIconType,
+        )
