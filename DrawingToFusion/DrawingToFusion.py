@@ -11,9 +11,29 @@ _cmd_def = None
 
 
 def _get_sketch_panel(ui):
+    """
+    Gibt das Toolbar-Panel zurück, in das der Add-In Button eingehängt wird.
+    Wirft RuntimeError mit sprechender Message wenn Workspace/Tab/Panel fehlt.
+    """
     workspace = ui.workspaces.itemById(config.WORKSPACE_ID)
+    if not workspace:
+        raise RuntimeError(
+            f"Workspace '{config.WORKSPACE_ID}' nicht gefunden. "
+            "Stelle sicher, dass Fusion 360 im Design-Workspace ist."
+        )
     tab = workspace.toolbarTabs.itemById(config.TOOLBAR_TAB_ID)
-    return tab.toolbarPanels.itemById(config.TOOLBAR_PANEL_ID)
+    if not tab:
+        raise RuntimeError(
+            f"Toolbar-Tab '{config.TOOLBAR_TAB_ID}' nicht gefunden. "
+            f"Prüfe TOOLBAR_TAB_ID in config.py."
+        )
+    panel = tab.toolbarPanels.itemById(config.TOOLBAR_PANEL_ID)
+    if not panel:
+        raise RuntimeError(
+            f"Toolbar-Panel '{config.TOOLBAR_PANEL_ID}' nicht gefunden. "
+            f"Prüfe TOOLBAR_PANEL_ID in config.py."
+        )
+    return panel
 
 
 def run(context):
