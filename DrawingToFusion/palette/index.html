@@ -448,6 +448,27 @@
     .jn { color: #f4a261; }   /* number */
     .jb { color: #e07ab1; }   /* bool/null */
 
+    /* Multi-view view strip */
+    #view-strip {
+      display: none;
+      gap: 4px;
+      padding: 6px 10px;
+      background: var(--bg0);
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+
+    .view-chip {
+      font-size: 9px;
+      padding: 2px 7px;
+      border-radius: 10px;
+      border: 1px solid var(--accent2);
+      color: var(--accent);
+      background: rgba(0,180,216,0.08);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
     /* ── Scrollbar styling ────────────────────────────────────── */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: var(--bg0); }
@@ -512,6 +533,14 @@
         </label>
       </div>
 
+      <div class="toggle-row">
+        <span>Mehrfachansichten erkennen <span style="color:var(--muted);font-size:9px">(2× API-Call)</span></span>
+        <label class="toggle">
+          <input type="checkbox" id="multi-view" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
     </div>
   </details>
 
@@ -536,6 +565,7 @@
       <span>Analyse-Ergebnis</span>
       <span id="confidence-badge">–</span>
     </div>
+    <div id="view-strip" style="display:none;"></div>
     <div id="notes-text"></div>
     <div id="json-preview"></div>
   </div>
@@ -563,6 +593,7 @@
     const unitSelect    = document.getElementById('unit');
     const buildHolesCb  = document.getElementById('build-holes');
     const buildChamfersCb = document.getElementById('build-chamfers');
+    const multiViewCb   = document.getElementById('multi-view');
     const analyzeBtn    = document.getElementById('analyze-btn');
     const statusBox     = document.getElementById('status-box');
     const progressWrap  = document.getElementById('progress-wrap');
@@ -571,6 +602,7 @@
     const clearLogBtn   = document.getElementById('clear-log-btn');
     const resultBox     = document.getElementById('result-box');
     const confidenceBadge = document.getElementById('confidence-badge');
+    const viewStrip     = document.getElementById('view-strip');
     const notesText     = document.getElementById('notes-text');
     const jsonPreview   = document.getElementById('json-preview');
 
@@ -745,6 +777,7 @@
         unit:           unitSelect.value,
         buildHoles:     buildHolesCb.checked,
         buildChamfers:  buildChamfersCb.checked,
+        multiView:      multiViewCb.checked,
       });
 
       // Send to Fusion 360 Python handler
@@ -803,6 +836,17 @@
       confidenceBadge.className   =
         pct >= 80 ? 'high' : pct >= 50 ? 'mid' : 'low';
 
+      // Multi-view chips
+      const views = Array.isArray(result.view_analyses) ? result.view_analyses : [];
+      if (views.length > 0) {
+        viewStrip.innerHTML = views.map(v =>
+          `<span class="view-chip">${escHtml(v.view || '?')}</span>`
+        ).join('');
+        viewStrip.style.display = 'flex';
+      } else {
+        viewStrip.style.display = 'none';
+      }
+
       // Notes
       if (result.notes) {
         notesText.style.display = 'block';
@@ -811,10 +855,12 @@
         notesText.style.display = 'none';
       }
 
-      // JSON preview with basic syntax highlighting
-      jsonPreview.innerHTML = syntaxHighlight(
-        JSON.stringify(result, null, 2)
-      );
+      // JSON preview — strip large view_analyses array to keep it readable
+      const preview = Object.assign({}, result);
+      if (preview.view_analyses && preview.view_analyses.length > 0) {
+        preview.view_analyses = `[${preview.view_analyses.length} Ansichten — siehe last_response.json]`;
+      }
+      jsonPreview.innerHTML = syntaxHighlight(JSON.stringify(preview, null, 2));
     }
 
     // ── Syntax highlight ───────────────────────────────────────────
@@ -855,15 +901,25 @@
 
     // ── Test simulation (no Fusion environment) ────────────────────
     function simulateResponse() {
+      const isMulti = multiViewCb.checked;
       const fake = {
         result: {
-          unit: 'mm', view: 'front',
+          unit: 'mm',
+          view: isMulti ? 'multi' : 'front',
           base_profile: { type: 'rectangle', width: 120, height: 80, thickness: 0 },
           extrusion_depth: 25,
           holes: [{ x: 20, y: 20, diameter: 8, depth: 'through' }],
           chamfers: [], fillets: [],
-          confidence: 0.87,
-          notes: 'Simulation — kein echtes Fusionsmodell erstellt.',
+          confidence: isMulti ? 0.92 : 0.87,
+          notes: isMulti
+            ? 'Simulation Mehrfachansichten — Masse aus 3 Ansichten konsolidiert.'
+            : 'Simulation — kein echtes Fusionsmodell erstellt.',
+          multi_view: isMulti,
+          view_analyses: isMulti ? [
+            { view: 'front', width: 120, height: 80, holes: [{ x: 20, y: 20, diameter: 8, depth: 'through' }] },
+            { view: 'side',  width: 25,  height: 80, holes: [] },
+            { view: 'top',   width: 120, height: 25, holes: [] },
+          ] : [],
         },
         status: 'Simulation abgeschlossen.',
         done: true,

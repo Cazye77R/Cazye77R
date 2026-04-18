@@ -65,6 +65,7 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
         image_mime     = data.get("imageMime", "image/png")
         build_holes    = bool(data.get("buildHoles", True))
         build_chamfers = bool(data.get("buildChamfers", True))
+        multi_view     = bool(data.get("multiView", False))
 
         # ── Validate inputs ───────────────────────────────────────────────────
         if not api_key:
@@ -84,14 +85,27 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
             return
 
         # ── Step 1: Vision analysis ───────────────────────────────────────────
-        self._send({"type": "progress", "step": "Bild wird analysiert …", "percent": 30})
-        try:
-            result_dict = VisionAnalyzer(api_key).analyze_image_from_base64(
-                image_base64, image_mime
-            )
-        except Exception as exc:
-            self._send({"type": "error", "message": f"Analyse fehlgeschlagen: {exc}"})
-            return
+        analyzer = VisionAnalyzer(api_key)
+        if multi_view:
+            self._send({"type": "progress", "step": "Ansichten werden erkannt …", "percent": 20})
+            try:
+                result_dict = analyzer.analyze_multiview_from_base64(image_base64, image_mime)
+            except Exception as exc:
+                self._send({"type": "error", "message": f"Mehrfachansichten-Analyse fehlgeschlagen: {exc}"})
+                return
+            n_views = len(result_dict.get("view_analyses", []))
+            if n_views > 1:
+                self._send({
+                    "type": "status",
+                    "message": f"{n_views} Ansichten erkannt — Maße werden konsolidiert …",
+                })
+        else:
+            self._send({"type": "progress", "step": "Bild wird analysiert …", "percent": 30})
+            try:
+                result_dict = analyzer.analyze_image_from_base64(image_base64, image_mime)
+            except Exception as exc:
+                self._send({"type": "error", "message": f"Analyse fehlgeschlagen: {exc}"})
+                return
 
         # ── Step 2: Parse + honour UI settings ───────────────────────────────
         analysis = DrawingAnalysis.from_dict(result_dict)

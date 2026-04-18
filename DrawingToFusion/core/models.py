@@ -105,6 +105,8 @@ class DrawingAnalysis:
     fillets: List[FilletSpec] = field(default_factory=list)
     confidence: float = 0.0                 # 0.0–1.0
     notes: str = ""
+    multi_view: bool = False                # True when consolidated from ≥2 views
+    view_analyses: List[dict] = field(default_factory=list)  # raw per-view data
 
     # ------------------------------------------------------------------
     # Helpers
@@ -146,6 +148,8 @@ class DrawingAnalysis:
             fillets=fillets,
             confidence=min(1.0, max(0.0, float(data.get("confidence", 0)))),
             notes=str(data.get("notes", "")),
+            multi_view=bool(data.get("multi_view", False)),
+            view_analyses=list(data.get("view_analyses", [])),
         )
 
 

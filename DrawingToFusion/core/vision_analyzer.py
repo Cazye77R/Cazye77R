@@ -69,6 +69,87 @@ Erlaubte Werte:
 - confidence: 0.0 bis 1.0
 """
 
+# ── Multi-view prompts ─────────────────────────────────────────────────────────
+
+_MULTIVIEW_EXTRACTION_PROMPT = """\
+Analysiere diese technische Zeichnung auf Mehrfachansichten.
+
+Schritt 1: Erkenne ob die Zeichnung mehrere Ansichten enthält (Vorder-, Seiten-, Draufsicht).
+Schritt 2: Extrahiere für jede Ansicht die sichtbaren Maße und Features.
+
+Antworte NUR mit validem JSON ohne Markdown-Backticks:
+{
+  "has_multiple_views": true,
+  "views_detected": ["front", "side", "top"],
+  "unit": "mm",
+  "views": {
+    "front": {
+      "width": 100.0,
+      "height": 60.0,
+      "profile_type": "rectangle",
+      "holes": [{"x": 15.0, "y": 15.0, "diameter": 8.0, "depth": "through"}],
+      "chamfers": [{"edge": "top-front", "distance": 2.0}],
+      "fillets": [],
+      "features": "Freitext fuer nicht schematisierbare Details"
+    },
+    "side": {
+      "width": 20.0,
+      "height": 60.0,
+      "profile_type": "rectangle",
+      "holes": [],
+      "chamfers": [],
+      "fillets": [],
+      "features": ""
+    },
+    "top": {
+      "width": 100.0,
+      "height": 20.0,
+      "profile_type": "rectangle",
+      "holes": [],
+      "chamfers": [],
+      "fillets": [],
+      "features": ""
+    }
+  }
+}
+
+Regeln:
+- Erlaubte Ansichtsbezeichnungen: "front", "side", "top", "back", "bottom", "isometric"
+- has_multiple_views = false wenn nur eine Ansicht vorhanden (views enthaelt nur "front")
+- Alle Masse in der in "unit" angegebenen Einheit
+- holes[].depth: "through" | "blind"
+- Fehlende Masse als 0.0, fehlende Listen als []
+"""
+
+_CONSOLIDATION_SCHEMA = """\
+{
+  "unit": "mm",
+  "view": "multi",
+  "base_profile": {
+    "type": "rectangle",
+    "width": 100.0,
+    "height": 60.0,
+    "thickness": 0.0,
+    "radius": null,
+    "flange_width": null,
+    "flange_height": null,
+    "web_thickness": null
+  },
+  "extrusion_depth": 20.0,
+  "holes": [
+    {
+      "x": 15.0, "y": 15.0, "diameter": 8.0,
+      "depth": "through", "depth_value": null,
+      "countersink": false, "countersink_angle": null
+    }
+  ],
+  "chamfers": [{"edge": "top-front", "distance": 2.0}],
+  "fillets":  [{"edge": "bottom-left", "radius": 3.0}],
+  "confidence": 0.9,
+  "notes": "Masse aus N Ansichten konsolidiert. Widersprueche: ..."
+}\
+"""
+
 
 class VisionAnalyzer:
     def __init__(self, api_key: str):
@@ -131,6 +212,33 @@ class VisionAnalyzer:
         self._log_result(data)
         return data
 
+    def analyze_multiview_image(self, image_path: str) -> dict:
+        """Multi-view pipeline from a file path — detects views then consolidates."""
+        encoded, media_type = self._encode_image(image_path)
+        return self._multiview_pipeline(encoded, media_type)
+
+    def analyze_multiview_from_base64(
+        self, base64_str: str, media_type: str = "image/png"
+    ) -> dict:
+        """Multi-view pipeline from pre-encoded base64 (from HTML palette).
+
+        Makes two API calls:
+          1. View detection + per-view dimension extraction.
+          2. Consolidation into a standard DrawingAnalysis JSON (resolves contradictions).
+        Falls back gracefully when only one view is detected.
+        """
+        if not base64_str:
+            raise ValueError("base64_str darf nicht leer sein.")
+
+        valid = set(_MIME_TYPES.values())
+        if media_type not in valid:
+            raise ValueError(
+                f"Nicht unterstützter MIME-Typ: '{media_type}'. "
+                f"Erlaubt: {', '.join(sorted(valid))}"
+            )
+
+        return self._multiview_pipeline(base64_str, media_type)
+
     def validate_response(self, data: dict) -> bool:
         """Return True when all required top-level fields are present and well-formed."""
         if not isinstance(data, dict):
@@ -162,7 +270,9 @@ class VisionAnalyzer:
             encoded = base64.standard_b64encode(fh.read()).decode("ascii")
         return encoded, media_type
 
-    def _build_payload(self, encoded: str, media_type: str) -> bytes:
+    def _build_payload(self, encoded: str, media_type: str, prompt=None) -> bytes:
+        if prompt is None:
+            prompt = _USER_PROMPT
         payload = {
             "model": config.DEFAULT_MODEL,
             "max_tokens": config.MAX_TOKENS,
@@ -179,12 +289,81 @@ class VisionAnalyzer:
                                 "data": encoded,
                             },
                         },
-                        {"type": "text", "text": _USER_PROMPT},
+                        {"type": "text", "text": prompt},
                     ],
                 }
             ],
         }
         return json.dumps(payload).encode("utf-8")
+
+    def _build_text_payload(self, user_text: str) -> bytes:
+        """Build a text-only (no image) API payload — used for the consolidation step."""
+        payload = {
+            "model": config.DEFAULT_MODEL,
+            "max_tokens": config.MAX_TOKENS,
+            "system": _SYSTEM_PROMPT,
+            "messages": [{"role": "user", "content": user_text}],
+        }
+        return json.dumps(payload).encode("utf-8")
+
+    def _multiview_pipeline(self, encoded: str, media_type: str) -> dict:
+        # Call 1 — per-view extraction
+        payload1 = self._build_payload(encoded, media_type, prompt=_MULTIVIEW_EXTRACTION_PROMPT)
+        raw1 = self._post(payload1)
+        mv_data = self._extract_json(raw1)
+
+        if not isinstance(mv_data, dict) or "has_multiple_views" not in mv_data:
+            raise ValueError(
+                f"Ungültige Mehrfachansichten-Antwort von der API.\n"
+                f"Erhaltene Schlüssel: {set(mv_data.keys()) if isinstance(mv_data, dict) else type(mv_data)}"
+            )
+
+        # Call 2 — consolidation into standard DrawingAnalysis schema
+        consolidated = self._consolidate_views(mv_data)
+
+        has_multi = bool(mv_data.get("has_multiple_views"))
+        consolidated["multi_view"] = has_multi
+        if has_multi:
+            views_raw = mv_data.get("views", {})
+            consolidated["view_analyses"] = [
+                {"view": k, **v} for k, v in views_raw.items()
+            ]
+
+        if not self.validate_response(consolidated):
+            raise ValueError(
+                f"Konsolidierte Antwort enthält nicht alle Pflichtfelder {_REQUIRED_FIELDS}. "
+                f"Erhaltene Schlüssel: {set(consolidated.keys())}"
+            )
+
+        self._log_result(consolidated)
+        return consolidated
+
+    def _consolidate_views(self, mv_data: dict) -> dict:
+        """Second API call (text-only): resolve contradictions and produce unified JSON."""
+        views_detected = mv_data.get("views_detected", [])
+        n = len(views_detected)
+        views_json = json.dumps(mv_data, ensure_ascii=False, indent=2)
+
+        user_text = (
+            "Konsolidiere diese Mehrfachansichten-Analyse zu einer konsistenten DrawingAnalysis.\n\n"
+            "Erkannte Ansichten (" + str(n) + "):\n"
+            + views_json
+            + "\n\nAufgabe:\n"
+            "1. Bestimme die Geometrie des Bauteils aus allen Ansichten:\n"
+            "   - Frontansicht: Breite (X) und Hoehe (Y) des Querschnitts\n"
+            "   - Seitenansicht: Tiefe des Bauteils (= extrusion_depth)\n"
+            "   - Draufsicht: bestaetigt Breite und Tiefe\n"
+            "2. Loese Widersprueche: Falls Masse widersprechen, nutze den haeufigsten Wert\n"
+            "   und dokumentiere alle Widersprueche in 'notes'\n"
+            "3. Uebernehme Bohrungen aus der Frontansicht (x/y-Koordinaten bleiben)\n"
+            "4. Wenn keine Seitenansicht: schaetze extrusion_depth aus Draufsicht-Hoehe\n\n"
+            "Antworte NUR mit validem JSON ohne Markdown-Backticks, exakt nach diesem Schema:\n"
+            + _CONSOLIDATION_SCHEMA
+        )
+
+        payload = self._build_text_payload(user_text)
+        raw = self._post(payload)
+        return self._extract_json(raw)
 
     def _post(self, payload: bytes) -> str:
         headers = {
@@ -251,9 +430,15 @@ class VisionAnalyzer:
     def _log_result(self, data: dict):
         confidence = data.get("confidence", 0.0)
         notes = data.get("notes", "")
+        views = data.get("view_analyses", [])
+        view_info = (
+            f" | Ansichten: {len(views)} ({', '.join(v.get('view','?') for v in views)})"
+            if views else ""
+        )
         message = (
             f"[DrawingToFusion] Analyse abgeschlossen — "
             f"Confidence: {confidence:.0%}"
+            + view_info
             + (f" | Notes: {notes}" if notes else "")
         )
         try:
