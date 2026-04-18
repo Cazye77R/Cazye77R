@@ -1,5 +1,6 @@
 import base64
 import datetime
+import io
 import json
 import os
 import urllib.error
@@ -19,6 +20,10 @@ _MIME_TYPES = {
 }
 
 _REQUIRED_FIELDS = {"unit", "base_profile", "extrusion_depth"}
+
+# Scale factor for PDF rasterization (base DPI in fitz is 72; ×3 → 216 DPI).
+# Technical drawings need ≥150 DPI to keep dimension text legible.
+_PDF_RENDER_SCALE = 3.0
 
 _SYSTEM_PROMPT = (
     "Du bist ein Experte für technische Zeichnungen. "
@@ -188,9 +193,14 @@ class VisionAnalyzer:
 
         Used instead of analyze_image() when the image is already in memory
         (loaded via FileReader in the browser) rather than on disk.
+        PDF inputs are rasterized to PNG automatically (requires PyMuPDF or Pillow).
         """
         if not base64_str:
             raise ValueError("base64_str darf nicht leer sein.")
+
+        if media_type == "application/pdf":
+            base64_str = self._pdf_to_png_base64(base64_str)
+            media_type = "image/png"
 
         valid = set(_MIME_TYPES.values())
         if media_type not in valid:
@@ -226,9 +236,14 @@ class VisionAnalyzer:
           1. View detection + per-view dimension extraction.
           2. Consolidation into a standard DrawingAnalysis JSON (resolves contradictions).
         Falls back gracefully when only one view is detected.
+        PDF inputs are rasterized to PNG automatically (requires PyMuPDF or Pillow).
         """
         if not base64_str:
             raise ValueError("base64_str darf nicht leer sein.")
+
+        if media_type == "application/pdf":
+            base64_str = self._pdf_to_png_base64(base64_str)
+            media_type = "image/png"
 
         valid = set(_MIME_TYPES.values())
         if media_type not in valid:
@@ -253,6 +268,53 @@ class VisionAnalyzer:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _pdf_to_png_base64(self, pdf_b64: str) -> str:
+        """Rasterize the first page of a base64-encoded PDF and return PNG base64.
+
+        Tries PyMuPDF (fitz) first — handles both vector and raster PDFs at
+        _PDF_RENDER_SCALE × 72 DPI.  Falls back to Pillow for image-embedded
+        PDFs when fitz is not installed.  Raises RuntimeError with installation
+        instructions when neither library is available or the PDF cannot be
+        rendered.
+        """
+        pdf_bytes = base64.b64decode(pdf_b64)
+
+        # ── PyMuPDF (fitz) ────────────────────────────────────────────────
+        try:
+            import fitz  # PyMuPDF
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            if doc.page_count == 0:
+                raise ValueError("PDF enthält keine Seiten.")
+            page = doc[0]
+            mat = fitz.Matrix(_PDF_RENDER_SCALE, _PDF_RENDER_SCALE)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            png_bytes = pix.tobytes("png")
+            doc.close()
+            return base64.standard_b64encode(png_bytes).decode("ascii")
+        except ImportError:
+            pass  # fitz not installed — try Pillow
+
+        # ── Pillow fallback (image-embedded PDFs only) ────────────────────
+        try:
+            from PIL import Image
+            img = Image.open(io.BytesIO(pdf_bytes))
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, format="PNG")
+            return base64.standard_b64encode(buf.getvalue()).decode("ascii")
+        except ImportError:
+            pass  # Pillow not installed
+        except Exception as exc:
+            raise RuntimeError(
+                f"Pillow konnte das PDF nicht rastern (vermutlich Vektor-PDF): {exc}\n"
+                "Bitte PyMuPDF installieren: pip install pymupdf"
+            ) from exc
+
+        raise RuntimeError(
+            "PDF-Unterstützung benötigt PyMuPDF oder Pillow.\n"
+            "  pip install pymupdf    ← empfohlen (Vektor- und Raster-PDFs)\n"
+            "  pip install pillow     ← nur für bild-basierte PDFs"
+        )
 
     def _encode_image(self, path: str) -> tuple:
         if not os.path.isfile(path):

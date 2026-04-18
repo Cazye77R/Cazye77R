@@ -16,7 +16,8 @@ _handlers: list = []
 _palette = None
 
 # MIME types accepted by the Claude messages API (images field)
-_VALID_MIME = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+# application/pdf is allowed — VisionAnalyzer rasterizes it to PNG before the API call
+_VALID_MIME = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"})
 
 
 # ──────────────────────────────────────────────────────────────────────────────
