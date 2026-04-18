@@ -4,6 +4,7 @@ import adsk.core
 import adsk.fusion
 import json
 import os
+import threading
 import traceback
 
 from ... import config
@@ -67,11 +68,21 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
             if html_args.action != "analyzeImage":
                 return
             data = json.loads(html_args.data)
-            self._run_pipeline(data)
+            thread = threading.Thread(
+                target=self._run_pipeline,
+                args=(data,),
+                daemon=True,
+                name="DrawingToFusion-Pipeline"
+            )
+            thread.start()
         except Exception:
             self._send({"type": "error", "message": traceback.format_exc()})
 
     # ── Pipeline ──────────────────────────────────────────────────────────────
+    # ACHTUNG: Diese Methode läuft in einem Background-Thread.
+    # Alle Fusion 360 API-Aufrufe (adsk.*) müssen deshalb über
+    # GeometryBuilder laufen, der intern executeAsync verwendet.
+    # _send() ist threadsafe, da sendInfoToHTML es intern ist.
 
     def _run_pipeline(self, data: dict) -> None:
         api_key        = _resolve_api_key(data.get("apiKey", ""))
