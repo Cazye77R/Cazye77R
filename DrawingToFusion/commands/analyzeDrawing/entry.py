@@ -79,67 +79,86 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
             self._send({"type": "error", "message": traceback.format_exc()})
 
     # ── Pipeline ──────────────────────────────────────────────────────────────
-    # ACHTUNG: Diese Methode läuft in einem Background-Thread.
+    # ACHTUNG: Alle drei Methoden laufen in einem Background-Thread.
     # Alle Fusion 360 API-Aufrufe (adsk.*) müssen deshalb über
     # GeometryBuilder laufen, der intern executeAsync verwendet.
     # _send() ist threadsafe, da sendInfoToHTML es intern ist.
 
-    def _run_pipeline(self, data: dict) -> None:
-        api_key        = _resolve_api_key(data.get("apiKey", ""))
-        image_base64   = data.get("imageBase64", "")
-        image_mime     = data.get("imageMime", "image/png")
-        build_holes    = bool(data.get("buildHoles", True))
-        build_chamfers = bool(data.get("buildChamfers", True))
-        multi_view     = bool(data.get("multiView", False))
+    def _validate_inputs(self, data: dict):
+        """
+        Validiert API-Key, Bild und MIME-Typ.
+        Gibt (api_key, image_base64, image_mime) zurück oder None bei Fehler.
+        """
+        api_key      = _resolve_api_key(data.get("apiKey", ""))
+        image_base64 = data.get("imageBase64", "")
+        image_mime   = data.get("imageMime", "image/png")
 
-        # ── Validate inputs ───────────────────────────────────────────────────
         if not api_key:
-            self._send({"type": "error", "message": "API-Key fehlt. Bitte in den Einstellungen eintragen."})
-            return
+            self._send({"type": "error", "message": "API-Key fehlt. Bitte eintragen."})
+            return None
         if not image_base64:
             self._send({"type": "error", "message": "Kein Bild übermittelt."})
-            return
+            return None
         if image_mime not in _VALID_MIME:
-            self._send({
-                "type": "error",
-                "message": (
-                    f"MIME-Typ '{image_mime}' wird von der Claude API nicht unterstützt. "
-                    "Bitte PNG, JPEG oder WEBP verwenden."
-                ),
-            })
-            return
+            self._send({"type": "error", "message": (
+                f"MIME-Typ '{image_mime}' nicht unterstützt. "
+                "Bitte PNG, JPEG oder WEBP verwenden."
+            )})
+            return None
+        return api_key, image_base64, image_mime
 
-        # ── Step 1: Vision analysis ───────────────────────────────────────────
-        analyzer = VisionAnalyzer(api_key)
+    def _run_vision_analysis(
+        self, analyzer: VisionAnalyzer, image_base64: str,
+        image_mime: str, multi_view: bool
+    ):
+        """
+        Führt die Vision-Analyse durch (single oder multi-view).
+        Gibt result_dict zurück oder None bei Fehler.
+        """
         if multi_view:
             self._send({"type": "progress", "step": "Ansichten werden erkannt …", "percent": 20})
             try:
                 result_dict = analyzer.analyze_multiview_from_base64(image_base64, image_mime)
             except Exception as exc:
                 self._send({"type": "error", "message": f"Mehrfachansichten-Analyse fehlgeschlagen: {exc}"})
-                return
+                return None
             n_views = len(result_dict.get("view_analyses", []))
             if n_views > 1:
-                self._send({
-                    "type": "status",
-                    "message": f"{n_views} Ansichten erkannt — Maße werden konsolidiert …",
-                })
+                self._send({"type": "status", "message": f"{n_views} Ansichten erkannt — Maße werden konsolidiert …"})
         else:
             self._send({"type": "progress", "step": "Bild wird analysiert …", "percent": 30})
             try:
                 result_dict = analyzer.analyze_image_from_base64(image_base64, image_mime)
             except Exception as exc:
                 self._send({"type": "error", "message": f"Analyse fehlgeschlagen: {exc}"})
-                return
+                return None
+        return result_dict
 
-        # ── Step 2: Parse + honour UI settings ───────────────────────────────
+    def _run_pipeline(self, data: dict) -> None:
+        # Schritt 1: Validierung
+        validated = self._validate_inputs(data)
+        if not validated:
+            return
+        api_key, image_base64, image_mime = validated
+        build_holes    = bool(data.get("buildHoles", True))
+        build_chamfers = bool(data.get("buildChamfers", True))
+        multi_view     = bool(data.get("multiView", False))
+
+        # Schritt 2: Vision-Analyse
+        analyzer    = VisionAnalyzer(api_key)
+        result_dict = self._run_vision_analysis(analyzer, image_base64, image_mime, multi_view)
+        if result_dict is None:
+            return
+
+        # Schritt 3: Modell aufbauen
+        self._send({"type": "progress", "step": "Maße werden geparst …", "percent": 55})
         analysis = DrawingAnalysis.from_dict(result_dict)
         if not build_holes:
             analysis.holes = []
         if not build_chamfers:
             analysis.chamfers = []
 
-        # ── Step 3: Build geometry ────────────────────────────────────────────
+        # Schritt 4: Geometrie aufbauen
         self._send({"type": "progress", "step": "Geometrie wird aufgebaut …", "percent": 70})
         try:
             GeometryBuilder().build(analysis)
@@ -147,7 +166,8 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
             self._send({"type": "error", "message": f"Geometrie-Aufbau fehlgeschlagen: {exc}"})
             return
 
-        # ── Done ──────────────────────────────────────────────────────────────
+        # Fertig
+        self._send({"type": "progress", "step": "Abgeschlossen.", "percent": 100})
         self._send({
             "type":       "success",
             "analysis":   result_dict,
