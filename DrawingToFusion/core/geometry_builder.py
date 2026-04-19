@@ -110,9 +110,10 @@ class GeometryBuilder:
         params = design.userParameters
         existing = params.itemByName(name)
         if existing:
-            existing.value = value
+            existing.expression = f"{value} {fu}"
         else:
-            params.add(name, adsk.core.ValueInput.createByReal(value), fu, comment)
+            vi = adsk.core.ValueInput.createByString(f"{value} {fu}")
+            params.add(name, vi, fu, comment)
         return name
 
     def _create_all_parameters(self, design, analysis: DrawingAnalysis) -> dict:
