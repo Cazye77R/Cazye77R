@@ -194,13 +194,13 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
 def _show_palette(ui) -> None:
     global _palette
 
-    html_path = os.path.normpath(
-        os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "..", "..",
-            config.PALETTE_URL,
-        )
+    html_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "..",
+        config.PALETTE_URL,
     )
+    # Backslashes zu Forward-Slashes konvertieren (Windows-Fix für Chromium)
+    html_path = os.path.abspath(html_path).replace("\\", "/")
 
     _palette = ui.palettes.itemById(config.PALETTE_ID)
 
