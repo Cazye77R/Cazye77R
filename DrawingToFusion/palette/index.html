@@ -755,7 +755,7 @@
     // ── Fusion send helper ─────────────────────────────────────────
     function sendToFusion(action, data) {
       if (typeof adsk !== 'undefined') {
-        adsk(JSON.stringify({ action: action, data: data }));
+        adsk(action, JSON.stringify(data));
       } else {
         // Fusion handler noch nicht bereit — kurz warten und nochmal
         let attempts = 0;
@@ -763,10 +763,10 @@
           attempts++;
           if (typeof adsk !== 'undefined') {
             clearInterval(retry);
-            adsk(JSON.stringify({ action: action, data: data }));
+            adsk(action, JSON.stringify(data));
           } else if (attempts > 20) {
             clearInterval(retry);
-            console.warn('fusionJavaScriptHandler nicht gefunden');
+            console.warn('adsk nicht gefunden');
           }
         }, 100);
       }
@@ -809,23 +809,21 @@
       analyzeBtn.textContent = busy ? 'Analysiere …' : 'Analysieren & Aufbauen';
     }
 
-    // ── Response handler (called from Python via executeScript) ────
+    // ── Response handler (called from Python via sendInfoToHTML) ────
     window.handleFusionResponse = function(jsonStr) {
       try {
         const data = JSON.parse(jsonStr);
 
-        if (data.error) {
-          log('err', data.error);
+        if (data.type === 'error') {
+          log('err', data.message || 'Unbekannter Fehler');
           finishProgress(false);
           setBusy(false);
-          return;
-        }
-
-        if (data.status) log('ok', data.status);
-        if (data.warning) log('warn', data.warning);
-
-        if (data.result) showResult(data.result);
-        if (data.done) {
+        } else if (data.type === 'progress') {
+          log('info', data.step || '');
+        } else if (data.type === 'status') {
+          log('info', data.message || '');
+        } else if (data.type === 'success') {
+          showResult(data.analysis || {});
           finishProgress(true);
           setBusy(false);
           log('ok', 'Modell erfolgreich aufgebaut.');
@@ -905,9 +903,12 @@
 
     // ── Fusion → JS bridge ────────────────────────────────────────
     // Called by Fusion when Python invokes palette.sendInfoToHTML(action, data)
-    window.fusionData = function(action, data) {
-      if (action === 'status' && typeof window.handleFusionResponse === 'function') {
-        window.handleFusionResponse(data);
+    window.fusionJavaScriptHandler = {
+      handle: function(action, data) {
+        if (action === 'status' && typeof window.handleFusionResponse === 'function') {
+          window.handleFusionResponse(data);
+        }
+        return 'OK';   // Fusion 360 CEF requires a non-empty return value
       }
     };
 
