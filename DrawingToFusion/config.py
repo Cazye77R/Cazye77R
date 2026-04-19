@@ -20,4 +20,4 @@ CMD_ANALYZE_TOOLTIP = "Technische Zeichnung mit KI analysieren und in Fusion 360
 
 WORKSPACE_ID = "FusionSolidEnvironment"
 TOOLBAR_TAB_ID = "SolidTab"
-TOOLBAR_PANEL_ID = "SketchPanel"
+TOOLBAR_PANEL_ID = "SolidCreatePanel"

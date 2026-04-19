@@ -59,7 +59,17 @@ def run(context):
         _cmd_def.commandCreated.add(on_created)
         handlers.append(on_created)
 
-        panel = _get_sketch_panel(ui)
+        try:
+            panel = _get_sketch_panel(ui)
+        except RuntimeError:
+            workspace = ui.workspaces.itemById(config.WORKSPACE_ID)
+            tab = workspace.toolbarTabs.itemById(config.TOOLBAR_TAB_ID)
+            panel = tab.toolbarPanels.add(
+                config.TOOLBAR_PANEL_ID,
+                "DrawingToFusion",
+                ""
+            )
+
         ctrl = panel.controls.addCommand(_cmd_def)
         ctrl.isPromotedByDefault = False
 
@@ -83,6 +93,9 @@ def stop(context):
         ctrl = panel.controls.itemById(config.CMD_ANALYZE_ID)
         if ctrl:
             ctrl.deleteMe()
+        # Panel löschen falls leer (nur wenn wir es selbst erstellt haben)
+        if panel and panel.controls.count == 0:
+            panel.deleteMe()
 
         cmd_def = ui.commandDefinitions.itemById(config.CMD_ANALYZE_ID)
         if cmd_def:
