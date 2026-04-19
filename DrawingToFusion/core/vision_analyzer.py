@@ -3,6 +3,7 @@ import datetime
 import io
 import json
 import os
+import sys
 import urllib.error
 import urllib.request
 
@@ -435,8 +436,13 @@ class VisionAnalyzer:
         }
         req = urllib.request.Request(_API_URL, data=payload, headers=headers, method="POST")
 
+        print(
+            f"[VisionAnalyzer] Sende Request, Bildgröße: {len(payload)} Zeichen",
+            file=sys.stderr,
+        )
+
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 body = resp.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace")
