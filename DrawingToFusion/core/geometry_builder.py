@@ -71,6 +71,16 @@ class GeometryBuilder:
         extrude = self._extrude(comp, sketch, depth_vi)
         body = extrude.bodies.item(0)
 
+        # Hollow-shell: apply Shell feature when a wall thickness is given.
+        # This is more reliable than drawing a nested inner rectangle in the
+        # sketch, which confuses profile selection and produces wrong geometry.
+        p = analysis.base_profile
+        if isinstance(p, RectangleProfile) and p.thickness > 0:
+            try:
+                self._apply_shell(comp, body, p.thickness, factor)
+            except Exception as exc:
+                self._app.log(f"[DrawingToFusion] Shell übersprungen: {exc}")
+
         self._add_holes(comp, body, analysis.holes, factor, p_names.get("holes", []))
         self._add_chamfers(comp, body, analysis.chamfers, factor, p_names.get("chamfers", []))
         self._add_fillets(comp, body, analysis.fillets, factor, p_names.get("fillets", []))
@@ -250,12 +260,6 @@ class GeometryBuilder:
         except Exception as exc:
             self._app.log(f"[DrawingToFusion] Rechteck-Constraints übersprungen: {exc}")
 
-        # Hollow shell: inner rectangle (no sketch constraints — geometry only)
-        if t > 0 and t < min(w, h) / 2:
-            lines.addTwoPointRectangle(
-                adsk.core.Point3D.create(t, t, 0),
-                adsk.core.Point3D.create(w - t, h - t, 0),
-            )
 
     def _sketch_circle(
         self, sketch, profile: CircleProfile, factor: float, p_names: dict
@@ -336,6 +340,20 @@ class GeometryBuilder:
             (cx - hwt, wh),
         ]
         self._add_closed_polyline(sketch, pts)
+
+    def _apply_shell(self, comp, body, thickness: float, factor: float) -> None:
+        """Hollow out a solid box by removing its front face (Z=0) and shelling
+        with the given wall thickness.  This converts a solid extrusion into a
+        five-sided enclosure — the correct shape for a Schaltschrank / housing.
+        """
+        faces_to_remove = adsk.core.ObjectCollection.create()
+        front = self._find_face_at_z(body, 0.0)
+        if front is None:
+            raise RuntimeError("Shell: Vorderfläche (Z=0) nicht gefunden.")
+        faces_to_remove.add(front)
+        t_vi = adsk.core.ValueInput.createByReal(self._cm(thickness, factor))
+        shell_input = comp.features.shellFeatures.createInput(faces_to_remove, t_vi)
+        comp.features.shellFeatures.add(shell_input)
 
     def _add_closed_polyline(self, sketch, pts: list) -> None:
         lines = sketch.sketchCurves.sketchLines
