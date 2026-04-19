@@ -752,6 +752,26 @@
       }, 800);
     }
 
+    // ── Fusion send helper ─────────────────────────────────────────
+    function sendToFusion(action, data) {
+      if (typeof adsk !== 'undefined') {
+        adsk(JSON.stringify({ action: action, data: data }));
+      } else {
+        // Fusion handler noch nicht bereit — kurz warten und nochmal
+        let attempts = 0;
+        const retry = setInterval(() => {
+          attempts++;
+          if (typeof adsk !== 'undefined') {
+            clearInterval(retry);
+            adsk(JSON.stringify({ action: action, data: data }));
+          } else if (attempts > 20) {
+            clearInterval(retry);
+            console.warn('fusionJavaScriptHandler nicht gefunden');
+          }
+        }, 100);
+      }
+    }
+
     // ── Analyze ────────────────────────────────────────────────────
     analyzeBtn.addEventListener('click', () => {
       const apiKey = apiKeyInput.value.trim();
@@ -770,7 +790,7 @@
       startProgress();
       log('info', 'Sende Zeichnung an Claude API …');
 
-      const payload = JSON.stringify({
+      const payload = {
         imageBase64:    state.imageBase64,
         imageMime:      state.imageMime,
         apiKey:         apiKey,
@@ -778,17 +798,9 @@
         buildHoles:     buildHolesCb.checked,
         buildChamfers:  buildChamfersCb.checked,
         multiView:      multiViewCb.checked,
-      });
+      };
 
-      // Send to Fusion 360 Python handler
-      if (window.fusionJavaScriptHandler) {
-        window.fusionJavaScriptHandler.handle('analyzeImage', payload);
-        // Response arrives via window.handleFusionResponse (registered below)
-      } else {
-        // Fallback for browser testing outside Fusion
-        log('warn', 'fusionJavaScriptHandler nicht gefunden (Testmodus).');
-        setTimeout(() => simulateResponse(), 1500);
-      }
+      sendToFusion('analyzeImage', payload);
     });
 
     function setBusy(busy) {
