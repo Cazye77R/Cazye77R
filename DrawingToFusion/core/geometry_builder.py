@@ -562,16 +562,21 @@ class GeometryBuilder:
     # ──────────────────────────────────────────────────────────────────────
 
     def _top_face(self, body) -> adsk.fusion.BRepFace:
-        """Return the face whose centroid has the highest Z — the extruded top."""
-        top, max_z = None, float('-inf')
+        """Return the largest flat face on the body — used as the drilling plane.
+
+        For a box extruded from Z=0 in +Z direction the back face (at Z=depth)
+        is the largest flat face and the natural plane for through-holes.
+        Picking by area rather than Z-centroid works correctly even when the
+        Shell feature is applied (which removes the front face at Z=0).
+        """
+        best, best_area = None, -1.0
         for face in body.faces:
-            z = face.centroid.z
-            if z > max_z:
-                max_z = z
-                top = face
-        if top is None:
+            if face.area > best_area:
+                best_area = face.area
+                best = face
+        if best is None:
             raise RuntimeError("Kein Face auf dem Body gefunden.")
-        return top
+        return best
 
     def _top_face_edges(self, body) -> adsk.core.ObjectCollection:
         """Collect all edges of the top face into an ObjectCollection."""
