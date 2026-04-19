@@ -481,7 +481,7 @@
   <!-- ── Header ─────────────────────────────────────────────────── -->
   <header>
     <h1>DrawingToFusion</h1>
-    <span class="version">v1.0.0</span>
+    <span class="version">v1.1.0</span>
   </header>
 
   <!-- ── Drop-Zone ──────────────────────────────────────────────── -->
@@ -754,22 +754,38 @@
 
     // ── Fusion send helper ─────────────────────────────────────────
     function sendToFusion(action, data) {
-      if (typeof adsk !== 'undefined') {
-        adsk(action, JSON.stringify(data));
-      } else {
-        // Fusion handler noch nicht bereit — kurz warten und nochmal
-        let attempts = 0;
-        const retry = setInterval(() => {
-          attempts++;
-          if (typeof adsk !== 'undefined') {
-            clearInterval(retry);
-            adsk(action, JSON.stringify(data));
-          } else if (attempts > 20) {
-            clearInterval(retry);
-            console.warn('adsk nicht gefunden');
+      const jsonData = JSON.stringify(data);
+
+      function trySend() {
+        if (typeof adsk !== 'undefined' && typeof adsk.fusionSendData === 'function') {
+          try {
+            adsk.fusionSendData(action, jsonData);
+            return true;
+          } catch (e) {
+            log('err', 'adsk.fusionSendData Fehler: ' + e.message);
+            finishProgress(false);
+            setBusy(false);
+            return true; // don't retry on hard error
           }
-        }, 100);
+        }
+        return false;
       }
+
+      if (trySend()) return;
+
+      // Fusion handler noch nicht bereit — kurz warten und nochmal
+      let attempts = 0;
+      const retry = setInterval(() => {
+        attempts++;
+        if (trySend()) {
+          clearInterval(retry);
+        } else if (attempts > 20) {
+          clearInterval(retry);
+          log('err', 'Fusion 360 Bridge nicht verfügbar (adsk.fusionSendData fehlt).');
+          finishProgress(false);
+          setBusy(false);
+        }
+      }, 100);
     }
 
     // ── Analyze ────────────────────────────────────────────────────

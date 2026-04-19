@@ -4,7 +4,7 @@
   "id": "DrawingToFusion",
   "author": "Markus",
   "description": "Technische Zeichnungen mit KI in Fusion 360 nachbauen",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "runOnStartup": false,
   "supportedOS": "windows|mac",
   "editEnabled": true
