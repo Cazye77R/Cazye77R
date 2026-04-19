@@ -416,8 +416,15 @@ class GeometryBuilder:
         factor: float,
         p_names_hole: dict,
     ) -> None:
-        x_cm = self._cm(spec.x,        factor)
-        y_cm = self._cm(spec.y,        factor)
+        # Clamp hole centre so it stays at least one radius away from every edge.
+        # Holes at x=0 or y=0 (common in AI estimates for edge features like
+        # hinges) would otherwise fail or produce invalid geometry.
+        bb    = body.boundingBox
+        r_cm  = self._cm(spec.diameter / 2.0, factor)
+        x_raw = self._cm(spec.x, factor)
+        y_raw = self._cm(spec.y, factor)
+        x_cm  = max(bb.minPoint.x + r_cm, min(x_raw, bb.maxPoint.x - r_cm))
+        y_cm  = max(bb.minPoint.y + r_cm, min(y_raw, bb.maxPoint.y - r_cm))
 
         # Sketch on the top face — one point per hole centre
         hole_sk = comp.sketches.add(top_face)
