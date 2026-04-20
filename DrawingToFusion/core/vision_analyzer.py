@@ -107,6 +107,9 @@ Antworte NUR mit validem JSON ohne Markdown-Backticks:
       "width": 100.0,
       "height": 60.0,
       "profile_type": "rectangle",
+      "flange_height": 0.0,
+      "flange_width": 0.0,
+      "web_thickness": 0.0,
       "holes": [{"x": 15.0, "y": 15.0, "diameter": 8.0, "depth": "through"}],
       "chamfers": [{"edge": "top-front", "distance": 2.0}],
       "fillets": [],
@@ -116,6 +119,9 @@ Antworte NUR mit validem JSON ohne Markdown-Backticks:
       "width": 20.0,
       "height": 60.0,
       "profile_type": "rectangle",
+      "flange_height": 0.0,
+      "flange_width": 0.0,
+      "web_thickness": 0.0,
       "holes": [],
       "chamfers": [],
       "fillets": [],
@@ -125,6 +131,9 @@ Antworte NUR mit validem JSON ohne Markdown-Backticks:
       "width": 100.0,
       "height": 20.0,
       "profile_type": "rectangle",
+      "flange_height": 0.0,
+      "flange_width": 0.0,
+      "web_thickness": 0.0,
       "holes": [],
       "chamfers": [],
       "fillets": [],
@@ -132,6 +141,13 @@ Antworte NUR mit validem JSON ohne Markdown-Backticks:
     }
   }
 }
+
+Fuer L-Profile (profile_type="l") und T-Profile (profile_type="t") in der FRONTANSICHT:
+  flange_height  = Hoehe des horizontalen Flansches (Grundplatte), z.B. 20.0
+  flange_width   = Breite des horizontalen Flansches, z.B. 80.0
+  web_thickness  = Dicke des vertikalen Stegs, z.B. 10.0
+  width          = Gesamtbreite des Profils (= flange_width fuer T-Profil)
+  height         = Gesamthoehe (= flange_height + Stegh=oehe)
 
 Fuer rotationssymmetrische Teile (Wellen, Zylinder, Drehteile) setze profile_type="revolution"
 und ergaenze das View-Objekt der SEITENANSICHT (Profilansicht) um:
@@ -205,6 +221,52 @@ _CONSOLIDATION_SCHEMA_REVOLUTION = """\
   "fillets":  [],
   "confidence": 0.9,
   "notes": "Welle aus N Ansichten konsolidiert. Gesamtlaenge = Summe aller steps.length."
+}\
+"""
+
+_CONSOLIDATION_SCHEMA_T = """\
+{
+  "unit": "mm",
+  "view": "multi",
+  "base_profile": {
+    "type": "t",
+    "width": 80.0,
+    "height": 60.0,
+    "flange_width": 80.0,
+    "flange_height": 20.0,
+    "web_thickness": 20.0,
+    "thickness": 0.0,
+    "radius": null
+  },
+  "extrusion_depth": 40.0,
+  "holes": [],
+  "chamfers": [{"edge": "top-front", "distance": 2.0}],
+  "fillets":  [],
+  "confidence": 0.9,
+  "notes": "T-Profil aus N Ansichten konsolidiert."
+}\
+"""
+
+_CONSOLIDATION_SCHEMA_L = """\
+{
+  "unit": "mm",
+  "view": "multi",
+  "base_profile": {
+    "type": "l",
+    "width": 80.0,
+    "height": 60.0,
+    "flange_width": 80.0,
+    "flange_height": 15.0,
+    "web_thickness": 15.0,
+    "thickness": 0.0,
+    "radius": null
+  },
+  "extrusion_depth": 40.0,
+  "holes": [],
+  "chamfers": [{"edge": "top-front", "distance": 2.0}],
+  "fillets":  [],
+  "confidence": 0.9,
+  "notes": "L-Profil (Winkelstahl) aus N Ansichten konsolidiert."
 }\
 """
 
@@ -415,11 +477,12 @@ class VisionAnalyzer:
         n = len(views_detected)
         views_json = json.dumps(mv_data, ensure_ascii=False, indent=2)
 
-        # Detect revolution from extraction result
+        # Detect profile type from extraction result
         views = mv_data.get("views", {})
-        is_revolution = any(
-            v.get("profile_type") == "revolution" for v in views.values()
-        )
+        profile_types = {v.get("profile_type", "").lower() for v in views.values()}
+        is_revolution = bool(profile_types & {"revolution", "lathe", "shaft", "welle"})
+        is_t_profile  = bool(profile_types & {"t", "tprofile"})
+        is_l_profile  = bool(profile_types & {"l", "lprofile"})
 
         if is_revolution:
             schema = _CONSOLIDATION_SCHEMA_REVOLUTION
@@ -435,6 +498,35 @@ class VisionAnalyzer:
                 "   - bore_diameter nur setzen wenn eine durchgehende Innenbohrung vorhanden\n"
                 "   - Die Frontansicht (konzentrische Kreise) bestaetigt nur die Durchmesser,\n"
                 "     liefert aber KEINE Laengeninformation\n\n"
+            )
+        elif is_t_profile:
+            schema = _CONSOLIDATION_SCHEMA_T
+            extra_rules = (
+                "5. Dieses Bauteil ist ein T-PROFIL (Traeger/T-Stueck):\n"
+                "   - Nutze die FRONTANSICHT fuer das Querschnittsprofil\n"
+                "   - base_profile.type = 't'\n"
+                "   - width = Gesamtbreite des Flansches (horizontaler Teil)\n"
+                "   - height = Gesamthoehe (= flange_height + web_height)\n"
+                "   - flange_height = Hoehe des horizontalen Flansches (Grundplatte)\n"
+                "   - flange_width = Breite des Flansches (= width bei symmetrischem T)\n"
+                "   - web_thickness = Dicke des vertikalen Stegs\n"
+                "   - extrusion_depth = Laenge des Profils (aus der Seitenansicht)\n"
+                "   - WICHTIG: Uebernehme flange_height und web_thickness direkt aus den\n"
+                "     Frontansicht-Werten, nicht aus width/height der Seitenansicht\n\n"
+            )
+        elif is_l_profile:
+            schema = _CONSOLIDATION_SCHEMA_L
+            extra_rules = (
+                "5. Dieses Bauteil ist ein L-PROFIL (Winkelstahl/Winkel):\n"
+                "   - Nutze die FRONTANSICHT fuer das Querschnittsprofil\n"
+                "   - base_profile.type = 'l'\n"
+                "   - width = Breite des horizontalen Schenkels\n"
+                "   - height = Hoehe des vertikalen Schenkels\n"
+                "   - flange_height = Materialdicke des horizontalen Schenkels\n"
+                "   - web_thickness = Materialdicke des vertikalen Schenkels\n"
+                "   - extrusion_depth = Laenge des Profils (aus der Seitenansicht)\n"
+                "   - WICHTIG: Uebernehme flange_height und web_thickness direkt aus\n"
+                "     den Frontansicht-Werten\n\n"
             )
         else:
             schema = _CONSOLIDATION_SCHEMA
