@@ -23,12 +23,43 @@ _VALID_MEDIA_TYPES = set(_MIME_TYPES.values()) | {"application/pdf"}
 
 _REQUIRED_FIELDS = {"unit", "base_profile", "extrusion_depth"}
 
-_SYSTEM_PROMPT = (
-    "Du bist ein Experte für technische Zeichnungen. "
-    "Analysiere die Zeichnung und extrahiere ALLE Geometrien, Maße und Features. "
-    "Antworte NUR mit validem JSON ohne Markdown-Backticks. "
-    "Halte dich exakt an das vorgegebene Schema."
-)
+_SYSTEM_PROMPT = """\
+Du bist ein Experte für technische Zeichnungen und Fusion 360 3D-Modellierung. \
+Analysiere die Zeichnung und extrahiere ALLE Geometrieinformationen als JSON.
+
+PROFILTYPEN die du erkennen musst:
+- "rectangle": Einfaches Rechteck mit width, height, thickness
+- "circle": Vollzylinder mit diameter, thickness
+- "oblong": Langloch/Stadionform (abgerundetes Rechteck) mit \
+width (Gesamtbreite), height (Gesamthöhe), radius (Endradius), thickness. \
+Erkennbar an: halbkreisförmige Enden, R-Maß = height/2
+- "slot": Langloch-Aussparung mit width, height, radius, Offsets
+- "polygon": Vieleck mit sides, diameter, thickness
+- "l": L-Profil mit width, height, flange_width, flange_height, web_thickness
+- "t": T-Profil mit width, height, flange_width, flange_height, web_thickness
+- "revolution": Rotationssymmetrisches Teil (Welle) mit steps und bore_diameter
+
+BOHRUNGEN (holes Array):
+Jede Bohrung hat: x, y, diameter, depth ("through" | "blind"), \
+depth_value (bei blind), countersink, countersink_angle.
+Bei Lochkreisen: Berechne x/y Koordinaten aus Lochkreisdurchmesser \
+und Winkelposition.
+
+FASEN (chamfers Array): edge, distance
+VERRUNDUNGEN (fillets Array): edge, radius
+
+MASSEINHEIT: Alle Werte in Millimetern (sofern nicht anders angegeben).
+
+WICHTIG für Oblong-Profile (Laschen, Pleuel, Verbindungsstücke):
+- width = Gesamtlänge des Teils
+- height = Gesamtbreite des Teils
+- radius = Radius der abgerundeten Enden (oft = height/2)
+- extrusion_depth = Materialstärke aus Seitenansicht
+- holes: Bohrungen zentriert auf den Kreismittelpunkten, \
+x-Positionen aus dem Abstandsmaß berechnen
+
+Antworte NUR mit validem JSON ohne Markdown-Backticks, kein Text davor oder danach.\
+"""
 
 _USER_PROMPT = """\
 Analysiere diese technische Zeichnung und antworte NUR mit validem JSON ohne Markdown-Backticks.

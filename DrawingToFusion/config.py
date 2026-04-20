@@ -6,7 +6,7 @@ ADDIN_NAME = "DrawingToFusion"
 COMPANY_NAME = "Markus"
 
 DEFAULT_MODEL = "claude-opus-4-6"
-MAX_TOKENS = 2000
+MAX_TOKENS = 4000
 
 PALETTE_ID = "DrawingToFusionPalette"
 PALETTE_TITLE = "Drawing to Fusion 360"
