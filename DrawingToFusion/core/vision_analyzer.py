@@ -133,6 +133,19 @@ Antworte NUR mit validem JSON ohne Markdown-Backticks:
   }
 }
 
+Fuer rotationssymmetrische Teile (Wellen, Zylinder, Drehteile) setze profile_type="revolution"
+und ergaenze das View-Objekt der SEITENANSICHT (Profilansicht) um:
+  "steps": [{"diameter": 94.0, "length": 84.0}, {"diameter": 70.0, "length": 40.0}, ...],
+  "bore_diameter": 0.0,
+  "total_length": 184.0
+
+Regeln fuer Wellen (profile_type="revolution"):
+- steps: von LINKS nach RECHTS, jede Stufe mit ihrem Aussendurchmesser und ihrer Laenge
+- Jede sichtbare Masslinie (z.B. 40, 30, 20) einer konkreten Stufe zuordnen
+- Masszahlen in Klammern z.B. (84) = Referenzmaß des dazugehoerigen Abschnitts
+- Durchmesser nehmen normalerweise von links nach rechts ab (z.B. 94 → 70 → 56 → 40 → 30)
+- total_length = Summe aller steps.length (entspricht der Gesamtlaengenmasslinie)
+
 Regeln:
 - Erlaubte Ansichtsbezeichnungen: "front", "side", "top", "back", "bottom", "isometric"
 - profile_type: "rectangle" | "circle" | "l" | "t" | "revolution"
@@ -155,7 +168,6 @@ _CONSOLIDATION_SCHEMA = """\
     "flange_width": null,
     "flange_height": null,
     "web_thickness": null
-    // Fuer Wellen: "type":"revolution","steps":[{"diameter":D,"length":L}...],"bore_diameter":0
   },
   "extrusion_depth": 20.0,
   "holes": [
@@ -169,6 +181,30 @@ _CONSOLIDATION_SCHEMA = """\
   "fillets":  [{"edge": "bottom-left", "radius": 3.0}],
   "confidence": 0.9,
   "notes": "Masse aus N Ansichten konsolidiert. Widersprueche: ..."
+}\
+"""
+
+_CONSOLIDATION_SCHEMA_REVOLUTION = """\
+{
+  "unit": "mm",
+  "view": "multi",
+  "base_profile": {
+    "type": "revolution",
+    "steps": [
+      {"diameter": 94.0, "length": 84.0},
+      {"diameter": 70.0, "length": 40.0},
+      {"diameter": 56.0, "length": 10.0},
+      {"diameter": 40.0, "length": 30.0},
+      {"diameter": 30.0, "length": 20.0}
+    ],
+    "bore_diameter": 0.0
+  },
+  "extrusion_depth": 184.0,
+  "holes": [],
+  "chamfers": [{"edge": "step", "distance": 2.0}],
+  "fillets":  [],
+  "confidence": 0.9,
+  "notes": "Welle aus N Ansichten konsolidiert. Gesamtlaenge = Summe aller steps.length."
 }\
 """
 
@@ -379,21 +415,46 @@ class VisionAnalyzer:
         n = len(views_detected)
         views_json = json.dumps(mv_data, ensure_ascii=False, indent=2)
 
+        # Detect revolution from extraction result
+        views = mv_data.get("views", {})
+        is_revolution = any(
+            v.get("profile_type") == "revolution" for v in views.values()
+        )
+
+        if is_revolution:
+            schema = _CONSOLIDATION_SCHEMA_REVOLUTION
+            extra_rules = (
+                "5. Dieses Bauteil ist ROTATIONSSYMMETRISCH (Welle/Drehteil):\n"
+                "   - Nutze die Seitenansicht (Profilansicht) fuer die Stufengeometrie\n"
+                "   - Ordne JEDE bemaßte Laenge der richtigen Stufe zu:\n"
+                "     * Folge den Pfeillinien der Masszahlen zur zugehoerigen Stufe\n"
+                "     * Masszahlen in Klammern (z.B. (84)) = Referenzmaß des Abschnitts\n"
+                "     * Durchmesser nehmen i.d.R. von links nach rechts ab\n"
+                "   - Berechne fehlende Laengen als Differenz: Gesamtlaenge - Summe bekannter Laengen\n"
+                "   - WICHTIG: Summe aller steps.length MUSS = extrusion_depth sein\n"
+                "   - bore_diameter nur setzen wenn eine durchgehende Innenbohrung vorhanden\n"
+                "   - Die Frontansicht (konzentrische Kreise) bestaetigt nur die Durchmesser,\n"
+                "     liefert aber KEINE Laengeninformation\n\n"
+            )
+        else:
+            schema = _CONSOLIDATION_SCHEMA
+            extra_rules = (
+                "5. Wenn keine Seitenansicht: schaetze extrusion_depth aus Draufsicht-Hoehe\n\n"
+            )
+
         user_text = (
             "Konsolidiere diese Mehrfachansichten-Analyse zu einer konsistenten DrawingAnalysis.\n\n"
             "Erkannte Ansichten (" + str(n) + "):\n"
             + views_json
             + "\n\nAufgabe:\n"
-            "1. Bestimme die Geometrie des Bauteils aus allen Ansichten:\n"
-            "   - Frontansicht: Breite (X) und Hoehe (Y) des Querschnitts\n"
-            "   - Seitenansicht: Tiefe des Bauteils (= extrusion_depth)\n"
-            "   - Draufsicht: bestaetigt Breite und Tiefe\n"
+            "1. Bestimme die Geometrie des Bauteils aus allen Ansichten\n"
             "2. Loese Widersprueche: Falls Masse widersprechen, nutze den haeufigsten Wert\n"
             "   und dokumentiere alle Widersprueche in 'notes'\n"
             "3. Uebernehme Bohrungen aus der Frontansicht (x/y-Koordinaten bleiben)\n"
-            "4. Wenn keine Seitenansicht: schaetze extrusion_depth aus Draufsicht-Hoehe\n\n"
-            "Antworte NUR mit validem JSON ohne Markdown-Backticks, exakt nach diesem Schema:\n"
-            + _CONSOLIDATION_SCHEMA
+            "4. Prismatische Koerper: Frontansicht=Breite/Hoehe, Seitenansicht=Tiefe\n"
+            + extra_rules
+            + "Antworte NUR mit validem JSON ohne Markdown-Backticks, exakt nach diesem Schema:\n"
+            + schema
         )
 
         payload = self._build_text_payload(user_text)
