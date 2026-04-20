@@ -82,6 +82,13 @@ Fuer rotationssymmetrische Teile (Wellen, Zylinder, Drehteile) verwende stattdes
 Erlaubte Werte:
 - unit: "mm" | "cm" | "inch"
 - base_profile.type: "rectangle" | "circle" | "l" | "t" | "revolution"
+- Bei "t" (T-Traeger): width = Flanschbreite (gesamt), height = Gesamthoehe,
+  flange_height = Hoehe des UNTEREN Flansches (Basis), web_thickness = Stegdicke
+  WICHTIG: flange_height und web_thickness duerfen NICHT 0 sein
+- Bei "l" (Winkelstahl): width = horizontaler Schenkel, height = vertikaler Schenkel,
+  flange_height = Materialdicke des horizontalen Schenkels,
+  web_thickness = Materialdicke des vertikalen Schenkels
+  WICHTIG: flange_height und web_thickness duerfen NICHT 0 sein
 - Bei "revolution": steps = Stufenliste von links nach rechts (diameter = Aussendurchmesser),
   bore_diameter = Innendurchmesser (0 falls massiv),
   extrusion_depth = Gesamtlaenge der Welle (= Summe der steps.length)

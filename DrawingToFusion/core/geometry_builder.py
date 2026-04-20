@@ -228,8 +228,18 @@ class GeometryBuilder:
         elif isinstance(p, CircleProfile):
             self._sketch_circle(sketch, p, factor, p_names)
         elif isinstance(p, LProfile):
+            if p.flange_height <= 0 or p.web_thickness <= 0:
+                raise ValueError(
+                    f"L-Profil: flange_height ({p.flange_height}) und web_thickness ({p.web_thickness}) "
+                    "müssen > 0 sein. KI hat unvollständige Werte geliefert."
+                )
             self._sketch_l_profile(sketch, p, factor)
         elif isinstance(p, TProfile):
+            if p.flange_height <= 0 or p.web_thickness <= 0:
+                raise ValueError(
+                    f"T-Profil: flange_height ({p.flange_height}) und web_thickness ({p.web_thickness}) "
+                    "müssen > 0 sein. KI hat unvollständige Werte geliefert."
+                )
             self._sketch_t_profile(sketch, p, factor)
         else:
             raise ValueError(f"Unbekannter Profiltyp: {type(p).__name__}")
@@ -328,15 +338,15 @@ class GeometryBuilder:
 
     def _sketch_t_profile(self, sketch, profile: TProfile, factor: float) -> None:
         """
-        T-profile, web pointing down, flange at top, symmetric around x = w/2:
+        T-profile, flange at bottom, web pointing UP, symmetric around x = w/2:
 
-            (0,h) ────────────────────── (w,h)
-              │                               │
-            (0,wh) ──(cx-hwt,wh)   (cx+hwt,wh)── (w,wh)
-                          │                   │
-                       (cx-hwt,0)  (cx+hwt,0)
+            (cx-hwt, h) ──── (cx+hwt, h)              ← top of web
+                  │                   │
+        (0, fh) ──(cx-hwt, fh)  (cx+hwt, fh)── (w, fh)   ← flange top
+          │                                          │
+        (0,  0) ──────────────────────────── (w,  0)    ← flange bottom
 
-        wh  = web_height = height - flange_height
+        fh  = flange_height (height of the horizontal base)
         cx  = width / 2
         hwt = web_thickness / 2
         """
@@ -347,17 +357,16 @@ class GeometryBuilder:
 
         cx  = w / 2
         hwt = wt / 2
-        wh  = h - fh          # height of the vertical web below the flange
 
         pts = [
-            (cx - hwt, 0 ),
-            (cx + hwt, 0 ),
-            (cx + hwt, wh),
-            (w,        wh),
-            (w,        h ),
-            (0,        h ),
-            (0,        wh),
-            (cx - hwt, wh),
+            (0,        0 ),    # bottom-left of flange
+            (w,        0 ),    # bottom-right of flange
+            (w,        fh),    # top-right of flange
+            (cx + hwt, fh),    # right edge of web at flange top
+            (cx + hwt, h ),    # top-right of web
+            (cx - hwt, h ),    # top-left of web
+            (cx - hwt, fh),    # left edge of web at flange top
+            (0,        fh),    # top-left of flange
         ]
         self._add_closed_polyline(sketch, pts)
 
