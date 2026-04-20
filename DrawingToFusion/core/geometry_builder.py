@@ -240,6 +240,12 @@ class GeometryBuilder:
                     f"T-Profil: flange_height ({p.flange_height}) und web_thickness ({p.web_thickness}) "
                     "müssen > 0 sein. KI hat unvollständige Werte geliefert."
                 )
+            if p.flange_height >= p.height / 2:
+                raise ValueError(
+                    f"T-Profil: flange_height ({p.flange_height}) >= height/2 ({p.height/2:.1f}). "
+                    "Wahrscheinlich wurde der obere Block als Flansch erkannt statt als Teil des Stegs. "
+                    "flange_height = nur der unterste, breiteste Abschnitt der Zeichnung."
+                )
             self._sketch_t_profile(sketch, p, factor)
         else:
             raise ValueError(f"Unbekannter Profiltyp: {type(p).__name__}")

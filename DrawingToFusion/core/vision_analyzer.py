@@ -85,6 +85,10 @@ Erlaubte Werte:
 - Bei "t" (T-Traeger): width = Flanschbreite (gesamt), height = Gesamthoehe,
   flange_height = Hoehe des UNTEREN Flansches (Basis), web_thickness = Stegdicke
   WICHTIG: flange_height und web_thickness duerfen NICHT 0 sein
+- Bei T-Profil mit 3 sichtbaren Abschnitten (Flansch + Steg + oberer Block):
+  Falls der obere Block gleich breit oder schmäler als der Steg ist, gehört er
+  zum Steg — addiere seine Höhe zur Steghöhe. Nur der BREITESTE untere Abschnitt
+  ist der Flansch. flange_height = Höhe des breitesten unteren Abschnitts.
 - Bei "l" (Winkelstahl): width = horizontaler Schenkel, height = vertikaler Schenkel,
   flange_height = Materialdicke des horizontalen Schenkels,
   web_thickness = Materialdicke des vertikalen Schenkels
@@ -154,7 +158,10 @@ Fuer L-Profile (profile_type="l") und T-Profile (profile_type="t") in der FRONTA
   flange_width   = Breite des horizontalen Flansches, z.B. 80.0
   web_thickness  = Dicke des vertikalen Stegs, z.B. 10.0
   width          = Gesamtbreite des Profils (= flange_width fuer T-Profil)
-  height         = Gesamthoehe (= flange_height + Stegh=oehe)
+  height         = Gesamthoehe (= flange_height + Steghöhe)
+  Bei T-Profil: Falls ein oberer Abschnitt existiert, der gleich breit oder schmäler als
+  der Steg ist: Addiere dessen Höhe zur Steghöhe (kein zweiter Flansch).
+  flange_height = ausschließlich Höhe des breitesten unteren Abschnitts.
 
 Fuer rotationssymmetrische Teile (Wellen, Zylinder, Drehteile) setze profile_type="revolution"
 und ergaenze das View-Objekt der SEITENANSICHT (Profilansicht) um:
@@ -519,7 +526,15 @@ class VisionAnalyzer:
                 "   - web_thickness = Dicke des vertikalen Stegs\n"
                 "   - extrusion_depth = Laenge des Profils (aus der Seitenansicht)\n"
                 "   - WICHTIG: Uebernehme flange_height und web_thickness direkt aus den\n"
-                "     Frontansicht-Werten, nicht aus width/height der Seitenansicht\n\n"
+                "     Frontansicht-Werten, nicht aus width/height der Seitenansicht\n"
+                "   - KRITISCH: Falls die Frontansicht 3 Abschnitte zeigt (unten breit, Mitte\n"
+                "     schmal, oben schmal gleicher Breite wie Mitte): Der oberste Abschnitt\n"
+                "     gehoert zum Steg — addiere seine Hoehe zur Steghöhe. Der Flansch ist\n"
+                "     NUR der unterste, breiteste Abschnitt.\n"
+                "   - flange_height = Hoehe des untersten breitesten Abschnitts\n"
+                "   - height = flange_height + volle Steghöhe inkl. aller deckungsgleichen\n"
+                "     Abschnitte oberhalb des Flansches\n"
+                "   - web_thickness = Breite des Stegs / der schmaleren Abschnitte\n\n"
             )
         elif is_l_profile:
             schema = _CONSOLIDATION_SCHEMA_L
