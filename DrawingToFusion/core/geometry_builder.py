@@ -14,6 +14,10 @@ from .models import (
     TProfile,
     RevolutionProfile,
     RevolutionStep,
+    ObLongProfile,
+    SlotProfile,
+    PolygonProfile,
+    CompositeProfile,
     HoleSpec,
     ChamferSpec,
     FilletSpec,
@@ -247,6 +251,32 @@ class GeometryBuilder:
                     "flange_height = nur der unterste, breiteste Abschnitt der Zeichnung."
                 )
             self._sketch_t_profile(sketch, p, factor)
+        elif isinstance(p, ObLongProfile):
+            if p.radius <= 0:
+                raise ValueError(
+                    f"ObLongProfile: radius ({p.radius}) muss > 0 sein."
+                )
+            self._build_oblong_sketch(sketch, p, factor)
+        elif isinstance(p, SlotProfile):
+            if p.radius <= 0:
+                raise ValueError(
+                    f"SlotProfile: radius ({p.radius}) muss > 0 sein."
+                )
+            self._build_slot_sketch(sketch, p, factor)
+        elif isinstance(p, PolygonProfile):
+            if p.sides < 3:
+                raise ValueError(
+                    f"PolygonProfile: sides ({p.sides}) muss >= 3 sein."
+                )
+            if p.diameter <= 0:
+                raise ValueError(
+                    f"PolygonProfile: diameter ({p.diameter}) muss > 0 sein."
+                )
+            self._build_polygon_sketch(sketch, p, factor)
+        elif isinstance(p, CompositeProfile):
+            if not p.sketch_elements:
+                raise ValueError("CompositeProfile: sketch_elements ist leer.")
+            self._build_composite_sketch(sketch, p, factor)
         else:
             raise ValueError(f"Unbekannter Profiltyp: {type(p).__name__}")
 
@@ -375,6 +405,140 @@ class GeometryBuilder:
             (0,        fh),    # top-left of flange
         ]
         self._add_closed_polyline(sketch, pts)
+
+    def _build_oblong_sketch(self, sketch, profile: ObLongProfile, factor: float) -> None:
+        """Two parallel lines + two semicircular arcs forming a closed stadium shape.
+
+        Layout (centered at origin):
+            cd = width - 2*radius   (straight section length)
+            Arc centers at (±cd/2, 0); arcs sweep -180° (clockwise).
+        """
+        w  = self._cm(profile.width,  factor)
+        r  = self._cm(profile.radius, factor)
+        cd = max(w - 2 * r, 0.0)
+
+        lines = sketch.sketchCurves.sketchLines
+        arcs  = sketch.sketchCurves.sketchArcs
+
+        if cd > 1e-9:
+            lines.addByTwoPoints(
+                adsk.core.Point3D.create(-cd / 2,  r, 0),
+                adsk.core.Point3D.create( cd / 2,  r, 0),
+            )
+            lines.addByTwoPoints(
+                adsk.core.Point3D.create( cd / 2, -r, 0),
+                adsk.core.Point3D.create(-cd / 2, -r, 0),
+            )
+
+        # Right semicircle: top → bottom (clockwise = -π)
+        arcs.addByCenterStartSweep(
+            adsk.core.Point3D.create(cd / 2, 0, 0),
+            adsk.core.Point3D.create(cd / 2, r, 0),
+            -math.pi,
+        )
+        # Left semicircle: bottom → top (clockwise = -π)
+        arcs.addByCenterStartSweep(
+            adsk.core.Point3D.create(-cd / 2, 0, 0),
+            adsk.core.Point3D.create(-cd / 2, -r, 0),
+            -math.pi,
+        )
+
+    def _build_slot_sketch(self, sketch, profile: SlotProfile, factor: float) -> None:
+        """Oblong shape offset by (x_offset, y_offset) — same geometry as ObLong."""
+        w  = self._cm(profile.width,    factor)
+        r  = self._cm(profile.radius,   factor)
+        dx = self._cm(profile.x_offset, factor)
+        dy = self._cm(profile.y_offset, factor)
+        cd = max(w - 2 * r, 0.0)
+
+        lines = sketch.sketchCurves.sketchLines
+        arcs  = sketch.sketchCurves.sketchArcs
+
+        if cd > 1e-9:
+            lines.addByTwoPoints(
+                adsk.core.Point3D.create(dx - cd / 2, dy + r, 0),
+                adsk.core.Point3D.create(dx + cd / 2, dy + r, 0),
+            )
+            lines.addByTwoPoints(
+                adsk.core.Point3D.create(dx + cd / 2, dy - r, 0),
+                adsk.core.Point3D.create(dx - cd / 2, dy - r, 0),
+            )
+
+        arcs.addByCenterStartSweep(
+            adsk.core.Point3D.create(dx + cd / 2, dy, 0),
+            adsk.core.Point3D.create(dx + cd / 2, dy + r, 0),
+            -math.pi,
+        )
+        arcs.addByCenterStartSweep(
+            adsk.core.Point3D.create(dx - cd / 2, dy, 0),
+            adsk.core.Point3D.create(dx - cd / 2, dy - r, 0),
+            -math.pi,
+        )
+
+    def _build_polygon_sketch(self, sketch, profile: PolygonProfile, factor: float) -> None:
+        """Regular polygon inscribed in a circle of diameter `profile.diameter`."""
+        r = self._cm(profile.diameter / 2.0, factor)
+        n = profile.sides
+        pts = [
+            (r * math.cos(2 * math.pi * i / n), r * math.sin(2 * math.pi * i / n))
+            for i in range(n)
+        ]
+        self._add_closed_polyline(sketch, pts)
+
+    def _build_composite_sketch(self, sketch, profile: CompositeProfile, factor: float) -> None:
+        """Draw arbitrary 2D elements from sketch_elements list.
+
+        Each element dict must have a "type" key:
+          {"type": "line",   "x1": …, "y1": …, "x2": …, "y2": …}
+          {"type": "arc",    "cx": …, "cy": …, "start_x": …, "start_y": …, "sweep_deg": …}
+          {"type": "circle", "cx": …, "cy": …, "radius": …}
+        """
+        lines   = sketch.sketchCurves.sketchLines
+        arcs    = sketch.sketchCurves.sketchArcs
+        circles = sketch.sketchCurves.sketchCircles
+
+        for elem in profile.sketch_elements:
+            kind = str(elem.get("type", "")).lower()
+            try:
+                if kind == "line":
+                    lines.addByTwoPoints(
+                        adsk.core.Point3D.create(
+                            self._cm(float(elem.get("x1", 0)), factor),
+                            self._cm(float(elem.get("y1", 0)), factor), 0,
+                        ),
+                        adsk.core.Point3D.create(
+                            self._cm(float(elem.get("x2", 0)), factor),
+                            self._cm(float(elem.get("y2", 0)), factor), 0,
+                        ),
+                    )
+                elif kind == "arc":
+                    arcs.addByCenterStartSweep(
+                        adsk.core.Point3D.create(
+                            self._cm(float(elem.get("cx", 0)), factor),
+                            self._cm(float(elem.get("cy", 0)), factor), 0,
+                        ),
+                        adsk.core.Point3D.create(
+                            self._cm(float(elem.get("start_x", 0)), factor),
+                            self._cm(float(elem.get("start_y", 0)), factor), 0,
+                        ),
+                        math.radians(float(elem.get("sweep_deg", 0))),
+                    )
+                elif kind == "circle":
+                    circles.addByCenterRadius(
+                        adsk.core.Point3D.create(
+                            self._cm(float(elem.get("cx", 0)), factor),
+                            self._cm(float(elem.get("cy", 0)), factor), 0,
+                        ),
+                        self._cm(float(elem.get("radius", 0)), factor),
+                    )
+                else:
+                    self._app.log(
+                        f"[DrawingToFusion] Unbekanntes Composite-Element: {kind!r} — übersprungen."
+                    )
+            except Exception as exc:
+                self._app.log(
+                    f"[DrawingToFusion] Composite-Element übersprungen: {exc}"
+                )
 
     # ──────────────────────────────────────────────────────────────────────
     # Revolution (lathe/shaft)
