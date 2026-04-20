@@ -273,6 +273,42 @@
       background: var(--accent);
     }
 
+    /* ── Model selector ──────────────────────────────────────── */
+    .model-group {
+      display: flex;
+      gap: 4px;
+    }
+
+    .model-btn {
+      flex: 1;
+      padding: 4px 2px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .model-btn:hover:not(.active) { border-color: var(--accent2); color: var(--text); }
+
+    .model-btn.active {
+      background: var(--accent2);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    #model-info {
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 3px;
+      min-height: 13px;
+    }
+
     /* ── Primary button ───────────────────────────────────────── */
     #analyze-btn {
       padding: 9px 12px;
@@ -541,6 +577,17 @@
         </label>
       </div>
 
+      <div class="field">
+        <label>KI-Modell</label>
+        <div class="model-group" id="model-group">
+          <button class="model-btn active" data-model="claude-opus-4-6">Opus 4.6</button>
+          <button class="model-btn" data-model="claude-opus-4-7">Opus 4.7</button>
+          <button class="model-btn" data-model="claude-sonnet-4-6">Sonnet 4.6</button>
+          <button class="model-btn" data-model="claude-haiku-4-5-20251001">Haiku 4.5</button>
+        </div>
+        <div id="model-info">Bewährt &amp; stabil · ~15 Ct/Analyse</div>
+      </div>
+
     </div>
   </details>
 
@@ -609,17 +656,49 @@
     // ── Persistence ────────────────────────────────────────────────
     const LS_KEY_APIKEY = 'dtf_api_key';
     const LS_KEY_UNIT   = 'dtf_unit';
+    const LS_KEY_MODEL  = 'dtf_model';
+
+    // ── Model selection ────────────────────────────────────────────
+    const modelGroup  = document.getElementById('model-group');
+    const modelInfoEl = document.getElementById('model-info');
+
+    const MODEL_INFO = {
+      'claude-opus-4-6':           'Bewährt &amp; stabil · ~15 Ct/Analyse',
+      'claude-opus-4-7':           'Neuestes Opus · höchste Qualität',
+      'claude-sonnet-4-6':         'Schneller &amp; günstiger · ~3 Ct/Analyse',
+      'claude-haiku-4-5-20251001': 'Blitzschnell · ~0,5 Ct/Analyse',
+    };
+
+    let selectedModel = 'claude-opus-4-6';
+
+    function setModel(modelId) {
+      selectedModel = modelId;
+      modelGroup.querySelectorAll('.model-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.model === modelId);
+      });
+      modelInfoEl.innerHTML = MODEL_INFO[modelId] || modelId;
+    }
+
+    modelGroup.addEventListener('click', e => {
+      const btn = e.target.closest('.model-btn');
+      if (!btn) return;
+      setModel(btn.dataset.model);
+      savePrefs();
+    });
 
     function loadPrefs() {
       const saved = localStorage.getItem(LS_KEY_APIKEY);
       if (saved) apiKeyInput.value = saved;
       const unit = localStorage.getItem(LS_KEY_UNIT);
       if (unit) unitSelect.value = unit;
+      const model = localStorage.getItem(LS_KEY_MODEL);
+      if (model && MODEL_INFO[model]) setModel(model);
     }
 
     function savePrefs() {
       localStorage.setItem(LS_KEY_APIKEY, apiKeyInput.value.trim());
       localStorage.setItem(LS_KEY_UNIT, unitSelect.value);
+      localStorage.setItem(LS_KEY_MODEL, selectedModel);
     }
 
     apiKeyInput.addEventListener('change', savePrefs);
@@ -814,6 +893,7 @@
         buildHoles:     buildHolesCb.checked,
         buildChamfers:  buildChamfersCb.checked,
         multiView:      multiViewCb.checked,
+        model:          selectedModel,
       };
 
       sendToFusion('analyzeImage', payload);

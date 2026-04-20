@@ -155,10 +155,11 @@ _CONSOLIDATION_SCHEMA = """\
 
 
 class VisionAnalyzer:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: str = None):
         if not api_key or not api_key.strip():
             raise ValueError("api_key darf nicht leer sein.")
         self._api_key = api_key.strip()
+        self._model   = model or config.DEFAULT_MODEL
 
     # ------------------------------------------------------------------
     # Public API
@@ -296,7 +297,7 @@ class VisionAnalyzer:
             }
 
         payload = {
-            "model": config.DEFAULT_MODEL,
+            "model": self._model,
             "max_tokens": config.MAX_TOKENS,
             "system": _SYSTEM_PROMPT,
             "messages": [
@@ -314,7 +315,7 @@ class VisionAnalyzer:
     def _build_text_payload(self, user_text: str) -> bytes:
         """Build a text-only (no image) API payload — used for the consolidation step."""
         payload = {
-            "model": config.DEFAULT_MODEL,
+            "model": self._model,
             "max_tokens": config.MAX_TOKENS,
             "system": _SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": user_text}],
@@ -486,7 +487,7 @@ class VisionAnalyzer:
         """
         payload = {
             "_saved_at": datetime.datetime.now().isoformat(timespec="seconds"),
-            "_model":    config.DEFAULT_MODEL,
+            "_model":    self._model,
             "data":      response_dict,
         }
         try:

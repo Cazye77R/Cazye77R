@@ -143,9 +143,10 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
         build_holes    = bool(data.get("buildHoles", True))
         build_chamfers = bool(data.get("buildChamfers", True))
         multi_view     = bool(data.get("multiView", False))
+        model          = data.get("model", config.DEFAULT_MODEL)
 
         # Schritt 2: Vision-Analyse
-        analyzer    = VisionAnalyzer(api_key)
+        analyzer    = VisionAnalyzer(api_key, model=model)
         result_dict = self._run_vision_analysis(analyzer, image_base64, image_mime, multi_view)
         if result_dict is None:
             return
