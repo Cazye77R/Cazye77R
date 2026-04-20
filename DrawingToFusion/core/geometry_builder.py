@@ -66,8 +66,7 @@ class GeometryBuilder:
                 "fillets":  [None] * len(analysis.fillets),
             }
 
-        occ = self._root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
-        comp = occ.component
+        comp = self._make_component()
 
         sketch = self._create_base_sketch(comp, analysis, factor, p_names)
 
@@ -99,6 +98,19 @@ class GeometryBuilder:
     def _cm(self, value: float, factor: float) -> float:
         """Convert a value in the drawing's unit to Fusion's internal cm."""
         return value * factor
+
+    def _make_component(self) -> adsk.fusion.Component:
+        """Create a new sub-component (Assembly) or fall back to root (Part document).
+
+        Fusion 360 Part documents allow only one component; attempting to add
+        a second via addNewComponent() raises error 3. In that case we return
+        the root component so geometry is created there directly.
+        """
+        try:
+            occ = self._root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
+            return occ.component
+        except Exception:
+            return self._root
 
     # ──────────────────────────────────────────────────────────────────────
     # User parameters
@@ -371,8 +383,7 @@ class GeometryBuilder:
         except Exception as exc:
             self._app.log(f"[DrawingToFusion] Parameter-Erstellung übersprungen: {exc}")
 
-        occ = self._root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
-        comp = occ.component
+        comp = self._make_component()
 
         sketch = comp.sketches.add(comp.xYConstructionPlane)
         self._sketch_revolution_profile(sketch, p, factor)
