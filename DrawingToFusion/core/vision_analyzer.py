@@ -65,9 +65,26 @@ Halte dich exakt an dieses Schema (Beispielwerte zeigen den Typ, nicht den Inhal
   "notes": "Freitext-Anmerkungen"
 }
 
+Fuer rotationssymmetrische Teile (Wellen, Zylinder, Drehteile) verwende stattdessen:
+{
+  "base_profile": {
+    "type": "revolution",
+    "steps": [
+      {"diameter": 56.0, "length": 10.0},
+      {"diameter": 94.0, "length": 84.0},
+      {"diameter": 70.0, "length": 40.0}
+    ],
+    "bore_diameter": 0.0
+  },
+  "extrusion_depth": 134.0
+}
+
 Erlaubte Werte:
 - unit: "mm" | "cm" | "inch"
-- base_profile.type: "rectangle" | "circle" | "l" | "t"
+- base_profile.type: "rectangle" | "circle" | "l" | "t" | "revolution"
+- Bei "revolution": steps = Stufenliste von links nach rechts (diameter = Aussendurchmesser),
+  bore_diameter = Innendurchmesser (0 falls massiv),
+  extrusion_depth = Gesamtlaenge der Welle (= Summe der steps.length)
 - holes[].depth: "through" | "blind"
 - confidence: 0.0 bis 1.0
 """
@@ -118,6 +135,7 @@ Antworte NUR mit validem JSON ohne Markdown-Backticks:
 
 Regeln:
 - Erlaubte Ansichtsbezeichnungen: "front", "side", "top", "back", "bottom", "isometric"
+- profile_type: "rectangle" | "circle" | "l" | "t" | "revolution"
 - has_multiple_views = false wenn nur eine Ansicht vorhanden (views enthaelt nur "front")
 - Alle Masse in der in "unit" angegebenen Einheit
 - holes[].depth: "through" | "blind"
@@ -137,6 +155,7 @@ _CONSOLIDATION_SCHEMA = """\
     "flange_width": null,
     "flange_height": null,
     "web_thickness": null
+    // Fuer Wellen: "type":"revolution","steps":[{"diameter":D,"length":L}...],"bore_diameter":0
   },
   "extrusion_depth": 20.0,
   "holes": [

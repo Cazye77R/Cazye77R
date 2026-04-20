@@ -12,6 +12,8 @@ from .models import (
     CircleProfile,
     LProfile,
     TProfile,
+    RevolutionProfile,
+    RevolutionStep,
     HoleSpec,
     ChamferSpec,
     FilletSpec,
@@ -37,13 +39,19 @@ class GeometryBuilder:
             raise ValueError(
                 "DrawingAnalysis enthält kein base_profile — Aufbau abgebrochen."
             )
+
+        p = analysis.base_profile
+        factor = analysis.to_cm_factor()
+        design = adsk.fusion.Design.cast(self._app.activeProduct)
+
+        if isinstance(p, RevolutionProfile):
+            self._build_revolution(design, analysis, p, factor)
+            return
+
         if analysis.extrusion_depth <= 0:
             raise ValueError(
                 f"extrusion_depth muss > 0 sein, ist {analysis.extrusion_depth!r}."
             )
-
-        factor = analysis.to_cm_factor()
-        design = adsk.fusion.Design.cast(self._app.activeProduct)
 
         # Create DTF_* user parameters; fall back to raw values if the design
         # is in DirectEdit mode or parameter creation fails for any reason.
@@ -74,7 +82,6 @@ class GeometryBuilder:
         # Hollow-shell: apply Shell feature when a wall thickness is given.
         # This is more reliable than drawing a nested inner rectangle in the
         # sketch, which confuses profile selection and produces wrong geometry.
-        p = analysis.base_profile
         if isinstance(p, RectangleProfile) and p.thickness > 0:
             try:
                 self._apply_shell(comp, body, p.thickness, factor)
@@ -340,6 +347,93 @@ class GeometryBuilder:
             (0,        wh),
             (cx - hwt, wh),
         ]
+        self._add_closed_polyline(sketch, pts)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Revolution (lathe/shaft)
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _build_revolution(
+        self, design, analysis: DrawingAnalysis, p: RevolutionProfile, factor: float
+    ) -> None:
+        if not p.steps:
+            raise ValueError("RevolutionProfile enthält keine steps.")
+
+        total_len = analysis.extrusion_depth
+        if total_len <= 0:
+            total_len = sum(s.length for s in p.steps)
+        if total_len <= 0:
+            raise ValueError("RevolutionProfile: Gesamtlänge = 0.")
+
+        try:
+            self._ensure_param(design, "DTF_Depth", total_len, analysis.unit,
+                               "DrawingToFusion: shaft total length")
+        except Exception as exc:
+            self._app.log(f"[DrawingToFusion] Parameter-Erstellung übersprungen: {exc}")
+
+        occ = self._root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
+        comp = occ.component
+
+        sketch = comp.sketches.add(comp.xYConstructionPlane)
+        self._sketch_revolution_profile(sketch, p, factor)
+
+        profile = self._largest_profile(sketch)
+        axis = comp.xConstructionAxis
+        revolves = comp.features.revolveFeatures
+        rev_input = revolves.createInput(
+            profile, axis,
+            adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+        )
+        rev_input.setAngleExtent(False, adsk.core.ValueInput.createByString("360 deg"))
+        revolves.add(rev_input)
+
+        if analysis.holes:
+            self._app.log(
+                "[DrawingToFusion] Bohrungen auf Drehteil übersprungen "
+                "(Innenprofil via bore_diameter setzen)."
+            )
+        if analysis.chamfers:
+            self._app.log(
+                f"[DrawingToFusion] {len(analysis.chamfers)} Fasen auf Drehteil — "
+                "bitte manuell hinzufügen."
+            )
+        if analysis.fillets:
+            self._app.log(
+                f"[DrawingToFusion] {len(analysis.fillets)} Verrundungen auf Drehteil — "
+                "bitte manuell hinzufügen."
+            )
+
+    def _sketch_revolution_profile(
+        self, sketch, p: RevolutionProfile, factor: float
+    ) -> None:
+        """Half-section of the shaft: x = axial position, y = radius.
+        Revolving around comp.xConstructionAxis (X axis) creates the 3D body.
+        """
+        bore_r = self._cm(p.bore_diameter / 2.0, factor)
+        pts: list = []
+        x = 0.0
+
+        # Left face: from axis/bore up to outer radius of first step
+        pts.append((x, bore_r if bore_r > 0 else 0.0))
+
+        for i, step in enumerate(p.steps):
+            r = self._cm(step.diameter / 2.0, factor)
+            length = self._cm(step.length, factor)
+
+            if i == 0:
+                pts.append((x, r))   # outer left face
+            else:
+                prev_r = self._cm(p.steps[i - 1].diameter / 2.0, factor)
+                if abs(r - prev_r) > 1e-9:
+                    pts.append((x, r))   # step transition face
+
+            if length > 1e-9:
+                x += length
+                pts.append((x, r))   # outer right face of this step
+
+        # Right face: back down to axis/bore
+        pts.append((x, bore_r if bore_r > 0 else 0.0))
+
         self._add_closed_polyline(sketch, pts)
 
     def _apply_shell(self, comp, body, thickness: float, factor: float) -> None:

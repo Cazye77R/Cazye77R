@@ -78,6 +78,18 @@ class TProfile(BaseProfile):
     web_thickness: float
 
 
+@dataclass
+class RevolutionStep:
+    diameter: float    # outer diameter in drawing unit
+    length: float      # axial length of this step
+
+
+@dataclass
+class RevolutionProfile(BaseProfile):
+    steps: List[RevolutionStep]
+    bore_diameter: float = 0.0    # 0 = solid shaft
+
+
 # ---------------------------------------------------------------------------
 # DrawingAnalysis — top-level result returned by VisionAnalyzer
 # ---------------------------------------------------------------------------
@@ -85,12 +97,16 @@ class TProfile(BaseProfile):
 _CM_FACTORS = {"mm": 0.1, "cm": 1.0, "inch": 2.54}
 
 _PROFILE_KEYS = {
-    "rectangle": RectangleProfile,
-    "circle": CircleProfile,
-    "l": LProfile,
-    "lprofile": LProfile,
-    "t": TProfile,
-    "tprofile": TProfile,
+    "rectangle":  RectangleProfile,
+    "circle":     CircleProfile,
+    "l":          LProfile,
+    "lprofile":   LProfile,
+    "t":          TProfile,
+    "tprofile":   TProfile,
+    "revolution": RevolutionProfile,
+    "lathe":      RevolutionProfile,
+    "shaft":      RevolutionProfile,
+    "welle":      RevolutionProfile,
 }
 
 
@@ -182,6 +198,22 @@ def _parse_profile(d: dict) -> Optional[BaseProfile]:
                 flange_width=float(d.get("flange_width", 0)),
                 flange_height=float(d.get("flange_height", 0)),
                 web_thickness=float(d.get("web_thickness", 0)),
+            )
+        if cls is RevolutionProfile:
+            steps = []
+            for s in d.get("steps", []):
+                try:
+                    steps.append(RevolutionStep(
+                        diameter=float(s.get("diameter", 0)),
+                        length=float(s.get("length", 0)),
+                    ))
+                except (TypeError, ValueError):
+                    continue
+            if not steps:
+                return None
+            return RevolutionProfile(
+                steps=steps,
+                bore_diameter=float(d.get("bore_diameter", 0)),
             )
     except (TypeError, ValueError):
         return None
