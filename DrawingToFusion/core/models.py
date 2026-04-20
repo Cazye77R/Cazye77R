@@ -90,6 +90,39 @@ class RevolutionProfile(BaseProfile):
     bore_diameter: float = 0.0    # 0 = solid shaft
 
 
+@dataclass
+class ObLongProfile(BaseProfile):
+    """Rechteck mit halbkreisförmigen Enden — z.B. Pleuel, Laschen"""
+    width: float
+    height: float
+    radius: float       # Endradius (= height/2 bei echtem Oblong)
+    thickness: float = 0.0
+
+
+@dataclass
+class SlotProfile(BaseProfile):
+    """Langloch-Aussparung in einem anderen Profil"""
+    width: float
+    height: float
+    radius: float
+    x_offset: float = 0.0
+    y_offset: float = 0.0
+
+
+@dataclass
+class PolygonProfile(BaseProfile):
+    sides: int          # Anzahl Seiten
+    diameter: float     # Umkreisdurchmesser
+    thickness: float = 0.0
+
+
+@dataclass
+class CompositeProfile(BaseProfile):
+    """Beliebige 2D-Kontur als Liste von Punkten + Bögen"""
+    sketch_elements: list = field(default_factory=list)
+    thickness: float = 0.0
+
+
 # ---------------------------------------------------------------------------
 # DrawingAnalysis — top-level result returned by VisionAnalyzer
 # ---------------------------------------------------------------------------
@@ -107,6 +140,10 @@ _PROFILE_KEYS = {
     "lathe":      RevolutionProfile,
     "shaft":      RevolutionProfile,
     "welle":      RevolutionProfile,
+    "oblong":     ObLongProfile,
+    "slot":       SlotProfile,
+    "polygon":    PolygonProfile,
+    "composite":  CompositeProfile,
 }
 
 
@@ -214,6 +251,32 @@ def _parse_profile(d: dict) -> Optional[BaseProfile]:
             return RevolutionProfile(
                 steps=steps,
                 bore_diameter=float(d.get("bore_diameter", 0)),
+            )
+        if cls is ObLongProfile:
+            return ObLongProfile(
+                width=float(d.get("width", 0)),
+                height=float(d.get("height", 0)),
+                radius=float(d.get("radius", 0)),
+                thickness=float(d.get("thickness", 0)),
+            )
+        if cls is SlotProfile:
+            return SlotProfile(
+                width=float(d.get("width", 0)),
+                height=float(d.get("height", 0)),
+                radius=float(d.get("radius", 0)),
+                x_offset=float(d.get("x_offset", 0)),
+                y_offset=float(d.get("y_offset", 0)),
+            )
+        if cls is PolygonProfile:
+            return PolygonProfile(
+                sides=int(d.get("sides", 6)),
+                diameter=float(d.get("diameter", 0)),
+                thickness=float(d.get("thickness", 0)),
+            )
+        if cls is CompositeProfile:
+            return CompositeProfile(
+                sketch_elements=list(d.get("sketch_elements", [])),
+                thickness=float(d.get("thickness", 0)),
             )
     except (TypeError, ValueError):
         return None

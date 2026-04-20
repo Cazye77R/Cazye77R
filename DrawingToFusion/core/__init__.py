@@ -10,4 +10,10 @@ from .models import (
     CircleProfile,
     LProfile,
     TProfile,
+    RevolutionStep,
+    RevolutionProfile,
+    ObLongProfile,
+    SlotProfile,
+    PolygonProfile,
+    CompositeProfile,
 )
