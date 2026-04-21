@@ -132,7 +132,172 @@ Erkennungsregeln für Einstiche:
 - Nur zurückgeben wenn in der Zeichnung tatsächlich erkennbar
 - step_index bezieht sich auf den Index in der "steps"-Liste des revolution-Profils
 - Positionen und Maße in der Einheit der Zeichnung angeben (wie alle anderen Maße)
-- Leeres Array [] wenn keine Features dieses Typs erkennbar sind\
+- Leeres Array [] wenn keine Features dieses Typs erkennbar sind
+
+---
+
+## Operations-Modus (modeling_mode: "operations")
+
+Verwende diesen Modus STATT des Profil-Modus wenn das Teil NICHT durch ein einzelnes
+Profil + Extrusion darstellbar ist. Typische Fälle:
+- Stufenkörper mit Aussparungen oder Taschen
+- Teile mit Langlöchern, Absätzen oder Stufen die nicht durch Fasen/Verrundungen entstehen
+- Teile bei denen die Vorderansicht eine nicht-konvexe Kontur zeigt (z.B. U-Form, T mit Aussparung)
+- Teile mit Features die von verschiedenen Seiten kommen (Stufe nur von oben etc.)
+
+Wenn du operations-Modus wählst, setze:
+  "modeling_mode": "operations"
+  "base_profile_type": "none"
+  "operations": [...]
+
+Die "operations"-Liste beschreibt die Modellierungsschritte in der Reihenfolge
+wie sie in Fusion 360 ausgeführt werden. Jeder Schritt hat:
+
+{
+  "operation": "extrude_add",
+  "sketch_plane": "XY",
+  "contour": {
+    "points": [[x1,y1], [x2,y2], ...],
+    "closed": true
+  },
+  "depth": 20.0,
+  "direction": "positive",
+  "description": "Grundkörper 70×50mm, 20mm tief"
+}
+
+### Verfügbare Operationen:
+
+1. "extrude_add" — Material hinzufügen (erster Schritt = Grundkörper)
+   Pflicht: contour (Punktliste), depth, sketch_plane
+   contour.points: Eckpunkte im Uhrzeigersinn, Einheit = Zeichnungseinheit
+   Für ein Rechteck 70×50: [[0,0], [70,0], [70,50], [0,50]]
+
+2. "extrude_cut" — Material entfernen (Tasche, Stufe, Nut)
+   Pflicht: contour, depth, sketch_plane
+   sketch_plane: "face_top" = auf der Oberseite des bisherigen Körpers schneiden
+                 "face_front" = von vorne schneiden
+                 "face_right" = von rechts schneiden
+                 "XY"/"XZ"/"YZ" = auf Konstruktionsebene
+
+3. "hole" — Bohrung (einfacher als Sketch-basierter Cut)
+   Pflicht: hole_diameter, hole_x, hole_y, sketch_plane
+   hole_type: "through" oder "blind" (dann hole_depth angeben)
+
+4. "slot" — Langloch (Oblong-Durchbruch)
+   Pflicht: slot_width, slot_length, slot_x, slot_y, depth, sketch_plane
+   slot_x/slot_y = Mittelpunkt des Langlochs
+   slot_width = Breite (schmale Seite), slot_length = Länge (lange Seite)
+
+5. "chamfer" — Fase auf Kanten
+   edge_selection: "top" | "bottom" | "all"
+   size: Fasenbreite
+
+6. "fillet" — Verrundung auf Kanten
+   edge_selection: "top" | "bottom" | "all"
+   size: Verrundungsradius
+
+### Regeln für die Operations-Erstellung:
+
+1. ERSTER Schritt ist IMMER "extrude_add" mit dem Grundkörper-Profil
+2. Alle Maße in der Zeichnungseinheit (mm, cm, inch)
+3. Punkte im Uhrzeigersinn, Start bei [0,0] (linke untere Ecke)
+4. Für Stufen die nur von einer Seite kommen: extrude_cut mit passendem sketch_plane
+5. Tiefe des Grundkörpers = Wert aus der Seitenansicht (Tiefe/Breite des Teils)
+6. Gestrichelte Linien = verdeckte Kanten → zeigen Features auf der Rückseite
+7. Strichpunktlinien = Mittellinien → zeigen Symmetrie oder Drehachsen
+
+### Beispiel: Stufenkörper (wie Dreitafelprojektion-Aufgabe)
+
+Vorderansicht zeigt T-Form: Grundplatte 40×20mm, oberer Block 20×40mm
+Seitenansicht zeigt Tiefe 20mm
+→ Zwei Operationen:
+
+"modeling_mode": "operations",
+"operations": [
+  {
+    "operation": "extrude_add",
+    "sketch_plane": "XY",
+    "contour": {"points": [[0,0], [40,0], [40,20], [0,20]], "closed": true},
+    "depth": 20.0,
+    "description": "Grundplatte 40×20mm, Tiefe 20mm"
+  },
+  {
+    "operation": "extrude_add",
+    "sketch_plane": "face_top",
+    "contour": {"points": [[10,0], [30,0], [30,40], [10,40]], "closed": true},
+    "depth": 0,
+    "description": "Oberer Block 20×40mm — Höhe schon in Kontur"
+  }
+]
+
+ALTERNATIV kann die gesamte Vorderansicht als eine Kontur extrudiert werden:
+"operations": [
+  {
+    "operation": "extrude_add",
+    "sketch_plane": "XY",
+    "contour": {
+      "points": [[0,0], [40,0], [40,20], [30,20], [30,60], [10,60], [10,20], [0,20]],
+      "closed": true
+    },
+    "depth": 20.0,
+    "description": "T-Stufenkörper als eine Kontur, 20mm tief"
+  }
+]
+
+Die zweite Variante (eine Kontur) ist BEVORZUGT wenn die Vorderansicht das vollständige
+Profil zeigt und die Tiefe überall gleich ist.
+
+### Beispiel: Block mit Langloch und Bohrung
+
+"modeling_mode": "operations",
+"operations": [
+  {
+    "operation": "extrude_add",
+    "sketch_plane": "XY",
+    "contour": {"points": [[0,0], [70,0], [70,50], [0,50]], "closed": true},
+    "depth": 20.0,
+    "description": "Grundkörper 70×50×20mm"
+  },
+  {
+    "operation": "extrude_cut",
+    "sketch_plane": "face_top",
+    "contour": {"points": [[0,43], [55,43], [55,50], [0,50]], "closed": true},
+    "depth": 7.0,
+    "description": "Stufe oben 55×7mm, 7mm tief"
+  },
+  {
+    "operation": "slot",
+    "sketch_plane": "face_front",
+    "slot_width": 10.0,
+    "slot_length": 15.0,
+    "slot_x": 22.0,
+    "slot_y": 25.0,
+    "depth": 20.0,
+    "description": "Langloch 10×15mm mittig, durchgehend"
+  },
+  {
+    "operation": "hole",
+    "sketch_plane": "face_front",
+    "hole_diameter": 10.0,
+    "hole_x": 55.0,
+    "hole_y": 25.0,
+    "hole_type": "through",
+    "description": "Durchgangsbohrung Ø10 rechts"
+  }
+]
+
+### Entscheidung: Profil-Modus vs. Operations-Modus
+
+Verwende "modeling_mode": "profile" (bisheriges Verhalten) wenn:
+- Das Teil ein einfaches Prisma ist (Rechteck, Kreis, L, T extrudiert)
+- Das Teil eine Welle/Achse ist (Revolution)
+- Nur Bohrungen, Fasen, Verrundungen als Features dazukommen
+
+Verwende "modeling_mode": "operations" wenn:
+- Die Vorderansicht eine nicht-triviale Kontur zeigt (Stufen, Aussparungen, U-Form)
+- Das Teil Langlöcher oder Taschen hat
+- Features von verschiedenen Seiten kommen
+- Mehr als 2 verschiedene Querschnitte in verschiedenen Ansichten sichtbar sind\
 """
 
 _USER_PROMPT = """\
@@ -204,6 +369,11 @@ Erlaubte Werte:
 - holes[].depth: "through" | "blind"
 - confidence: 0.0 bis 1.0
 - Für Wellen/Achsen (revolution): Erkenne auch threads, undercuts und grooves wie im System-Prompt beschrieben.
+WICHTIG: Entscheide zuerst ob das Teil im Profil-Modus (ein Profil + Extrusion) oder
+im Operations-Modus (Schritt-für-Schritt Modellierung) dargestellt werden soll.
+Verwende den Operations-Modus für alle Teile die nicht durch ein einzelnes Profil
+abbildbar sind — z.B. Stufenkörper, Teile mit Taschen/Langlöchern, oder Teile mit
+verschiedenen Querschnitten.
 """
 
 # ── Multi-view prompts ─────────────────────────────────────────────────────────
