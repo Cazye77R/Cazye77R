@@ -527,6 +527,33 @@
     .feature-chip.undercut { background: #3a1a5c; color: #b44dff; border: 1px solid #5a2a8c; }
     .feature-chip.groove   { background: #1a5c3a; color: #4dffb4; border: 1px solid #2a8c5a; }
 
+    /* ── Operations summary ──────────────────────────────────────── */
+    .ops-summary {
+        margin-top: 8px;
+        padding: 8px;
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        font-family: monospace;
+        font-size: 11px;
+    }
+    .ops-header {
+        color: #00b4d8;
+        font-weight: bold;
+        margin-bottom: 6px;
+        font-size: 12px;
+    }
+    .ops-step {
+        padding: 2px 0;
+        color: #c9d1d9;
+        border-bottom: 1px solid #21262d;
+    }
+    .ops-step:last-child { border-bottom: none; }
+    .ops-icon { margin-right: 4px; }
+    .ops-num { color: #8b949e; min-width: 20px; display: inline-block; }
+    .ops-type { color: #ff7b72; font-weight: bold; }
+    .ops-desc { color: #8b949e; }
+
     /* ── Scrollbar styling ────────────────────────────────────── */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: var(--bg0); }
@@ -974,6 +1001,34 @@
           log('info', data.message || '');
         } else if (data.type === 'success') {
           showResult(data.analysis || {});
+
+          var prevOps = document.querySelector('.ops-summary');
+          if (prevOps) prevOps.remove();
+
+          if (data.modeling_mode === 'operations' && data.operation_count > 0) {
+            var ops = (data.analysis && data.analysis.operations) || [];
+            var opsHtml = '<div class="ops-summary">';
+            opsHtml += '<div class="ops-header">' + ops.length + ' Modellierungsschritte</div>';
+            ops.forEach(function(op, idx) {
+              var icon = op.operation === 'extrude_add' ? '➕' :
+                         op.operation === 'extrude_cut' ? '✂️' :
+                         op.operation === 'hole'        ? '⭕' :
+                         op.operation === 'slot'        ? '🔲' :
+                         op.operation === 'chamfer'     ? '📐' :
+                         op.operation === 'fillet'      ? '🔵' : '🔧';
+              opsHtml += '<div class="ops-step">'
+                + '<span class="ops-icon">' + icon + '</span>'
+                + '<span class="ops-num">' + (idx + 1) + '.</span> '
+                + '<span class="ops-type">' + escHtml(op.operation) + '</span> '
+                + '<span class="ops-desc">' + escHtml(op.description || '') + '</span>'
+                + '</div>';
+            });
+            opsHtml += '</div>';
+            document.getElementById('resultPreview') !== null
+              ? document.getElementById('resultPreview').insertAdjacentHTML('beforeend', opsHtml)
+              : document.getElementById('json-preview').insertAdjacentHTML('afterend', opsHtml);
+          }
+
           finishProgress(true);
           setBusy(false);
           log('ok', 'Modell erfolgreich aufgebaut.');
