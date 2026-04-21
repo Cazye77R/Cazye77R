@@ -39,6 +39,40 @@ class FilletSpec:
     radius: float
 
 
+@dataclass
+class ThreadSpec:
+    """Gewinde auf einer Welle oder in einer Bohrung (DIN ISO 6410)."""
+    designation: str          # z.B. "M12x1.5", "M8", "Tr20x4", "G1/2"
+    thread_type: str          # "metric" | "metric_fine" | "trapezoidal" | "whitworth" | "pipe"
+    start_position: float     # Axiale Position ab Bezugskante in Zeichnungseinheit
+    length: float             # Gewindelänge in Zeichnungseinheit
+    step_index: int = 0       # Index des RevolutionProfile.steps-Eintrags
+    pitch: float = 0.0        # Steigung in mm (0 = Regelgewinde)
+    hand: str = "right"       # "right" | "left"
+    internal: bool = False    # True = Innengewinde (Bohrung), False = Außengewinde
+
+
+@dataclass
+class UndercutSpec:
+    """Freistich an einem Wellenabsatz (DIN 509 Form E/F)."""
+    undercut_type: str        # "DIN509_E" | "DIN509_F" | "custom"
+    position: float           # Axiale Position in Zeichnungseinheit
+    step_index: int = 0       # An welchem Step-Übergang
+    width: float = 0.0        # t1 — Breite des Freistichs
+    depth: float = 0.0        # t2 — Tiefe des Freistichs
+    radius: float = 0.0       # Auslaufradius r
+
+
+@dataclass
+class GrooveSpec:
+    """Einstich / Nut auf einer Welle (Sicherungsring, O-Ring, allgemein)."""
+    groove_type: str          # "circlip_din471" | "circlip_din472" | "o_ring" | "custom"
+    position: float           # Axiale Position in Zeichnungseinheit
+    width: float              # Nutbreite
+    depth: float              # Nuttiefe (radial)
+    step_index: int = 0       # Auf welchem Revolution-Step
+
+
 # ---------------------------------------------------------------------------
 # Base profile + concrete subclasses
 # ---------------------------------------------------------------------------
@@ -160,6 +194,9 @@ class DrawingAnalysis:
     notes: str = ""
     multi_view: bool = False                # True when consolidated from ≥2 views
     view_analyses: List[dict] = field(default_factory=list)  # raw per-view data
+    threads: list = field(default_factory=list)    # List[ThreadSpec]
+    undercuts: list = field(default_factory=list)  # List[UndercutSpec]
+    grooves: list = field(default_factory=list)    # List[GrooveSpec]
 
     # ------------------------------------------------------------------
     # Helpers
@@ -191,6 +228,41 @@ class DrawingAnalysis:
             for f in data.get("fillets", []) if f
         ]
 
+        threads = [
+            ThreadSpec(
+                designation=t.get("designation", "M6"),
+                thread_type=t.get("thread_type", "metric"),
+                start_position=float(t.get("start_position", 0)),
+                length=float(t.get("length", 10)),
+                step_index=int(t.get("step_index", 0)),
+                pitch=float(t.get("pitch", 0)),
+                hand=t.get("hand", "right"),
+                internal=bool(t.get("internal", False)),
+            )
+            for t in data.get("threads", []) if t
+        ]
+        undercuts = [
+            UndercutSpec(
+                undercut_type=u.get("undercut_type", "DIN509_E"),
+                position=float(u.get("position", 0)),
+                step_index=int(u.get("step_index", 0)),
+                width=float(u.get("width", 0)),
+                depth=float(u.get("depth", 0)),
+                radius=float(u.get("radius", 0)),
+            )
+            for u in data.get("undercuts", []) if u
+        ]
+        grooves = [
+            GrooveSpec(
+                groove_type=g.get("groove_type", "custom"),
+                position=float(g.get("position", 0)),
+                width=float(g.get("width", 0)),
+                depth=float(g.get("depth", 0)),
+                step_index=int(g.get("step_index", 0)),
+            )
+            for g in data.get("grooves", []) if g
+        ]
+
         return cls(
             unit=unit,
             view=str(data.get("view", "")),
@@ -203,6 +275,9 @@ class DrawingAnalysis:
             notes=str(data.get("notes", "")),
             multi_view=bool(data.get("multi_view", False)),
             view_analyses=list(data.get("view_analyses", [])),
+            threads=threads,
+            undercuts=undercuts,
+            grooves=grooves,
         )
 
 
