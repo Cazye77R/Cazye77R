@@ -154,10 +154,22 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
         # Schritt 3: Modell aufbauen
         self._send({"type": "progress", "step": "Maße werden geparst …", "percent": 55})
         analysis = DrawingAnalysis.from_dict(result_dict)
-        if not build_holes:
-            analysis.holes = []
-        if not build_chamfers:
-            analysis.chamfers = []
+        if analysis.modeling_mode == "operations":
+            if not build_holes:
+                analysis.operations = [
+                    op for op in analysis.operations
+                    if op.operation not in ("hole", "slot")
+                ]
+            if not build_chamfers:
+                analysis.operations = [
+                    op for op in analysis.operations
+                    if op.operation not in ("chamfer", "fillet")
+                ]
+        else:
+            if not build_holes:
+                analysis.holes = []
+            if not build_chamfers:
+                analysis.chamfers = []
 
         # Schritt 4: Geometrie aufbauen
         self._send({"type": "progress", "step": "Geometrie wird aufgebaut …", "percent": 70})
@@ -170,9 +182,11 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
         # Fertig
         self._send({"type": "progress", "step": "Abgeschlossen.", "percent": 100})
         self._send({
-            "type":       "success",
-            "analysis":   result_dict,
-            "confidence": result_dict.get("confidence", 0.0),
+            "type":            "success",
+            "analysis":        result_dict,
+            "confidence":      result_dict.get("confidence", 0.0),
+            "modeling_mode":   result_dict.get("modeling_mode", "profile"),
+            "operation_count": len(result_dict.get("operations", [])),
         })
 
     # ── Send helper ───────────────────────────────────────────────────────────
