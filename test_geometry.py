@@ -35,6 +35,8 @@ from DrawingToFusion.core.models import (
     ThreadSpec,
     UndercutSpec,
     GrooveSpec,
+    OperationStep,
+    SketchContour,
 )
 from DrawingToFusion.core.geometry_builder import GeometryBuilder
 
@@ -270,6 +272,106 @@ def run(context):
             log(f"  Revolve-Features: {revolve_count} (erwartet ≥4: Grundkörper + 2 Freistiche + 1 Nut)")
         else:
             log("  ✗ Wellen-Occurrence nicht gefunden")
+
+        # ── Test 3: Stufenkörper (Operations-Modus) ──────────────────────
+        log("═══ Test 3: Stufenkörper (Operations-Modus) ═══")
+
+        stufen_analysis = DrawingAnalysis(
+            unit="mm",
+            extrusion_depth=20.0,
+            confidence=0.9,
+            notes="Stufenkörper aus Dreitafelprojektion",
+            modeling_mode="operations",
+            base_profile=RectangleProfile(width=40, height=60),
+            operations=[
+                OperationStep(
+                    operation="extrude_add",
+                    sketch_plane="XY",
+                    contour=SketchContour(
+                        points=[
+                            [0, 0], [40, 0], [40, 20],
+                            [30, 20], [30, 60], [10, 60],
+                            [10, 20], [0, 20],
+                        ],
+                        closed=True,
+                    ),
+                    depth=20.0,
+                    description="T-Stufenkörper Vorderansicht, 20mm tief",
+                ),
+            ],
+            holes=[],
+            chamfers=[],
+            fillets=[],
+        )
+
+        try:
+            GeometryBuilder().build(stufen_analysis)
+            log("✓ Stufenkörper erfolgreich erstellt")
+        except Exception as exc:
+            log(f"✗ Stufenkörper fehlgeschlagen: {exc}")
+
+        # ── Test 4: Block mit Stufe, Langloch und Bohrung ────────────────
+        log("═══ Test 4: Komplexer Block (Operations-Modus) ═══")
+
+        block_analysis = DrawingAnalysis(
+            unit="mm",
+            extrusion_depth=20.0,
+            confidence=0.85,
+            notes="Block mit Stufe, Langloch, Bohrung",
+            modeling_mode="operations",
+            base_profile=RectangleProfile(width=70, height=50),
+            operations=[
+                OperationStep(
+                    operation="extrude_add",
+                    sketch_plane="XY",
+                    contour=SketchContour(
+                        points=[[0, 0], [70, 0], [70, 50], [0, 50]],
+                        closed=True,
+                    ),
+                    depth=20.0,
+                    description="Grundkörper 70×50×20mm",
+                ),
+                OperationStep(
+                    operation="extrude_cut",
+                    sketch_plane="face_top",
+                    contour=SketchContour(
+                        points=[[0, 0], [55, 0], [55, 7], [0, 7]],
+                        closed=True,
+                    ),
+                    depth=7.0,
+                    direction="negative",
+                    description="Stufe oben absetzen 55×7mm",
+                ),
+                OperationStep(
+                    operation="slot",
+                    sketch_plane="face_front",
+                    slot_width=10.0,
+                    slot_length=15.0,
+                    slot_x=22.0,
+                    slot_y=25.0,
+                    depth=20.0,
+                    description="Langloch 10×15mm mittig",
+                ),
+                OperationStep(
+                    operation="hole",
+                    sketch_plane="face_front",
+                    hole_diameter=10.0,
+                    hole_x=55.0,
+                    hole_y=25.0,
+                    hole_type="through",
+                    description="Durchgangsbohrung Ø10 rechts",
+                ),
+            ],
+            holes=[],
+            chamfers=[],
+            fillets=[],
+        )
+
+        try:
+            GeometryBuilder().build(block_analysis)
+            log("✓ Komplexer Block erfolgreich erstellt")
+        except Exception as exc:
+            log(f"✗ Komplexer Block fehlgeschlagen: {exc}")
 
         log("═══ Alle Tests abgeschlossen ═══")
 
