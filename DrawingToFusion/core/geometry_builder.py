@@ -1065,6 +1065,10 @@ class GeometryBuilder:
     def _op_hole(self, comp, op, f: float, body) -> None:
         """Hole feature positioned by face-matching and modelToSketchSpace."""
         diameter_cm = op.hole_diameter * f
+        self._app.log(
+            f"[DrawingToFusion] Bohrung Ø{op.hole_diameter} bei "
+            f"x={op.hole_x}, y={op.hole_y}, plane={op.sketch_plane}"
+        )
 
         target_face = self._find_best_hole_face(body, op, f)
 
@@ -1075,9 +1079,16 @@ class GeometryBuilder:
             )
             target_face = self._get_sketch_plane(comp, op.sketch_plane, body)
 
+        self._app.log(
+            f"[DrawingToFusion] Gewählte Fläche: normal="
+            f"{target_face.geometry.normal.x:.2f},"
+            f"{target_face.geometry.normal.y:.2f},"
+            f"{target_face.geometry.normal.z:.2f}  area={target_face.area:.4f}"
+        )
+
         sketch = comp.sketches.add(target_face)
 
-        world_point = self._hole_world_point(op, f)
+        world_point = self._hole_world_point(op, f, body)
         sketch_point = sketch.modelToSketchSpace(world_point)
         sp = sketch.sketchPoints.add(sketch_point)
 
@@ -1175,23 +1186,28 @@ class GeometryBuilder:
         """Shell from OperationStep.shell_thickness and shell_remove_face fields."""
         self._apply_shell(comp, body, op.shell_thickness, f)
 
-    def _hole_world_point(self, op, f: float) -> adsk.core.Point3D:
+    def _hole_world_point(self, op, f: float, body=None) -> adsk.core.Point3D:
         """Return the 3D model-space point for a hole centre.
 
         The returned point lies on or near the intended drilling face so that
         modelToSketchSpace() projects it to the correct sketch UV coords.
+        When body is provided the face-axis coordinate is derived from the
+        body bounding box instead of a hardcoded dummy value.
         """
         x = op.hole_x * f
         y = op.hole_y * f
         if op.sketch_plane in ("face_top", "XY"):
             # Draufsicht: hole_x→world-X, hole_y→world-Y; drill along -Z
-            return adsk.core.Point3D.create(x, y, 100.0)
+            z = body.boundingBox.maxPoint.z if body else 0.0
+            return adsk.core.Point3D.create(x, y, z)
         if op.sketch_plane in ("face_front", "XZ"):
             # Vorderansicht: hole_x→world-X, hole_y→world-Z; drill along +Y
-            return adsk.core.Point3D.create(x, 0.0, y)
+            y_val = body.boundingBox.minPoint.y if body else 0.0
+            return adsk.core.Point3D.create(x, y_val, y)
         if op.sketch_plane in ("face_right", "YZ"):
             # Seitenansicht: hole_x→world-Y, hole_y→world-Z; drill along -X
-            return adsk.core.Point3D.create(100.0, x, y)
+            x_val = body.boundingBox.maxPoint.x if body else 0.0
+            return adsk.core.Point3D.create(x_val, x, y)
         return adsk.core.Point3D.create(x, y, 0.0)
 
     def _find_best_hole_face(self, body, op, f: float):
@@ -1199,11 +1215,13 @@ class GeometryBuilder:
 
         Selection strategy:
         1. Face must be planar and axis-aligned to the expected drilling direction.
-        2. The hole centre (from _hole_world_point) must project inside the face
-           bounding box (with a small tolerance).
-        3. Among matching candidates, prefer the face with the largest area —
-           this avoids selecting a narrow ledge (e.g. web top) over a wide
-           flange when both point in the same direction.
+        2. The hole centre must pass an exact containment test via
+           evaluator.getParameterAtPoint() — the re-projected point must be
+           within hole_diameter * 0.6 cm of the test point.
+        3. For face_top/XY, sort by (-z_height, -area) so the topmost face wins
+           when multiple horizontal faces contain the point (L-profile flange).
+        4. If no candidate passes the containment test, fall back to the largest
+           planar face with the correct normal axis.
         """
         axis_map = {
             "face_top":    "z",
@@ -1214,8 +1232,8 @@ class GeometryBuilder:
             "YZ":          "x",
         }
         target_axis = axis_map.get(op.sketch_plane, "z")
-        world_pt = self._hole_world_point(op, f)
-        margin = op.hole_diameter * f / 2.0 * 0.5
+        world_pt = self._hole_world_point(op, f, body)
+        tol = op.hole_diameter * f * 0.6  # containment tolerance
 
         candidates = []
         for face in body.faces:
@@ -1231,34 +1249,58 @@ class GeometryBuilder:
             if target_axis == "x" and abs(abs(normal.x) - 1.0) > 0.01:
                 continue
 
-            bb = face.boundingBox
+            # Project the world point onto the face plane, then re-evaluate
+            evaluator = face.evaluator
+            ok, param = evaluator.getParameterAtPoint(world_pt)
+            if not ok:
+                continue
+            ok2, surface_pt = evaluator.getPointAtParameter(param)
+            if not ok2:
+                continue
+            dist = world_pt.distanceTo(surface_pt)
+            self._app.log(
+                f"[DrawingToFusion]   Fläche normal="
+                f"{normal.x:.2f},{normal.y:.2f},{normal.z:.2f} "
+                f"area={face.area:.4f}  dist={dist:.4f}  tol={tol:.4f}"
+            )
+            if dist > tol:
+                continue
+
             if target_axis == "z":
-                if (world_pt.x < bb.minPoint.x - margin or
-                        world_pt.x > bb.maxPoint.x + margin or
-                        world_pt.y < bb.minPoint.y - margin or
-                        world_pt.y > bb.maxPoint.y + margin):
-                    continue
-            elif target_axis == "y":
-                if (world_pt.x < bb.minPoint.x - 0.01 or
-                        world_pt.x > bb.maxPoint.x + 0.01 or
-                        world_pt.z < bb.minPoint.z - 0.01 or
-                        world_pt.z > bb.maxPoint.z + 0.01):
-                    continue
-            else:  # x
-                if (world_pt.y < bb.minPoint.y - 0.01 or
-                        world_pt.y > bb.maxPoint.y + 0.01 or
-                        world_pt.z < bb.minPoint.z - 0.01 or
-                        world_pt.z > bb.maxPoint.z + 0.01):
-                    continue
+                # height of face used for sorting: prefer topmost face
+                height = face.boundingBox.maxPoint.z
+                candidates.append((-height, -face.area, face))
+            else:
+                candidates.append((0.0, -face.area, face))
 
-            candidates.append(face)
+        if candidates:
+            candidates.sort(key=lambda t: (t[0], t[1]))
+            return candidates[0][2]
 
-        if not candidates:
-            return None
+        self._app.log(
+            "[DrawingToFusion] Kein exakter Treffer — verwende Fallback-Fläche"
+        )
+        return self._fallback_hole_face(body, target_axis)
 
-        # Largest area → most likely the main drilling surface
-        candidates.sort(key=lambda face: face.area, reverse=True)
-        return candidates[0]
+    def _fallback_hole_face(self, body, normal_axis: str):
+        """Return the largest planar face whose normal aligns with normal_axis."""
+        best = None
+        best_area = -1.0
+        for face in body.faces:
+            geo = face.geometry
+            if not isinstance(geo, adsk.core.Plane):
+                continue
+            n = geo.normal
+            if normal_axis == "z" and abs(abs(n.z) - 1.0) > 0.01:
+                continue
+            if normal_axis == "y" and abs(abs(n.y) - 1.0) > 0.01:
+                continue
+            if normal_axis == "x" and abs(abs(n.x) - 1.0) > 0.01:
+                continue
+            if face.area > best_area:
+                best_area = face.area
+                best = face
+        return best
 
     def _add_closed_polyline(self, sketch, pts: list) -> None:
         lines = sketch.sketchCurves.sketchLines
