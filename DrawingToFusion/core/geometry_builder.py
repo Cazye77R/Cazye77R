@@ -39,6 +39,11 @@ class GeometryBuilder:
     # ──────────────────────────────────────────────────────────────────────
 
     def build(self, analysis: DrawingAnalysis) -> None:
+        if (getattr(analysis, 'modeling_mode', 'profile') == "operations"
+                and getattr(analysis, 'operations', None)):
+            self._build_from_operations(analysis)
+            return
+
         if analysis.base_profile is None:
             raise ValueError(
                 "DrawingAnalysis enthält kein base_profile — Aufbau abgebrochen."
@@ -897,6 +902,262 @@ class GeometryBuilder:
         t_vi = adsk.core.ValueInput.createByReal(self._cm(thickness, factor))
         shell_input = comp.features.shellFeatures.createInput(faces_to_remove, t_vi)
         comp.features.shellFeatures.add(shell_input)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Operations-Modus
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _build_from_operations(self, analysis: DrawingAnalysis) -> None:
+        """Build the part step by step from the operations list."""
+        comp = self._make_component()
+        f = analysis.to_cm_factor()
+        body = None
+
+        for i, op in enumerate(analysis.operations):
+            try:
+                self._app.log(
+                    f"[DrawingToFusion] Operation {i+1}/{len(analysis.operations)}: "
+                    f"{op.operation} — {op.description}"
+                )
+                if op.operation == "extrude_add":
+                    body = self._op_extrude(comp, op, f, body, cut=False)
+                elif op.operation == "extrude_cut":
+                    if body is None:
+                        self._app.log(
+                            "[DrawingToFusion] WARNUNG — extrude_cut ohne Grundkörper, überspringe"
+                        )
+                        continue
+                    body = self._op_extrude(comp, op, f, body, cut=True)
+                elif op.operation == "hole":
+                    if body is None:
+                        continue
+                    self._op_hole(comp, op, f, body)
+                elif op.operation == "slot":
+                    if body is None:
+                        continue
+                    self._op_slot(comp, op, f, body)
+                elif op.operation == "chamfer":
+                    if body is None:
+                        continue
+                    self._op_chamfer(comp, op, f, body)
+                elif op.operation == "fillet":
+                    if body is None:
+                        continue
+                    self._op_fillet(comp, op, f, body)
+                elif op.operation == "shell":
+                    if body is None:
+                        continue
+                    self._op_shell(comp, op, f, body)
+                else:
+                    self._app.log(
+                        f"[DrawingToFusion] Unbekannte Operation '{op.operation}', überspringe"
+                    )
+            except Exception as exc:
+                self._app.log(
+                    f"[DrawingToFusion] Operation {i+1} ({op.operation}) fehlgeschlagen: {exc}"
+                )
+
+    def _get_sketch_plane(self, comp, plane_str: str, body=None):
+        """Return the construction plane or BRepFace for the given sketch plane string."""
+        if plane_str == "XY":
+            return comp.xYConstructionPlane
+        if plane_str == "XZ":
+            return comp.xZConstructionPlane
+        if plane_str == "YZ":
+            return comp.yZConstructionPlane
+        if plane_str.startswith("face_") and body is not None:
+            face = self._find_face_by_direction(body, plane_str)
+            if face is not None:
+                return face
+        return comp.xYConstructionPlane
+
+    def _find_face_by_direction(self, body, direction: str):
+        """Return the BRepFace whose outward normal best matches the given direction."""
+        best_face = None
+        best_score = -2.0
+        for face in body.faces:
+            try:
+                ev = face.evaluator
+                ok, normal = ev.getNormalAtPoint(face.centroid)
+                if not ok:
+                    continue
+                if direction == "face_top":
+                    score = normal.z
+                elif direction == "face_bottom":
+                    score = -normal.z
+                elif direction == "face_front":
+                    score = -normal.y
+                elif direction == "face_back":
+                    score = normal.y
+                elif direction == "face_right":
+                    score = normal.x
+                elif direction == "face_left":
+                    score = -normal.x
+                else:
+                    continue
+                if score > best_score or (
+                    abs(score - best_score) < 1e-6
+                    and face.area > (best_face.area if best_face else 0)
+                ):
+                    best_score = score
+                    best_face = face
+            except Exception:
+                continue
+        return best_face
+
+    def _op_extrude(self, comp, op, f: float, body, cut: bool):
+        """Extrude add or cut a closed contour from OperationStep.contour."""
+        plane = self._get_sketch_plane(comp, op.sketch_plane, body)
+        sketch = comp.sketches.add(plane)
+        lines = sketch.sketchCurves.sketchLines
+
+        pts = op.contour.points if op.contour else []
+        if len(pts) < 3:
+            raise ValueError(
+                f"Kontur braucht mindestens 3 Punkte, hat {len(pts)}"
+            )
+
+        for j in range(len(pts)):
+            p1 = pts[j]
+            p2 = pts[(j + 1) % len(pts)]
+            lines.addByTwoPoints(
+                adsk.core.Point3D.create(float(p1[0]) * f, float(p1[1]) * f, 0),
+                adsk.core.Point3D.create(float(p2[0]) * f, float(p2[1]) * f, 0),
+            )
+
+        prof = self._largest_profile(sketch)
+
+        extrudes = comp.features.extrudeFeatures
+        depth_cm = op.depth * f
+
+        if cut:
+            operation = adsk.fusion.FeatureOperations.CutFeatureOperation
+        elif body is None:
+            operation = adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+        else:
+            operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
+
+        ext_input = extrudes.createInput(prof, operation)
+
+        if op.direction == "symmetric":
+            ext_input.setSymmetricExtent(
+                adsk.core.ValueInput.createByReal(abs(depth_cm) / 2), True
+            )
+        else:
+            dir_enum = (
+                adsk.fusion.ExtentDirections.NegativeExtentDirection
+                if op.direction == "negative"
+                else adsk.fusion.ExtentDirections.PositiveExtentDirection
+            )
+            distance = adsk.fusion.DistanceExtentDefinition.create(
+                adsk.core.ValueInput.createByReal(abs(depth_cm))
+            )
+            ext_input.setOneSideExtent(distance, dir_enum)
+
+        if cut and body is not None:
+            ext_input.participantBodies = [body]
+
+        feat = extrudes.add(ext_input)
+        if feat.bodies.count > 0:
+            return feat.bodies.item(0)
+        return body
+
+    def _op_hole(self, comp, op, f: float, body) -> None:
+        """Hole feature from OperationStep.hole_* fields."""
+        plane = self._get_sketch_plane(comp, op.sketch_plane, body)
+        hole_sk = comp.sketches.add(plane)
+        sp = hole_sk.sketchPoints.add(
+            adsk.core.Point3D.create(op.hole_x * f, op.hole_y * f, 0)
+        )
+        pt_col = adsk.core.ObjectCollection.create()
+        pt_col.add(sp)
+
+        dia_vi = adsk.core.ValueInput.createByReal(op.hole_diameter * f)
+        hole_feats = comp.features.holeFeatures
+        hole_input = hole_feats.createSimpleInput(dia_vi)
+        hole_input.setPositionBySketchPoints(pt_col)
+        hole_input.isDefaultDirection = True
+        hole_input.participantBodies = adsk.core.ObjectCollection.createWithArray([body])
+
+        if op.hole_type != "through" and op.hole_depth > 0:
+            hole_input.depth = adsk.core.ValueInput.createByReal(op.hole_depth * f)
+
+        hole_feats.add(hole_input)
+
+    def _op_slot(self, comp, op, f: float, body) -> None:
+        """Oblong (stadium-shape) slot cut from OperationStep.slot_* fields."""
+        plane = self._get_sketch_plane(comp, op.sketch_plane, body)
+        sketch = comp.sketches.add(plane)
+
+        cx = op.slot_x * f
+        cy = op.slot_y * f
+        r  = op.slot_width * f / 2
+        straight = max(op.slot_length * f - op.slot_width * f, 0.0)
+        half_s = straight / 2
+
+        lines = sketch.sketchCurves.sketchLines
+        arcs  = sketch.sketchCurves.sketchArcs
+
+        # Upper semicircle: start=(cx-r, cy+half_s), sweep=+π (CCW)
+        arcs.addByCenterStartSweep(
+            adsk.core.Point3D.create(cx, cy + half_s, 0),
+            adsk.core.Point3D.create(cx - r, cy + half_s, 0),
+            math.pi,
+        )
+        # Lower semicircle: start=(cx+r, cy-half_s), sweep=+π (CCW)
+        arcs.addByCenterStartSweep(
+            adsk.core.Point3D.create(cx, cy - half_s, 0),
+            adsk.core.Point3D.create(cx + r, cy - half_s, 0),
+            math.pi,
+        )
+        if straight > 1e-6:
+            lines.addByTwoPoints(
+                adsk.core.Point3D.create(cx - r, cy + half_s, 0),
+                adsk.core.Point3D.create(cx - r, cy - half_s, 0),
+            )
+            lines.addByTwoPoints(
+                adsk.core.Point3D.create(cx + r, cy - half_s, 0),
+                adsk.core.Point3D.create(cx + r, cy + half_s, 0),
+            )
+
+        prof = self._largest_profile(sketch)
+        if not prof:
+            return
+
+        extrudes = comp.features.extrudeFeatures
+        ext_input = extrudes.createInput(
+            prof, adsk.fusion.FeatureOperations.CutFeatureOperation
+        )
+        distance = adsk.fusion.DistanceExtentDefinition.create(
+            adsk.core.ValueInput.createByReal(
+                op.depth * f if op.depth > 0 else 100.0  # 100 cm >> any body
+            )
+        )
+        ext_input.setOneSideExtent(
+            distance, adsk.fusion.ExtentDirections.PositiveExtentDirection
+        )
+        ext_input.participantBodies = [body]
+        extrudes.add(ext_input)
+
+    def _op_chamfer(self, comp, op, f: float, body) -> None:
+        """Chamfer from OperationStep.edge_selection and size fields."""
+        self._add_chamfers(
+            comp, body,
+            [ChamferSpec(edge=op.edge_selection, distance=op.size)],
+            f, [],
+        )
+
+    def _op_fillet(self, comp, op, f: float, body) -> None:
+        """Fillet from OperationStep.edge_selection and size fields."""
+        self._add_fillets(
+            comp, body,
+            [FilletSpec(edge=op.edge_selection, radius=op.size)],
+            f, [],
+        )
+
+    def _op_shell(self, comp, op, f: float, body) -> None:
+        """Shell from OperationStep.shell_thickness and shell_remove_face fields."""
+        self._apply_shell(comp, body, op.shell_thickness, f)
 
     def _add_closed_polyline(self, sketch, pts: list) -> None:
         lines = sketch.sketchCurves.sketchLines
