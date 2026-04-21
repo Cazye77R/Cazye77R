@@ -182,6 +182,20 @@ wie sie in Fusion 360 ausgeführt werden. Jeder Schritt hat:
 3. "hole" — Bohrung (einfacher als Sketch-basierter Cut)
    Pflicht: hole_diameter, hole_x, hole_y, sketch_plane
    hole_type: "through" oder "blind" (dann hole_depth angeben)
+   Für Bohrungen im Operations-Modus:
+   - sketch_plane bestimmt die BOHRRICHTUNG, nicht nur die Ebene:
+     * "face_top": Bohrung geht von OBEN nach UNTEN (Z-Achse)
+       → hole_x/hole_y sind Koordinaten aus der DRAUFSICHT
+     * "face_front": Bohrung geht von VORNE nach HINTEN (Y-Achse)
+       → hole_x/hole_y sind Koordinaten aus der VORDERANSICHT
+     * "face_right": Bohrung geht von RECHTS nach LINKS (X-Achse)
+   - Bestimme sketch_plane anhand der Ansicht in der die Bohrung
+     als KREIS sichtbar ist (nicht als gestrichelte Linie)
+   - Wenn die Bohrung in der Draufsicht als Kreis erscheint → face_top
+   - Wenn die Bohrung in der Vorderansicht als Kreis erscheint → face_front
+   - hole_type "through" bei L-Profilen: Die Bohrung durchdringt
+     nur den Flansch, nicht den gesamten Körper — trotzdem "through"
+     verwenden, Fusion's AllExtent stoppt am Materialende
 
 4. "slot" — Langloch (Oblong-Durchbruch)
    Pflicht: slot_width, slot_length, slot_x, slot_y, depth, sketch_plane
