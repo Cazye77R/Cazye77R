@@ -28,8 +28,13 @@ if _REPO_ROOT not in sys.path:
 from DrawingToFusion.core.models import (
     DrawingAnalysis,
     RectangleProfile,
+    RevolutionProfile,
+    RevolutionStep,
     HoleSpec,
     ChamferSpec,
+    ThreadSpec,
+    UndercutSpec,
+    GrooveSpec,
 )
 from DrawingToFusion.core.geometry_builder import GeometryBuilder
 
@@ -172,6 +177,101 @@ def run(context):
             f"Bounding-Box Z erwartet ~20 mm, ist {size_z} mm.",
         )
         log("Bounding-Box-Prüfung (100×60×20 mm ±Toleranz)  ✓")
+
+        # ── Test 2: Stufenwelle mit Gewinde, Freistich, Einstich ─────────
+        log("═══ Test 2: Stufenwelle mit Features ═══")
+
+        shaft_analysis = DrawingAnalysis(
+            unit="mm",
+            view="multi",
+            base_profile=RevolutionProfile(
+                steps=[
+                    RevolutionStep(diameter=30, length=40),   # Step 0: Ø30×40 mm (Gewindezapfen)
+                    RevolutionStep(diameter=40, length=50),   # Step 1: Ø40×50 mm (Lagersitz)
+                    RevolutionStep(diameter=25, length=30),   # Step 2: Ø25×30 mm (Abtrieb)
+                ],
+                bore_diameter=0,
+            ),
+            extrusion_depth=120.0,
+            holes=[],
+            chamfers=[],
+            fillets=[],
+            threads=[
+                ThreadSpec(
+                    designation="M30x2",
+                    thread_type="metric_fine",
+                    start_position=5.0,
+                    length=25.0,
+                    step_index=0,
+                    pitch=2.0,
+                ),
+            ],
+            undercuts=[
+                UndercutSpec(
+                    undercut_type="DIN509_E",
+                    position=38.0,
+                    step_index=0,
+                    width=2.5,
+                    depth=0.3,
+                    radius=0.2,
+                ),
+                UndercutSpec(
+                    undercut_type="DIN509_E",
+                    position=88.0,
+                    step_index=1,
+                    width=2.0,
+                    depth=0.2,
+                    radius=0.1,
+                ),
+            ],
+            grooves=[
+                GrooveSpec(
+                    groove_type="circlip_din471",
+                    position=105.0,
+                    width=1.8,
+                    depth=1.1,
+                    step_index=2,
+                ),
+            ],
+            confidence=0.85,
+            notes="Teststufenwelle mit 3 Absätzen",
+        )
+
+        try:
+            GeometryBuilder().build(shaft_analysis)
+            log("Stufenwelle erfolgreich erstellt  ✓")
+        except Exception as exc:
+            log(f"Stufenwelle fehlgeschlagen: {exc}")
+
+        # Prüfungen für Test 2
+        occs_t2 = root.occurrences.count
+        if occs_t2 >= 2:
+            occ_t2  = root.occurrences.item(occs_t2 - 1)
+            comp_t2 = occ_t2.component
+            bodies_t2 = comp_t2.bRepBodies
+            if bodies_t2.count > 0:
+                body_t2 = bodies_t2.item(0)
+                bb2 = body_t2.boundingBox
+                total_length_mm = round((bb2.maxPoint.x - bb2.minPoint.x) * 10, 1)
+                max_diam_mm     = round(
+                    max(
+                        (bb2.maxPoint.y - bb2.minPoint.y),
+                        (bb2.maxPoint.z - bb2.minPoint.z),
+                    ) * 10, 1
+                )
+                log(f"  Gesamtlänge  : {total_length_mm} mm (erwartet ~120)")
+                log(f"  Max. Ø       : {max_diam_mm} mm (erwartet ~40)")
+            else:
+                log("  ✗ Kein Body in Wellen-Komponente")
+
+            thread_count  = comp_t2.features.threadFeatures.count
+            revolve_count = comp_t2.features.revolveFeatures.count
+            log(f"  Thread-Features : {thread_count} (erwartet 1)")
+            log(f"  Revolve-Features: {revolve_count} (erwartet ≥4: Grundkörper + 2 Freistiche + 1 Nut)")
+        else:
+            log("  ✗ Wellen-Occurrence nicht gefunden")
+
+        log("═══ Alle Tests abgeschlossen ═══")
 
         # ── Ergebnis-Dialog ───────────────────────────────────────────────
         log_text = "\n".join(f"  {l}" for l in log_lines)
