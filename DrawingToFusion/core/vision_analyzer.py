@@ -423,6 +423,10 @@ Antworte NUR mit validem JSON ohne Markdown-Backticks:
       "threads": [],
       "undercuts": [],
       "grooves": [],
+      "contour_points": [[0,0], [100,0], [100,60], [0,60]],
+      "visible_features": ["rechteckige_aussenkante"],
+      "hidden_features": [],
+      "depth_from_this_view": 0.0,
       "features": "Freitext fuer nicht schematisierbare Details"
     },
     "side": {
@@ -438,6 +442,10 @@ Antworte NUR mit validem JSON ohne Markdown-Backticks:
       "threads": [],
       "undercuts": [],
       "grooves": [],
+      "contour_points": [[0,0], [20,0], [20,60], [0,60]],
+      "visible_features": [],
+      "hidden_features": [],
+      "depth_from_this_view": 20.0,
       "features": ""
     },
     "top": {
@@ -453,10 +461,23 @@ Antworte NUR mit validem JSON ohne Markdown-Backticks:
       "threads": [],
       "undercuts": [],
       "grooves": [],
+      "contour_points": [[0,0], [100,0], [100,20], [0,20]],
+      "visible_features": [],
+      "hidden_features": [],
+      "depth_from_this_view": 0.0,
       "features": ""
     }
   }
 }
+
+Neue Felder pro Ansicht:
+- contour_points: Äußere Kontur dieser Ansicht als [[x,y],...] Punktliste (Einheit wie "unit")
+  Für nicht-rechteckige Konturen alle Eckpunkte im Uhrzeigersinn angeben.
+  Für einfache Rechtecke: 4 Eckpunkte. Für Stufenkonturen: alle Stufen-Eckpunkte.
+- visible_features: Sichtbare Geometrie-Elemente als Textliste (Volllinien), z.B. ["stufe_oben", "bohrung_links"]
+- hidden_features: Verdeckte Elemente (gestrichelte Linien), z.B. ["nut_hinten", "sackloch_mitte"]
+- depth_from_this_view: Tiefe die DIESE Ansicht für den Körper liefert (0.0 wenn nicht direkt ablesbar)
+  Seitenansicht liefert typischerweise die Extrusionstiefe des Grundkörpers.
 
 Fuer L-Profile (profile_type="l") und T-Profile (profile_type="t") in der FRONTANSICHT:
   flange_height  = Hoehe des horizontalen Flansches (Grundplatte), z.B. 20.0
@@ -488,6 +509,20 @@ Regeln:
 - Alle Masse in der in "unit" angegebenen Einheit
 - holes[].depth: "through" | "blind"
 - Fehlende Masse als 0.0, fehlende Listen als []
+
+Positions-basierte Ansichtserkennung (Erste-Winkel-Projektion / Dritte-Winkel):
+- Deutsche Zeichnungen verwenden meist ERSTE-WINKEL-PROJEKTION (DIN/ISO):
+  Seitenansicht RECHTS zeigt die LINKE Seite des Teils
+  Draufsicht UNTEN zeigt das Teil von OBEN
+- Amerikanische Zeichnungen: DRITTE-WINKEL-PROJEKTION:
+  Seitenansicht RECHTS zeigt die RECHTE Seite
+  Draufsicht OBEN zeigt das Teil von OBEN
+- Prüfe das Projektionssymbol im Schriftfeld (Kegelstumpf) wenn vorhanden
+- Default für deutsche Zeichnungen: Erste-Winkel-Projektion
+
+Isometrische/axonometrische Ansichten (3D-Schrägbild) sind KEINE
+Projektionsansichten — sie dienen nur der Visualisierung. Maße daraus
+nur verwenden wenn sie explizit bemaßt sind.
 """
 
 _CONSOLIDATION_SCHEMA = """\
@@ -609,6 +644,51 @@ _CONSOLIDATION_SCHEMA_L = """\
   "notes": "L-Profil (Winkelstahl) aus N Ansichten konsolidiert."
 }\
 """
+
+_CONSOLIDATION_SCHEMA_OPERATIONS = """\
+{
+  "unit": "mm",
+  "view": "multi",
+  "modeling_mode": "operations",
+  "base_profile": {"type": "none"},
+  "extrusion_depth": 0.0,
+  "holes": [],
+  "chamfers": [],
+  "fillets": [],
+  "threads": [],
+  "undercuts": [],
+  "grooves": [],
+  "operations": [
+    {
+      "operation": "extrude_add",
+      "sketch_plane": "XY",
+      "contour": {
+        "points": [[0,0],[100,0],[100,20],[30,20],[30,60],[70,60],[70,20],[100,20],[100,0]],
+        "closed": true
+      },
+      "depth": 20.0,
+      "description": "Grundkörper aus Vorderansicht-Kontur, Tiefe aus Seitenansicht"
+    }
+  ],
+  "confidence": 0.9,
+  "notes": "Operations-Modus: nicht-rechteckige Kontur erkannt. Aus N Ansichten konsolidiert."
+}\
+"""
+
+
+def _has_complex_contour(pts: list) -> bool:
+    """Return True when pts represents a non-rectangular (and non-empty) contour."""
+    if not pts:
+        return False
+    if len(pts) > 4:
+        return True
+    if len(pts) == 4:
+        xs = [p[0] for p in pts if isinstance(p, (list, tuple)) and len(p) >= 2]
+        ys = [p[1] for p in pts if isinstance(p, (list, tuple)) and len(p) >= 2]
+        if len(xs) != 4:
+            return False
+        return not (len(set(xs)) == 2 and len(set(ys)) == 2)
+    return False
 
 
 class VisionAnalyzer:
@@ -823,6 +903,13 @@ class VisionAnalyzer:
         is_revolution = bool(profile_types & {"revolution", "lathe", "shaft", "welle"})
         is_t_profile  = bool(profile_types & {"t", "tprofile"})
         is_l_profile  = bool(profile_types & {"l", "lprofile"})
+        is_operations = (
+            not is_revolution
+            and any(
+                _has_complex_contour(v.get("contour_points", []))
+                for v in views.values()
+            )
+        )
 
         if is_revolution:
             schema = _CONSOLIDATION_SCHEMA_REVOLUTION
@@ -883,6 +970,22 @@ class VisionAnalyzer:
                 "   - extrusion_depth = Laenge des Profils (aus der Seitenansicht)\n"
                 "   - WICHTIG: Uebernehme flange_height und web_thickness direkt aus\n"
                 "     den Frontansicht-Werten\n\n"
+            )
+        elif is_operations:
+            schema = _CONSOLIDATION_SCHEMA_OPERATIONS
+            extra_rules = (
+                "5. Dieses Bauteil hat eine NICHT-RECHTECKIGE Kontur → Operations-Modus:\n"
+                "   - modeling_mode = 'operations'\n"
+                "   - base_profile = {'type': 'none'}, extrusion_depth = 0\n"
+                "   - Nutze contour_points der FRONTANSICHT als Grundkörper-Kontur für den\n"
+                "     ersten extrude_add-Schritt\n"
+                "   - depth des ersten Schritts = depth_from_this_view der SEITENANSICHT\n"
+                "   - Weitere Schritte: extrude_cut / hole / slot für alle erkannten Features\n"
+                "     (visible_features und hidden_features der jeweiligen Ansichten)\n"
+                "   - Gestrichelte Linien einer Ansicht → hidden_features → als extrude_cut\n"
+                "     oder hole von der gegenüberliegenden Seite modellieren\n"
+                "   - Wenn die Frontkontur das vollständige Profil zeigt und die Tiefe überall\n"
+                "     gleich ist: eine einzelne extrude_add mit der vollen Kontur bevorzugen\n\n"
             )
         else:
             schema = _CONSOLIDATION_SCHEMA
