@@ -209,6 +209,26 @@ Erlaubte Werte:
 # ── Multi-view prompts ─────────────────────────────────────────────────────────
 
 _MULTIVIEW_EXTRACTION_PROMPT = """\
+### Ansichtserkennung OHNE Textlabels
+
+Wenn die Zeichnung keine Beschriftungen wie "Ansicht A" oder "Vorderansicht" hat, bestimme die Ansichten anhand ihrer Position und ihres Inhalts:
+
+1. VORDERANSICHT: Die größte Ansicht mit der meisten Bemaßung. Zeigt die Hauptkontur.
+2. SEITENANSICHT: Rechts neben der Vorderansicht auf gleicher Höhe. Zeigt die Tiefe/Extrusion.
+3. DRAUFSICHT: Über der Vorderansicht auf gleicher Breite. Zeigt die Breite von oben.
+4. LÄNGSSCHNITT (bei Rotationsteilen): Ansicht mit Strichpunktlinie (Mittellinie) — zeigt die halbe Kontur über/unter der Drehachse. Alle Durchmesser als Ø-Maße, Längen horizontal.
+5. STIRNANSICHT: Einzelner Kreis mit konzentrischen Ringen = Blick auf die Wellenachse.
+
+Für Wellen/Achsen/Spindeln speziell:
+- Der Längsschnitt zeigt die HALBE Kontur über der Mittellinie
+- Durchmesser stehen als Ø-Maße (= voller Durchmesser, NICHT Radius)
+- Gewinde: dünne Linien parallel zur Kontur + M-/Tr-/G-Maßangabe
+- Freistiche: kleine Einkerbungen an jedem Absatzübergang
+- Einstiche: schmale Rechteck-Vertiefungen in der Kontur
+- Alle drei Feature-Typen in die per-View-Daten aufnehmen
+
+---
+
 Analysiere diese technische Zeichnung auf Mehrfachansichten.
 
 Schritt 1: Erkenne ob die Zeichnung mehrere Ansichten enthält (Vorder-, Seiten-, Draufsicht).
@@ -230,6 +250,9 @@ Antworte NUR mit validem JSON ohne Markdown-Backticks:
       "holes": [{"x": 15.0, "y": 15.0, "diameter": 8.0, "depth": "through"}],
       "chamfers": [{"edge": "top-front", "distance": 2.0}],
       "fillets": [],
+      "threads": [],
+      "undercuts": [],
+      "grooves": [],
       "features": "Freitext fuer nicht schematisierbare Details"
     },
     "side": {
@@ -242,6 +265,9 @@ Antworte NUR mit validem JSON ohne Markdown-Backticks:
       "holes": [],
       "chamfers": [],
       "fillets": [],
+      "threads": [],
+      "undercuts": [],
+      "grooves": [],
       "features": ""
     },
     "top": {
@@ -254,6 +280,9 @@ Antworte NUR mit validem JSON ohne Markdown-Backticks:
       "holes": [],
       "chamfers": [],
       "fillets": [],
+      "threads": [],
+      "undercuts": [],
+      "grooves": [],
       "features": ""
     }
   }
@@ -315,6 +344,9 @@ _CONSOLIDATION_SCHEMA = """\
   ],
   "chamfers": [{"edge": "top-front", "distance": 2.0}],
   "fillets":  [{"edge": "bottom-left", "radius": 3.0}],
+  "threads":  [],
+  "undercuts": [],
+  "grooves":  [],
   "confidence": 0.9,
   "notes": "Masse aus N Ansichten konsolidiert. Widersprueche: ..."
 }\
@@ -339,6 +371,18 @@ _CONSOLIDATION_SCHEMA_REVOLUTION = """\
   "holes": [],
   "chamfers": [{"edge": "step", "distance": 2.0}],
   "fillets":  [],
+  "threads":  [
+    {"designation": "M12", "thread_type": "metric", "start_position": 0.0,
+     "length": 20.0, "step_index": 0, "pitch": 0.0, "hand": "right", "internal": false}
+  ],
+  "undercuts": [
+    {"undercut_type": "DIN509_E", "position": 0.0, "step_index": 0,
+     "width": 0.0, "depth": 0.0, "radius": 0.0}
+  ],
+  "grooves":  [
+    {"groove_type": "circlip_din471", "position": 0.0, "width": 0.0,
+     "depth": 0.0, "step_index": 0}
+  ],
   "confidence": 0.9,
   "notes": "Welle aus N Ansichten konsolidiert. Gesamtlaenge = Summe aller steps.length."
 }\
@@ -362,6 +406,9 @@ _CONSOLIDATION_SCHEMA_T = """\
   "holes": [],
   "chamfers": [{"edge": "top-front", "distance": 2.0}],
   "fillets":  [],
+  "threads":  [],
+  "undercuts": [],
+  "grooves":  [],
   "confidence": 0.9,
   "notes": "T-Profil aus N Ansichten konsolidiert."
 }\
@@ -385,6 +432,9 @@ _CONSOLIDATION_SCHEMA_L = """\
   "holes": [],
   "chamfers": [{"edge": "top-front", "distance": 2.0}],
   "fillets":  [],
+  "threads":  [],
+  "undercuts": [],
+  "grooves":  [],
   "confidence": 0.9,
   "notes": "L-Profil (Winkelstahl) aus N Ansichten konsolidiert."
 }\
@@ -617,7 +667,15 @@ class VisionAnalyzer:
                 "   - WICHTIG: Summe aller steps.length MUSS = extrusion_depth sein\n"
                 "   - bore_diameter nur setzen wenn eine durchgehende Innenbohrung vorhanden\n"
                 "   - Die Frontansicht (konzentrische Kreise) bestaetigt nur die Durchmesser,\n"
-                "     liefert aber KEINE Laengeninformation\n\n"
+                "     liefert aber KEINE Laengeninformation\n"
+                "   - Konsolidiere threads aus ALLEN Ansichten; der Laengsschnitt hat die\n"
+                "     genauesten Positionsdaten — bevorzuge ihn bei Widerspruechen\n"
+                "   - Konsolidiere undercuts: pruefe jeden Absatzuebergang der steps-Liste\n"
+                "     auf erkannte Freistiche und weise sie dem richtigen step_index zu\n"
+                "   - Konsolidiere grooves: Position und Breite aus dem Laengsschnitt,\n"
+                "     Tiefe ggf. aus der Stirnansicht\n"
+                "   - Dedupliziere: Wenn der gleiche Thread/Undercut/Groove in mehreren\n"
+                "     Ansichten erkannt wurde, behalte die Version mit den meisten Massangaben\n\n"
             )
         elif is_t_profile:
             schema = _CONSOLIDATION_SCHEMA_T
