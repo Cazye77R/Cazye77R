@@ -19,4 +19,6 @@ from .models import (
     SlotProfile,
     PolygonProfile,
     CompositeProfile,
+    SketchContour,
+    OperationStep,
 )

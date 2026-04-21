@@ -158,6 +158,73 @@ class CompositeProfile(BaseProfile):
 
 
 # ---------------------------------------------------------------------------
+# Operation model — step-by-step build sequence
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SketchContour:
+    """2D-Kontur als Punktliste für Sketch-Erstellung."""
+    points: list = field(default_factory=list)
+    closed: bool = True
+
+    @staticmethod
+    def from_dict(d: dict) -> "SketchContour":
+        return SketchContour(
+            points=d.get("points", []),
+            closed=d.get("closed", True),
+        )
+
+
+@dataclass
+class OperationStep:
+    """Ein einzelner Modellierungsschritt in der Build-Sequenz."""
+    operation: str = "extrude_add"
+    sketch_plane: str = "XY"
+    contour: Optional[SketchContour] = None
+    depth: float = 0.0
+    direction: str = "positive"
+    description: str = ""
+    hole_diameter: float = 0.0
+    hole_x: float = 0.0
+    hole_y: float = 0.0
+    hole_type: str = "through"
+    hole_depth: float = 0.0
+    slot_width: float = 0.0
+    slot_length: float = 0.0
+    slot_x: float = 0.0
+    slot_y: float = 0.0
+    edge_selection: str = "top"
+    size: float = 0.0
+    shell_thickness: float = 0.0
+    shell_remove_face: str = "top"
+
+    @staticmethod
+    def from_dict(d: dict) -> "OperationStep":
+        contour_data = d.get("contour")
+        return OperationStep(
+            operation=d.get("operation", "extrude_add"),
+            sketch_plane=d.get("sketch_plane", "XY"),
+            contour=SketchContour.from_dict(contour_data) if contour_data else None,
+            depth=float(d.get("depth", 0)),
+            direction=d.get("direction", "positive"),
+            description=d.get("description", ""),
+            hole_diameter=float(d.get("hole_diameter", 0)),
+            hole_x=float(d.get("hole_x", 0)),
+            hole_y=float(d.get("hole_y", 0)),
+            hole_type=d.get("hole_type", "through"),
+            hole_depth=float(d.get("hole_depth", 0)),
+            slot_width=float(d.get("slot_width", 0)),
+            slot_length=float(d.get("slot_length", 0)),
+            slot_x=float(d.get("slot_x", 0)),
+            slot_y=float(d.get("slot_y", 0)),
+            edge_selection=d.get("edge_selection", "top"),
+            size=float(d.get("size", 0)),
+            shell_thickness=float(d.get("shell_thickness", 0)),
+            shell_remove_face=d.get("shell_remove_face", "top"),
+        )
+
+
+# ---------------------------------------------------------------------------
 # DrawingAnalysis — top-level result returned by VisionAnalyzer
 # ---------------------------------------------------------------------------
 
@@ -197,6 +264,8 @@ class DrawingAnalysis:
     threads: list = field(default_factory=list)    # List[ThreadSpec]
     undercuts: list = field(default_factory=list)  # List[UndercutSpec]
     grooves: list = field(default_factory=list)    # List[GrooveSpec]
+    operations: list = field(default_factory=list) # List[OperationStep]
+    modeling_mode: str = "profile"                 # "profile" | "operations"
 
     # ------------------------------------------------------------------
     # Helpers
@@ -278,6 +347,8 @@ class DrawingAnalysis:
             threads=threads,
             undercuts=undercuts,
             grooves=grooves,
+            operations=[OperationStep.from_dict(op) for op in data.get("operations", []) if op],
+            modeling_mode=str(data.get("modeling_mode", "profile")),
         )
 
 
