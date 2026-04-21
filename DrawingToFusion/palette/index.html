@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DrawingToFusion</title>
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg0:      #0d0d1a;
+      --bg1:      #1a1a2e;
+      --bg2:      #16213e;
+      --bg3:      #0f3460;
+      --accent:   #00b4d8;
+      --accent2:  #0077b6;
+      --ok:       #2dc653;
+      --warn:     #f4a261;
+      --err:      #e63946;
+      --text:     #cad3e0;
+      --muted:    #6b7a8d;
+      --border:   #2a3550;
+      --radius:   6px;
+      --mono:     "Cascadia Code", "Fira Code", "Consolas", "Courier New", monospace;
+    }
+
+    html { height: 100%; }
+
+    body {
+      font-family: var(--mono);
+      font-size: 12px;
+      background: var(--bg0);
+      color: var(--text);
+      min-height: 100%;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* ── Header ───────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+
+    header h1 {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      text-transform: uppercase;
+    }
+
+    header .version {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+    }
+
+    /* ── Drop-Zone ────────────────────────────────────────────── */
+    #drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 18px 12px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.18s, background 0.18s;
+      position: relative;
+      min-height: 90px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      color: var(--muted);
+    }
+
+    #drop-zone:hover,
+    #drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(0, 180, 216, 0.06);
+      color: var(--accent);
+    }
+
+    #drop-zone .dz-icon {
+      font-size: 28px;
+      line-height: 1;
+      opacity: 0.7;
+    }
+
+    #drop-zone .dz-hint {
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    #drop-zone .dz-types {
+      font-size: 9px;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+    }
+
+    #file-input { display: none; }
+
+    /* Image preview */
+    #preview-wrap {
+      display: none;
+      position: relative;
+      margin-top: 8px;
+    }
+
+    #preview-wrap img {
+      width: 100%;
+      max-height: 200px;
+      object-fit: contain;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      display: block;
+    }
+
+    #preview-wrap .clear-btn {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: rgba(0,0,0,0.7);
+      border: 1px solid var(--border);
+      color: var(--err);
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      transition: background 0.15s;
+    }
+
+    #preview-wrap .clear-btn:hover { background: var(--err); color: #fff; }
+
+    #file-name {
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+
+    /* ── Settings section ─────────────────────────────────────── */
+    details {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    details summary {
+      padding: 7px 10px;
+      background: var(--bg2);
+      cursor: pointer;
+      font-size: 11px;
+      color: var(--accent);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      user-select: none;
+    }
+
+    details summary::before {
+      content: "▶";
+      font-size: 8px;
+      transition: transform 0.15s;
+      display: inline-block;
+    }
+
+    details[open] summary::before { transform: rotate(90deg); }
+
+    details summary::-webkit-details-marker { display: none; }
+
+    .settings-body {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      background: var(--bg1);
+    }
+
+    .field { display: flex; flex-direction: column; gap: 3px; }
+
+    .field label {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .field input,
+    .field select {
+      background: var(--bg0);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 5px 8px;
+      outline: none;
+      transition: border-color 0.15s;
+      width: 100%;
+    }
+
+    .field input:focus,
+    .field select:focus { border-color: var(--accent); }
+
+    .field select option { background: var(--bg1); }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .toggle-row span {
+      font-size: 11px;
+      color: var(--text);
+    }
+
+    /* Custom toggle */
+    .toggle {
+      position: relative;
+      width: 34px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+
+    .toggle input { opacity: 0; width: 0; height: 0; }
+
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: var(--bg3);
+      border-radius: 18px;
+      cursor: pointer;
+      transition: background 0.2s;
+      border: 1px solid var(--border);
+    }
+
+    .toggle-slider::before {
+      content: "";
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      left: 2px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: var(--muted);
+      border-radius: 50%;
+      transition: transform 0.2s, background 0.2s;
+    }
+
+    .toggle input:checked + .toggle-slider { background: var(--accent2); border-color: var(--accent); }
+    .toggle input:checked + .toggle-slider::before {
+      transform: translate(16px, -50%);
+      background: var(--accent);
+    }
+
+    /* ── Model selector ──────────────────────────────────────── */
+    .model-group {
+      display: flex;
+      gap: 4px;
+    }
+
+    .model-btn {
+      flex: 1;
+      padding: 4px 2px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .model-btn:hover:not(.active) { border-color: var(--accent2); color: var(--text); }
+
+    .model-btn.active {
+      background: var(--accent2);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    #model-info {
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 3px;
+      min-height: 13px;
+    }
+
+    /* ── Primary button ───────────────────────────────────────── */
+    #analyze-btn {
+      padding: 9px 12px;
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      color: #fff;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      width: 100%;
+      transition: opacity 0.15s, transform 0.1s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #analyze-btn:hover:not(:disabled) { opacity: 0.88; }
+    #analyze-btn:active:not(:disabled) { transform: scale(0.98); }
+    #analyze-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    /* ── Status box ───────────────────────────────────────────── */
+    #status-box {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: none;
+    }
+
+    #status-header {
+      padding: 5px 10px;
+      background: var(--bg2);
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #status-header .clear-log {
+      font-size: 9px;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 1px 5px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: none;
+      transition: color 0.15s, border-color 0.15s;
+      font-family: var(--mono);
+    }
+
+    #status-header .clear-log:hover { color: var(--text); border-color: var(--muted); }
+
+    /* Progress bar */
+    #progress-wrap {
+      height: 3px;
+      background: var(--bg3);
+      overflow: hidden;
+      display: none;
+    }
+
+    #progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+      transition: width 0.4s ease;
+    }
+
+    #progress-bar.indeterminate {
+      width: 40%;
+      animation: indeterminate 1.4s ease-in-out infinite;
+    }
+
+    @keyframes indeterminate {
+      0%   { transform: translateX(-120%); }
+      100% { transform: translateX(300%); }
+    }
+
+    #log {
+      max-height: 130px;
+      overflow-y: auto;
+      padding: 6px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      background: var(--bg1);
+    }
+
+    .log-line {
+      display: flex;
+      gap: 8px;
+      font-size: 10px;
+      line-height: 1.5;
+    }
+
+    .log-time { color: var(--muted); flex-shrink: 0; }
+
+    .log-msg.ok   { color: var(--ok); }
+    .log-msg.warn { color: var(--warn); }
+    .log-msg.err  { color: var(--err); }
+    .log-msg.info { color: var(--text); }
+
+    /* ── Result preview ───────────────────────────────────────── */
+    #result-box {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: none;
+    }
+
+    #result-header {
+      padding: 5px 10px;
+      background: var(--bg2);
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Confidence badge */
+    #confidence-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 7px;
+      border-radius: 10px;
+      background: var(--bg3);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      min-width: 52px;
+      text-align: center;
+    }
+
+    #confidence-badge.high { background: rgba(45,198,83,0.15); color: var(--ok); border-color: var(--ok); }
+    #confidence-badge.mid  { background: rgba(244,162,97,0.15); color: var(--warn); border-color: var(--warn); }
+    #confidence-badge.low  { background: rgba(230,57,70,0.15); color: var(--err); border-color: var(--err); }
+
+    #notes-text {
+      padding: 6px 10px;
+      font-size: 10px;
+      color: var(--warn);
+      background: rgba(244,162,97,0.05);
+      border-bottom: 1px solid var(--border);
+      line-height: 1.5;
+      display: none;
+      white-space: pre-wrap;
+    }
+
+    #json-preview {
+      padding: 8px 10px;
+      max-height: 200px;
+      overflow-y: auto;
+      background: var(--bg1);
+      font-size: 10px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--text);
+    }
+
+    /* JSON syntax highlighting */
+    .jk { color: #7ec8e3; }   /* key */
+    .jv { color: #a8d8a8; }   /* string value */
+    .jn { color: #f4a261; }   /* number */
+    .jb { color: #e07ab1; }   /* bool/null */
+
+    /* Multi-view view strip */
+    #view-strip {
+      display: none;
+      gap: 4px;
+      padding: 6px 10px;
+      background: var(--bg0);
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+
+    .view-chip {
+      font-size: 9px;
+      padding: 2px 7px;
+      border-radius: 10px;
+      border: 1px solid var(--accent2);
+      color: var(--accent);
+      background: rgba(0,180,216,0.08);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* Feature chips (threads / undercuts / grooves) */
+    #feature-summary {
+      display: none;
+      flex-wrap: wrap;
+      padding: 5px 10px;
+      background: var(--bg0);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .feature-chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      margin: 2px 4px;
+      font-family: monospace;
+    }
+
+    .feature-chip.thread   { background: #1a3a5c; color: #4da6ff; border: 1px solid #2a5a8c; }
+    .feature-chip.undercut { background: #3a1a5c; color: #b44dff; border: 1px solid #5a2a8c; }
+    .feature-chip.groove   { background: #1a5c3a; color: #4dffb4; border: 1px solid #2a8c5a; }
+
+    /* ── Operations summary ──────────────────────────────────────── */
+    .ops-summary {
+        margin-top: 8px;
+        padding: 8px;
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        font-family: monospace;
+        font-size: 11px;
+    }
+    .ops-header {
+        color: #00b4d8;
+        font-weight: bold;
+        margin-bottom: 6px;
+        font-size: 12px;
+    }
+    .ops-step {
+        padding: 2px 0;
+        color: #c9d1d9;
+        border-bottom: 1px solid #21262d;
+    }
+    .ops-step:last-child { border-bottom: none; }
+    .ops-icon { margin-right: 4px; }
+    .ops-num { color: #8b949e; min-width: 20px; display: inline-block; }
+    .ops-type { color: #ff7b72; font-weight: bold; }
+    .ops-desc { color: #8b949e; }
+
+    /* ── Scrollbar styling ────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg0); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  </style>
+</head>
+<body>
+
+  <!-- ── Header ─────────────────────────────────────────────────── -->
+  <header>
+    <h1>DrawingToFusion</h1>
+    <span class="version">v1.1.0</span>
+  </header>
+
+  <!-- ── Drop-Zone ──────────────────────────────────────────────── -->
+  <div id="drop-zone" role="button" tabindex="0" aria-label="Bild laden">
+    <div class="dz-icon">&#128444;</div>
+    <div class="dz-hint">Zeichnung hierher ziehen<br>oder klicken zum Öffnen</div>
+    <div class="dz-types">PNG &nbsp;·&nbsp; JPG &nbsp;·&nbsp; WEBP &nbsp;·&nbsp; PDF</div>
+    <input type="file" id="file-input" accept=".png,.jpg,.jpeg,.webp,.pdf" />
+  </div>
+
+  <div id="preview-wrap">
+    <img id="preview-img" src="" alt="Vorschau" />
+    <button class="clear-btn" id="clear-btn" title="Bild entfernen">✕</button>
+    <div id="file-name"></div>
+  </div>
+
+  <!-- ── Settings ───────────────────────────────────────────────── -->
+  <details open>
+    <summary>Einstellungen</summary>
+    <div class="settings-body">
+
+      <div class="field">
+        <label for="api-key">API-Key (Anthropic)</label>
+        <input type="password" id="api-key" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+      </div>
+
+      <div class="field">
+        <label for="unit">Maßeinheit (Hinweis für KI)</label>
+        <select id="unit">
+          <option value="mm" selected>mm — Millimeter</option>
+          <option value="cm">cm — Zentimeter</option>
+          <option value="inch">inch — Zoll</option>
+        </select>
+      </div>
+
+      <div class="toggle-row">
+        <span>Bohrungen erzeugen</span>
+        <label class="toggle">
+          <input type="checkbox" id="build-holes" checked />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <span>Fasen erzeugen</span>
+        <label class="toggle">
+          <input type="checkbox" id="build-chamfers" checked />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <span>Gewinde erstellen</span>
+        <label class="toggle">
+          <input type="checkbox" id="build-threads" checked />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <span>Freistiche erstellen</span>
+        <label class="toggle">
+          <input type="checkbox" id="build-undercuts" checked />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <span>Einstiche/Nuten erstellen</span>
+        <label class="toggle">
+          <input type="checkbox" id="build-grooves" checked />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <span>Mehrfachansichten erkennen <span style="color:var(--muted);font-size:9px">(2× API-Call)</span></span>
+        <label class="toggle">
+          <input type="checkbox" id="multi-view" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="field">
+        <label>KI-Modell</label>
+        <div class="model-group" id="model-group">
+          <button class="model-btn active" data-model="claude-opus-4-6">Opus 4.6</button>
+          <button class="model-btn" data-model="claude-opus-4-7">Opus 4.7</button>
+          <button class="model-btn" data-model="claude-sonnet-4-6">Sonnet 4.6</button>
+          <button class="model-btn" data-model="claude-haiku-4-5-20251001">Haiku 4.5</button>
+        </div>
+        <div id="model-info">Bewährt &amp; stabil · ~15 Ct/Analyse</div>
+      </div>
+
+    </div>
+  </details>
+
+  <!-- ── Primary action ─────────────────────────────────────────── -->
+  <button id="analyze-btn" disabled>Analysieren &amp; Aufbauen</button>
+
+  <!-- ── Status log ─────────────────────────────────────────────── -->
+  <div id="status-box">
+    <div id="status-header">
+      <span>Status</span>
+      <button class="clear-log" id="clear-log-btn">Leeren</button>
+    </div>
+    <div id="progress-wrap">
+      <div id="progress-bar"></div>
+    </div>
+    <div id="log"></div>
+  </div>
+
+  <!-- ── Result preview ─────────────────────────────────────────── -->
+  <div id="result-box">
+    <div id="result-header">
+      <span>Analyse-Ergebnis</span>
+      <span id="confidence-badge">–</span>
+    </div>
+    <div id="view-strip" style="display:none;"></div>
+    <div id="feature-summary"></div>
+    <div id="notes-text"></div>
+    <div id="json-preview"></div>
+  </div>
+
+  <script>
+  (() => {
+    'use strict';
+
+    // ── State ──────────────────────────────────────────────────────
+    const state = {
+      imageBase64: null,
+      imageMime:   null,
+      fileName:    null,
+      busy:        false,
+    };
+
+    // ── DOM refs ───────────────────────────────────────────────────
+    const dropZone      = document.getElementById('drop-zone');
+    const fileInput     = document.getElementById('file-input');
+    const previewWrap   = document.getElementById('preview-wrap');
+    const previewImg    = document.getElementById('preview-img');
+    const clearBtn      = document.getElementById('clear-btn');
+    const fileNameEl    = document.getElementById('file-name');
+    const apiKeyInput   = document.getElementById('api-key');
+    const unitSelect    = document.getElementById('unit');
+    const buildHolesCb    = document.getElementById('build-holes');
+    const buildChamfersCb = document.getElementById('build-chamfers');
+    const buildThreadsCb  = document.getElementById('build-threads');
+    const buildUndercutsCb = document.getElementById('build-undercuts');
+    const buildGroovesCb  = document.getElementById('build-grooves');
+    const multiViewCb     = document.getElementById('multi-view');
+    const analyzeBtn    = document.getElementById('analyze-btn');
+    const statusBox     = document.getElementById('status-box');
+    const progressWrap  = document.getElementById('progress-wrap');
+    const progressBar   = document.getElementById('progress-bar');
+    const logEl         = document.getElementById('log');
+    const clearLogBtn   = document.getElementById('clear-log-btn');
+    const resultBox     = document.getElementById('result-box');
+    const confidenceBadge = document.getElementById('confidence-badge');
+    const viewStrip     = document.getElementById('view-strip');
+    const featureSummary = document.getElementById('feature-summary');
+    const notesText     = document.getElementById('notes-text');
+    const jsonPreview   = document.getElementById('json-preview');
+
+    // ── Persistence ────────────────────────────────────────────────
+    const LS_KEY_APIKEY = 'dtf_api_key';
+    const LS_KEY_UNIT   = 'dtf_unit';
+    const LS_KEY_MODEL  = 'dtf_model';
+
+    // ── Model selection ────────────────────────────────────────────
+    const modelGroup  = document.getElementById('model-group');
+    const modelInfoEl = document.getElementById('model-info');
+
+    const MODEL_INFO = {
+      'claude-opus-4-6':           'Bewährt &amp; stabil · ~15 Ct/Analyse',
+      'claude-opus-4-7':           'Neuestes Opus · höchste Qualität',
+      'claude-sonnet-4-6':         'Schneller &amp; günstiger · ~3 Ct/Analyse',
+      'claude-haiku-4-5-20251001': 'Blitzschnell · ~0,5 Ct/Analyse',
+    };
+
+    let selectedModel = 'claude-opus-4-6';
+
+    function setModel(modelId) {
+      selectedModel = modelId;
+      modelGroup.querySelectorAll('.model-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.model === modelId);
+      });
+      modelInfoEl.innerHTML = MODEL_INFO[modelId] || modelId;
+    }
+
+    modelGroup.addEventListener('click', e => {
+      const btn = e.target.closest('.model-btn');
+      if (!btn) return;
+      setModel(btn.dataset.model);
+      savePrefs();
+    });
+
+    function loadPrefs() {
+      const saved = localStorage.getItem(LS_KEY_APIKEY);
+      if (saved) apiKeyInput.value = saved;
+      const unit = localStorage.getItem(LS_KEY_UNIT);
+      if (unit) unitSelect.value = unit;
+      const model = localStorage.getItem(LS_KEY_MODEL);
+      if (model && MODEL_INFO[model]) setModel(model);
+    }
+
+    function savePrefs() {
+      localStorage.setItem(LS_KEY_APIKEY, apiKeyInput.value.trim());
+      localStorage.setItem(LS_KEY_UNIT, unitSelect.value);
+      localStorage.setItem(LS_KEY_MODEL, selectedModel);
+    }
+
+    apiKeyInput.addEventListener('change', savePrefs);
+    unitSelect.addEventListener('change', savePrefs);
+    loadPrefs();
+
+    // ── Drop-Zone ──────────────────────────────────────────────────
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') fileInput.click();
+    });
+
+    dropZone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropZone.classList.add('drag-over');
+    });
+
+    ['dragleave', 'dragend'].forEach(ev =>
+      dropZone.addEventListener(ev, () => dropZone.classList.remove('drag-over'))
+    );
+
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file) loadFile(file);
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) loadFile(fileInput.files[0]);
+      fileInput.value = '';   // allow re-selecting same file
+    });
+
+    clearBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      clearImage();
+    });
+
+    // ── File loading ───────────────────────────────────────────────
+    const ACCEPTED = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf'];
+
+    function loadFile(file) {
+      if (!ACCEPTED.includes(file.type)) {
+        log('warn', `Nicht unterstützter Dateityp: ${file.type || file.name}`);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = evt => {
+        const dataUrl = evt.target.result;
+        // dataUrl = "data:<mime>;base64,<data>"
+        const [header, b64] = dataUrl.split(',', 2);
+        const mime = header.replace('data:', '').replace(';base64', '');
+        state.imageBase64 = b64;
+        state.imageMime   = mime;
+        state.fileName    = file.name;
+
+        if (mime === 'application/pdf') {
+          // PDF: show a generic placeholder — actual rendering happens in Python
+          previewImg.src = 'data:image/svg+xml,' + encodeURIComponent(
+            `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80">` +
+            `<rect width="120" height="80" fill="#0f3460"/>` +
+            `<text x="60" y="46" font-family="monospace" font-size="13" fill="#00b4d8" text-anchor="middle">PDF</text>` +
+            `</svg>`
+          );
+        } else {
+          previewImg.src = dataUrl;
+        }
+
+        previewWrap.style.display = 'block';
+        dropZone.style.display = 'none';
+        fileNameEl.textContent = file.name;
+        updateBtn();
+        log('ok', `Datei geladen: ${file.name} (${formatBytes(file.size)})`);
+      };
+
+      reader.onerror = () => log('err', 'Datei konnte nicht gelesen werden.');
+      reader.readAsDataURL(file);
+    }
+
+    function clearImage() {
+      state.imageBase64 = null;
+      state.imageMime   = null;
+      state.fileName    = null;
+      previewImg.src    = '';
+      previewWrap.style.display = 'none';
+      dropZone.style.display    = 'flex';
+      updateBtn();
+    }
+
+    // ── Button state ───────────────────────────────────────────────
+    function updateBtn() {
+      analyzeBtn.disabled = state.busy || !state.imageBase64;
+    }
+
+    // ── Logging ────────────────────────────────────────────────────
+    function log(level, msg) {
+      statusBox.style.display = 'block';
+      const now   = new Date();
+      const ts    = now.toTimeString().slice(0, 8);
+      const line  = document.createElement('div');
+      line.className = 'log-line';
+      line.innerHTML =
+        `<span class="log-time">${ts}</span>` +
+        `<span class="log-msg ${level}">${escHtml(msg)}</span>`;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    clearLogBtn.addEventListener('click', () => {
+      logEl.innerHTML = '';
+      statusBox.style.display = 'none';
+    });
+
+    // ── Progress bar ───────────────────────────────────────────────
+    function startProgress() {
+      progressWrap.style.display = 'block';
+      progressBar.className      = 'indeterminate';
+      progressBar.style.width    = '';
+    }
+
+    function finishProgress(ok) {
+      progressBar.className   = '';
+      progressBar.style.width = '100%';
+      progressBar.style.background = ok ? 'var(--ok)' : 'var(--err)';
+      setTimeout(() => {
+        progressWrap.style.display = 'none';
+        progressBar.style.width    = '0%';
+        progressBar.style.background = '';
+      }, 800);
+    }
+
+    // ── Fusion send helper ─────────────────────────────────────────
+    function sendToFusion(action, data) {
+      const jsonData = JSON.stringify(data);
+
+      function trySend() {
+        if (typeof adsk !== 'undefined' && typeof adsk.fusionSendData === 'function') {
+          try {
+            adsk.fusionSendData(action, jsonData);
+            return true;
+          } catch (e) {
+            log('err', 'adsk.fusionSendData Fehler: ' + e.message);
+            finishProgress(false);
+            setBusy(false);
+            return true; // don't retry on hard error
+          }
+        }
+        return false;
+      }
+
+      if (trySend()) return;
+
+      // Fusion handler noch nicht bereit — kurz warten und nochmal
+      let attempts = 0;
+      const retry = setInterval(() => {
+        attempts++;
+        if (trySend()) {
+          clearInterval(retry);
+        } else if (attempts > 20) {
+          clearInterval(retry);
+          log('err', 'Fusion 360 Bridge nicht verfügbar (adsk.fusionSendData fehlt).');
+          finishProgress(false);
+          setBusy(false);
+        }
+      }, 100);
+    }
+
+    // ── Analyze ────────────────────────────────────────────────────
+    analyzeBtn.addEventListener('click', () => {
+      const apiKey = apiKeyInput.value.trim();
+
+      if (!state.imageBase64) {
+        log('err', 'Kein Bild geladen. Bitte zuerst eine Zeichnung auswählen.');
+        return;
+      }
+      if (!apiKey) {
+        log('err', 'API-Key fehlt. Bitte in den Einstellungen eintragen.');
+        return;
+      }
+
+      savePrefs();
+      setBusy(true);
+      startProgress();
+      log('info', 'Sende Zeichnung an Claude API …');
+
+      const payload = {
+        imageBase64:    state.imageBase64,
+        imageMime:      state.imageMime,
+        apiKey:         apiKey,
+        unit:           unitSelect.value,
+        buildHoles:     buildHolesCb.checked,
+        buildChamfers:  buildChamfersCb.checked,
+        buildThreads:   buildThreadsCb.checked,
+        buildUndercuts: buildUndercutsCb.checked,
+        buildGrooves:   buildGroovesCb.checked,
+        multiView:      multiViewCb.checked,
+        model:          selectedModel,
+      };
+
+      sendToFusion('analyzeImage', payload);
+    });
+
+    function setBusy(busy) {
+      state.busy = busy;
+      analyzeBtn.disabled = busy || !state.imageBase64;
+      analyzeBtn.textContent = busy ? 'Analysiere …' : 'Analysieren & Aufbauen';
+    }
+
+    // ── Response handler (called from Python via sendInfoToHTML) ────
+    window.handleFusionResponse = function(jsonStr) {
+      try {
+        const data = JSON.parse(jsonStr);
+
+        if (data.type === 'error') {
+          log('err', data.message || 'Unbekannter Fehler');
+          finishProgress(false);
+          setBusy(false);
+        } else if (data.type === 'progress') {
+          log('info', data.step || '');
+        } else if (data.type === 'status') {
+          log('info', data.message || '');
+        } else if (data.type === 'success') {
+          showResult(data.analysis || {});
+
+          var prevOps = document.querySelector('.ops-summary');
+          if (prevOps) prevOps.remove();
+
+          if (data.modeling_mode === 'operations' && data.operation_count > 0) {
+            var ops = (data.analysis && data.analysis.operations) || [];
+            var opsHtml = '<div class="ops-summary">';
+            opsHtml += '<div class="ops-header">' + ops.length + ' Modellierungsschritte</div>';
+            ops.forEach(function(op, idx) {
+              var icon = op.operation === 'extrude_add' ? '➕' :
+                         op.operation === 'extrude_cut' ? '✂️' :
+                         op.operation === 'hole'        ? '⭕' :
+                         op.operation === 'slot'        ? '🔲' :
+                         op.operation === 'chamfer'     ? '📐' :
+                         op.operation === 'fillet'      ? '🔵' : '🔧';
+              opsHtml += '<div class="ops-step">'
+                + '<span class="ops-icon">' + icon + '</span>'
+                + '<span class="ops-num">' + (idx + 1) + '.</span> '
+                + '<span class="ops-type">' + escHtml(op.operation) + '</span> '
+                + '<span class="ops-desc">' + escHtml(op.description || '') + '</span>'
+                + '</div>';
+            });
+            opsHtml += '</div>';
+            document.getElementById('resultPreview') !== null
+              ? document.getElementById('resultPreview').insertAdjacentHTML('beforeend', opsHtml)
+              : document.getElementById('json-preview').insertAdjacentHTML('afterend', opsHtml);
+          }
+
+          finishProgress(true);
+          setBusy(false);
+          log('ok', 'Modell erfolgreich aufgebaut.');
+        }
+      } catch (e) {
+        log('err', `Ungültige Antwort vom Add-In: ${e.message}`);
+        finishProgress(false);
+        setBusy(false);
+      }
+    };
+
+    // ── Result display ─────────────────────────────────────────────
+    function showResult(result) {
+      resultBox.style.display = 'block';
+
+      // Confidence badge
+      const conf = typeof result.confidence === 'number' ? result.confidence : 0;
+      const pct  = Math.round(conf * 100);
+      confidenceBadge.textContent = pct + '%';
+      confidenceBadge.className   =
+        pct >= 80 ? 'high' : pct >= 50 ? 'mid' : 'low';
+
+      // Multi-view chips
+      const views = Array.isArray(result.view_analyses) ? result.view_analyses : [];
+      if (views.length > 0) {
+        viewStrip.innerHTML = views.map(v =>
+          `<span class="view-chip">${escHtml(v.view || '?')}</span>`
+        ).join('');
+        viewStrip.style.display = 'flex';
+      } else {
+        viewStrip.style.display = 'none';
+      }
+
+      // Feature chips (threads / undercuts / grooves)
+      let chips = '';
+      if (result.threads && result.threads.length > 0) {
+        chips += '<span class="feature-chip thread">'
+          + result.threads.length + '× Gewinde ('
+          + result.threads.map(t => escHtml(t.designation || '?')).join(', ')
+          + ')</span>';
+      }
+      if (result.undercuts && result.undercuts.length > 0) {
+        chips += '<span class="feature-chip undercut">'
+          + result.undercuts.length + '× Freistich</span>';
+      }
+      if (result.grooves && result.grooves.length > 0) {
+        chips += '<span class="feature-chip groove">'
+          + result.grooves.length + '× Einstich/Nut</span>';
+      }
+      if (chips) {
+        featureSummary.innerHTML = chips;
+        featureSummary.style.display = 'flex';
+      } else {
+        featureSummary.style.display = 'none';
+      }
+
+      // Notes
+      if (result.notes) {
+        notesText.style.display = 'block';
+        notesText.textContent   = '\u26A0 ' + result.notes;
+      } else {
+        notesText.style.display = 'none';
+      }
+
+      // JSON preview — strip large view_analyses array to keep it readable
+      const preview = Object.assign({}, result);
+      if (preview.view_analyses && preview.view_analyses.length > 0) {
+        preview.view_analyses = `[${preview.view_analyses.length} Ansichten — siehe last_response.json]`;
+      }
+      jsonPreview.innerHTML = syntaxHighlight(JSON.stringify(preview, null, 2));
+    }
+
+    // ── Syntax highlight ───────────────────────────────────────────
+    function syntaxHighlight(json) {
+      return escHtml(json)
+        // string keys: "key":
+        .replace(/"([^"]+)"(?=\s*:)/g, '<span class="jk">"$1"</span>')
+        // string values
+        .replace(/:\s*"([^"]*)"/g, (m, v) => `: <span class="jv">"${v}"</span>`)
+        // numbers
+        .replace(/:\s*(-?\d+\.?\d*)/g, (m, n) => `: <span class="jn">${n}</span>`)
+        // booleans & null
+        .replace(/:\s*(true|false|null)/g, (m, b) => `: <span class="jb">${b}</span>`);
+    }
+
+    // ── Utilities ──────────────────────────────────────────────────
+    function escHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function formatBytes(n) {
+      if (n < 1024)       return n + ' B';
+      if (n < 1048576)    return (n / 1024).toFixed(1) + ' KB';
+      return (n / 1048576).toFixed(1) + ' MB';
+    }
+
+    // ── Fusion → JS bridge ────────────────────────────────────────
+    // Called by Fusion when Python invokes palette.sendInfoToHTML(action, data)
+    window.fusionJavaScriptHandler = {
+      handle: function(action, data) {
+        if (action === 'status' && typeof window.handleFusionResponse === 'function') {
+          window.handleFusionResponse(data);
+        }
+        return 'OK';   // Fusion 360 CEF requires a non-empty return value
+      }
+    };
+
+    // ── Test simulation (no Fusion environment) ────────────────────
+    function simulateResponse() {
+      const isMulti = multiViewCb.checked;
+      const fake = {
+        type: 'success',
+        analysis: {
+          unit: 'mm',
+          view: isMulti ? 'multi' : 'front',
+          base_profile: isMulti
+            ? { type: 'revolution',
+                steps: [
+                  { diameter: 56, length: 10 },
+                  { diameter: 94, length: 84 },
+                  { diameter: 70, length: 40 },
+                ],
+                bore_diameter: 0 }
+            : { type: 'rectangle', width: 120, height: 80, thickness: 0 },
+          extrusion_depth: isMulti ? 134 : 25,
+          holes: isMulti ? [] : [{ x: 20, y: 20, diameter: 8, depth: 'through' }],
+          chamfers: [], fillets: [],
+          threads: isMulti ? [
+            { designation: 'M12x1.5', thread_type: 'metric_fine',
+              start_position: 5, length: 20, step_index: 0, pitch: 1.5,
+              hand: 'right', internal: false },
+          ] : [],
+          undercuts: isMulti ? [
+            { undercut_type: 'DIN509_E', position: 38, step_index: 1,
+              width: 2.5, depth: 0.3, radius: 0 },
+          ] : [],
+          grooves: [],
+          confidence: isMulti ? 0.92 : 0.87,
+          notes: isMulti
+            ? 'Simulation Mehrfachansichten — Welle mit Gewinde und Freistich.'
+            : 'Simulation — kein echtes Fusionsmodell erstellt.',
+          multi_view: isMulti,
+          view_analyses: isMulti ? [
+            { view: 'front', width: 94, height: 94, holes: [] },
+            { view: 'side',  width: 134, height: 94, holes: [] },
+          ] : [],
+        },
+      };
+      window.handleFusionResponse(JSON.stringify(fake));
+    }
+
+  })();
+  </script>
+</body>
+</html>

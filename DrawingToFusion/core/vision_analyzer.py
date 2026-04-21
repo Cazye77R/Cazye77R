@@ -1,0 +1,1148 @@
+import base64
+import datetime
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+from .models import DrawingAnalysis
+from .. import config
+
+_API_URL = "https://api.anthropic.com/v1/messages"
+_API_VERSION = "2023-06-01"
+
+_MIME_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+
+_VALID_MEDIA_TYPES = set(_MIME_TYPES.values()) | {"application/pdf"}
+
+_REQUIRED_FIELDS = {"unit", "base_profile", "extrusion_depth"}
+
+_SYSTEM_PROMPT = """\
+Du bist ein Experte für technische Zeichnungen und Fusion 360 3D-Modellierung. \
+Analysiere die Zeichnung und extrahiere ALLE Geometrieinformationen als JSON.
+
+PROFILTYPEN die du erkennen musst:
+- "rectangle": Einfaches Rechteck mit width, height, thickness
+- "circle": Vollzylinder mit diameter, thickness
+- "oblong": Langloch/Stadionform (abgerundetes Rechteck) mit \
+width (Gesamtbreite), height (Gesamthöhe), radius (Endradius), thickness. \
+Erkennbar an: halbkreisförmige Enden, R-Maß = height/2
+- "slot": Langloch-Aussparung mit width, height, radius, Offsets
+- "polygon": Vieleck mit sides, diameter, thickness
+- "l": L-Profil mit width, height, flange_width, flange_height, web_thickness
+- "t": T-Profil mit width, height, flange_width, flange_height, web_thickness
+- "revolution": Rotationssymmetrisches Teil (Welle) mit steps und bore_diameter
+
+BOHRUNGEN (holes Array):
+Jede Bohrung hat: x, y, diameter, depth ("through" | "blind"), \
+depth_value (bei blind), countersink, countersink_angle.
+Bei Lochkreisen: Berechne x/y Koordinaten aus Lochkreisdurchmesser \
+und Winkelposition.
+
+FASEN (chamfers Array): edge, distance
+VERRUNDUNGEN (fillets Array): edge, radius
+
+MASSEINHEIT: Alle Werte in Millimetern (sofern nicht anders angegeben).
+
+WICHTIG für Oblong-Profile (Laschen, Pleuel, Verbindungsstücke):
+- width = Gesamtlänge des Teils
+- height = Gesamtbreite des Teils
+- radius = Radius der abgerundeten Enden (oft = height/2)
+- extrusion_depth = Materialstärke aus Seitenansicht
+- holes: Bohrungen zentriert auf den Kreismittelpunkten, \
+x-Positionen aus dem Abstandsmaß berechnen
+
+Antworte NUR mit validem JSON ohne Markdown-Backticks, kein Text davor oder danach.
+
+## Gewinde (threads)
+
+Für revolution-Profile (Wellen, Achsen, Spindeln) erkenne Gewinde und gib sie als "threads"-Array zurück:
+
+"threads": [
+  {
+    "designation": "M12x1.5",
+    "thread_type": "metric_fine",
+    "start_position": 5.0,
+    "length": 20.0,
+    "step_index": 0,
+    "pitch": 1.5,
+    "hand": "right",
+    "internal": false
+  }
+]
+
+Erkennungsregeln für Gewinde:
+- Dünne Linien parallel zur Wellenkontur = Gewindekern-/Kammlinie
+- Maßangaben: "M12", "M8x1", "Tr20x4", "G1/2", "UNC 1/4"
+- In der Stirnansicht: Dreiviertelkreis am Kerndurchmesser (ca. 75% Vollkreis)
+- thread_type bestimmen: "M" = metric, "M...x..." mit Steigung = metric_fine, "Tr" = trapezoidal, "G" = pipe, "UNC/UNF" = whitworth
+- pitch: nur angeben wenn explizit in der Zeichnung (z.B. "M12x1.5" → pitch=1.5). Bei "M12" ohne Steigung → pitch=0 (Regelgewinde)
+- start_position: Abstand von der linken Bezugskante des Steps bis zum Gewindeanfang
+- step_index: Index in der steps-Liste auf dem das Gewinde sitzt
+
+## Freistiche (undercuts)
+
+"undercuts": [
+  {
+    "undercut_type": "DIN509_E",
+    "position": 40.0,
+    "step_index": 1,
+    "width": 2.5,
+    "depth": 0.3,
+    "radius": 0.2
+  }
+]
+
+Erkennungsregeln für Freistiche:
+- Kleine Einkerbung/Vertiefung am Übergang zwischen zwei Wellendurchmessern
+- Oft mit "DIN 509" Verweis oder t1/t2-Bemaßung in der Zeichnung
+- Freistiche sitzen IMMER an einem Absatz (Durchmessersprung)
+- Typisch VOR einem Gewinde oder einer Passfläche
+- undercut_type: "DIN509_E" (Standard, nur Breite+Tiefe), "DIN509_F" (mit Radius), "custom"
+- position: axiale Position des Freistich-Anfangs
+- Wenn kein Maß angegeben: width und depth auf 0 setzen, undercut_type auf "DIN509_E" — der Builder verwendet dann DIN-Tabellenwerte
+
+## Einstiche / Nuten (grooves)
+
+"grooves": [
+  {
+    "groove_type": "circlip_din471",
+    "position": 55.0,
+    "width": 1.8,
+    "depth": 1.1,
+    "step_index": 2
+  }
+]
+
+Erkennungsregeln für Einstiche:
+- Schmale rechteckige Vertiefungen/Einschnitte IN die Wellenkontur
+- Sicherungsringnuten: DIN 471/472 Verweis, "Sicherungsring", Wellenmuster-Symbol
+- O-Ring-Nuten: breitere Nut mit Radiusübergang am Grund
+- groove_type: "circlip_din471" (Außensicherungsring), "circlip_din472" (Innensicherungsring), "o_ring", "custom"
+- position: Axiale Mitte der Nut
+- width/depth: Aus Bemaßung ablesen, bei DIN-Verweis können Tabellenwerte verwendet werden
+
+## Wichtig für alle drei Feature-Typen:
+- Nur zurückgeben wenn in der Zeichnung tatsächlich erkennbar
+- step_index bezieht sich auf den Index in der "steps"-Liste des revolution-Profils
+- Positionen und Maße in der Einheit der Zeichnung angeben (wie alle anderen Maße)
+- Leeres Array [] wenn keine Features dieses Typs erkennbar sind
+
+---
+
+## Operations-Modus (modeling_mode: "operations")
+
+Verwende diesen Modus STATT des Profil-Modus wenn das Teil NICHT durch ein einzelnes
+Profil + Extrusion darstellbar ist. Typische Fälle:
+- Stufenkörper mit Aussparungen oder Taschen
+- Teile mit Langlöchern, Absätzen oder Stufen die nicht durch Fasen/Verrundungen entstehen
+- Teile bei denen die Vorderansicht eine nicht-konvexe Kontur zeigt (z.B. U-Form, T mit Aussparung)
+- Teile mit Features die von verschiedenen Seiten kommen (Stufe nur von oben etc.)
+
+Wenn du operations-Modus wählst, setze:
+  "modeling_mode": "operations"
+  "base_profile_type": "none"
+  "operations": [...]
+
+Die "operations"-Liste beschreibt die Modellierungsschritte in der Reihenfolge
+wie sie in Fusion 360 ausgeführt werden. Jeder Schritt hat:
+
+{
+  "operation": "extrude_add",
+  "sketch_plane": "XY",
+  "contour": {
+    "points": [[x1,y1], [x2,y2], ...],
+    "closed": true
+  },
+  "depth": 20.0,
+  "direction": "positive",
+  "description": "Grundkörper 70×50mm, 20mm tief"
+}
+
+### Verfügbare Operationen:
+
+1. "extrude_add" — Material hinzufügen (erster Schritt = Grundkörper)
+   Pflicht: contour (Punktliste), depth, sketch_plane
+   contour.points: Eckpunkte im Uhrzeigersinn, Einheit = Zeichnungseinheit
+   Für ein Rechteck 70×50: [[0,0], [70,0], [70,50], [0,50]]
+
+2. "extrude_cut" — Material entfernen (Tasche, Stufe, Nut)
+   Pflicht: contour, depth, sketch_plane
+   sketch_plane: "face_top" = auf der Oberseite des bisherigen Körpers schneiden
+                 "face_front" = von vorne schneiden
+                 "face_right" = von rechts schneiden
+                 "XY"/"XZ"/"YZ" = auf Konstruktionsebene
+
+3. "hole" — Bohrung (einfacher als Sketch-basierter Cut)
+   Pflicht: hole_diameter, hole_x, hole_y, sketch_plane
+   hole_type: "through" oder "blind" (dann hole_depth angeben)
+   Für Bohrungen im Operations-Modus:
+   - sketch_plane bestimmt die BOHRRICHTUNG, nicht nur die Ebene:
+     * "face_top": Bohrung geht von OBEN nach UNTEN (Z-Achse)
+       → hole_x/hole_y sind Koordinaten aus der DRAUFSICHT
+     * "face_front": Bohrung geht von VORNE nach HINTEN (Y-Achse)
+       → hole_x/hole_y sind Koordinaten aus der VORDERANSICHT
+     * "face_right": Bohrung geht von RECHTS nach LINKS (X-Achse)
+   - Bestimme sketch_plane anhand der Ansicht in der die Bohrung
+     als KREIS sichtbar ist (nicht als gestrichelte Linie)
+   - Wenn die Bohrung in der Draufsicht als Kreis erscheint → face_top
+   - Wenn die Bohrung in der Vorderansicht als Kreis erscheint → face_front
+   - hole_type "through" bei L-Profilen: Die Bohrung durchdringt
+     nur den Flansch, nicht den gesamten Körper — trotzdem "through"
+     verwenden, Fusion's AllExtent stoppt am Materialende
+
+4. "slot" — Langloch (Oblong-Durchbruch)
+   Pflicht: slot_width, slot_length, slot_x, slot_y, depth, sketch_plane
+   slot_x/slot_y = Mittelpunkt des Langlochs
+   slot_width = Breite (schmale Seite), slot_length = Länge (lange Seite)
+
+5. "chamfer" — Fase auf Kanten
+   edge_selection: "top" | "bottom" | "all"
+   size: Fasenbreite
+
+6. "fillet" — Verrundung auf Kanten
+   edge_selection: "top" | "bottom" | "all"
+   size: Verrundungsradius
+
+### Regeln für die Operations-Erstellung:
+
+1. ERSTER Schritt ist IMMER "extrude_add" mit dem Grundkörper-Profil
+2. Alle Maße in der Zeichnungseinheit (mm, cm, inch)
+3. Punkte im Uhrzeigersinn, Start bei [0,0] (linke untere Ecke)
+4. Für Stufen die nur von einer Seite kommen: extrude_cut mit passendem sketch_plane
+5. Tiefe des Grundkörpers = Wert aus der Seitenansicht (Tiefe/Breite des Teils)
+6. Gestrichelte Linien = verdeckte Kanten → zeigen Features auf der Rückseite
+7. Strichpunktlinien = Mittellinien → zeigen Symmetrie oder Drehachsen
+
+### Beispiel: Stufenkörper (wie Dreitafelprojektion-Aufgabe)
+
+Vorderansicht zeigt T-Form: Grundplatte 40×20mm, oberer Block 20×40mm
+Seitenansicht zeigt Tiefe 20mm
+→ Zwei Operationen:
+
+"modeling_mode": "operations",
+"operations": [
+  {
+    "operation": "extrude_add",
+    "sketch_plane": "XY",
+    "contour": {"points": [[0,0], [40,0], [40,20], [0,20]], "closed": true},
+    "depth": 20.0,
+    "description": "Grundplatte 40×20mm, Tiefe 20mm"
+  },
+  {
+    "operation": "extrude_add",
+    "sketch_plane": "face_top",
+    "contour": {"points": [[10,0], [30,0], [30,40], [10,40]], "closed": true},
+    "depth": 0,
+    "description": "Oberer Block 20×40mm — Höhe schon in Kontur"
+  }
+]
+
+ALTERNATIV kann die gesamte Vorderansicht als eine Kontur extrudiert werden:
+"operations": [
+  {
+    "operation": "extrude_add",
+    "sketch_plane": "XY",
+    "contour": {
+      "points": [[0,0], [40,0], [40,20], [30,20], [30,60], [10,60], [10,20], [0,20]],
+      "closed": true
+    },
+    "depth": 20.0,
+    "description": "T-Stufenkörper als eine Kontur, 20mm tief"
+  }
+]
+
+Die zweite Variante (eine Kontur) ist BEVORZUGT wenn die Vorderansicht das vollständige
+Profil zeigt und die Tiefe überall gleich ist.
+
+### Beispiel: Block mit Langloch und Bohrung
+
+"modeling_mode": "operations",
+"operations": [
+  {
+    "operation": "extrude_add",
+    "sketch_plane": "XY",
+    "contour": {"points": [[0,0], [70,0], [70,50], [0,50]], "closed": true},
+    "depth": 20.0,
+    "description": "Grundkörper 70×50×20mm"
+  },
+  {
+    "operation": "extrude_cut",
+    "sketch_plane": "face_top",
+    "contour": {"points": [[0,43], [55,43], [55,50], [0,50]], "closed": true},
+    "depth": 7.0,
+    "description": "Stufe oben 55×7mm, 7mm tief"
+  },
+  {
+    "operation": "slot",
+    "sketch_plane": "face_front",
+    "slot_width": 10.0,
+    "slot_length": 15.0,
+    "slot_x": 22.0,
+    "slot_y": 25.0,
+    "depth": 20.0,
+    "description": "Langloch 10×15mm mittig, durchgehend"
+  },
+  {
+    "operation": "hole",
+    "sketch_plane": "face_front",
+    "hole_diameter": 10.0,
+    "hole_x": 55.0,
+    "hole_y": 25.0,
+    "hole_type": "through",
+    "description": "Durchgangsbohrung Ø10 rechts"
+  }
+]
+
+### Entscheidung: Profil-Modus vs. Operations-Modus
+
+Verwende "modeling_mode": "profile" (bisheriges Verhalten) wenn:
+- Das Teil ein einfaches Prisma ist (Rechteck, Kreis, L, T extrudiert)
+- Das Teil eine Welle/Achse ist (Revolution)
+- Nur Bohrungen, Fasen, Verrundungen als Features dazukommen
+
+Verwende "modeling_mode": "operations" wenn:
+- Die Vorderansicht eine nicht-triviale Kontur zeigt (Stufen, Aussparungen, U-Form)
+- Das Teil Langlöcher oder Taschen hat
+- Features von verschiedenen Seiten kommen
+- Mehr als 2 verschiedene Querschnitte in verschiedenen Ansichten sichtbar sind\
+"""
+
+_USER_PROMPT = """\
+Analysiere diese technische Zeichnung und antworte NUR mit validem JSON ohne Markdown-Backticks.
+
+Halte dich exakt an dieses Schema (Beispielwerte zeigen den Typ, nicht den Inhalt):
+{
+  "unit": "mm",
+  "view": "front",
+  "base_profile": {
+    "type": "rectangle",
+    "width": 100.0,
+    "height": 50.0,
+    "thickness": 5.0,
+    "radius": null,
+    "flange_width": null,
+    "flange_height": null,
+    "web_thickness": null
+  },
+  "extrusion_depth": 20.0,
+  "holes": [
+    {
+      "x": 10.0,
+      "y": 10.0,
+      "diameter": 8.0,
+      "depth": "through",
+      "depth_value": null,
+      "countersink": false,
+      "countersink_angle": null
+    }
+  ],
+  "chamfers": [{"edge": "top-front", "distance": 2.0}],
+  "fillets":  [{"edge": "bottom-left", "radius": 3.0}],
+  "confidence": 0.9,
+  "notes": "Freitext-Anmerkungen"
+}
+
+Fuer rotationssymmetrische Teile (Wellen, Zylinder, Drehteile) verwende stattdessen:
+{
+  "base_profile": {
+    "type": "revolution",
+    "steps": [
+      {"diameter": 56.0, "length": 10.0},
+      {"diameter": 94.0, "length": 84.0},
+      {"diameter": 70.0, "length": 40.0}
+    ],
+    "bore_diameter": 0.0
+  },
+  "extrusion_depth": 134.0
+}
+
+Erlaubte Werte:
+- unit: "mm" | "cm" | "inch"
+- base_profile.type: "rectangle" | "circle" | "l" | "t" | "revolution"
+- Bei "t" (T-Traeger): width = Flanschbreite (gesamt), height = Gesamthoehe,
+  flange_height = Hoehe des UNTEREN Flansches (Basis), web_thickness = Stegdicke
+  WICHTIG: flange_height und web_thickness duerfen NICHT 0 sein
+- Bei T-Profil mit 3 sichtbaren Abschnitten (Flansch + Steg + oberer Block):
+  Falls der obere Block gleich breit oder schmäler als der Steg ist, gehört er
+  zum Steg — addiere seine Höhe zur Steghöhe. Nur der BREITESTE untere Abschnitt
+  ist der Flansch. flange_height = Höhe des breitesten unteren Abschnitts.
+- Bei "l" (Winkelstahl): width = horizontaler Schenkel, height = vertikaler Schenkel,
+  flange_height = Materialdicke des horizontalen Schenkels,
+  web_thickness = Materialdicke des vertikalen Schenkels
+  WICHTIG: flange_height und web_thickness duerfen NICHT 0 sein
+- Bei "revolution": steps = Stufenliste von links nach rechts (diameter = Aussendurchmesser),
+  bore_diameter = Innendurchmesser (0 falls massiv),
+  extrusion_depth = Gesamtlaenge der Welle (= Summe der steps.length)
+- holes[].depth: "through" | "blind"
+- confidence: 0.0 bis 1.0
+- Für Wellen/Achsen (revolution): Erkenne auch threads, undercuts und grooves wie im System-Prompt beschrieben.
+WICHTIG: Entscheide zuerst ob das Teil im Profil-Modus (ein Profil + Extrusion) oder
+im Operations-Modus (Schritt-für-Schritt Modellierung) dargestellt werden soll.
+Verwende den Operations-Modus für alle Teile die nicht durch ein einzelnes Profil
+abbildbar sind — z.B. Stufenkörper, Teile mit Taschen/Langlöchern, oder Teile mit
+verschiedenen Querschnitten.
+"""
+
+# ── Multi-view prompts ─────────────────────────────────────────────────────────
+
+_MULTIVIEW_EXTRACTION_PROMPT = """\
+### Ansichtserkennung OHNE Textlabels
+
+Wenn die Zeichnung keine Beschriftungen wie "Ansicht A" oder "Vorderansicht" hat, bestimme die Ansichten anhand ihrer Position und ihres Inhalts:
+
+1. VORDERANSICHT: Die größte Ansicht mit der meisten Bemaßung. Zeigt die Hauptkontur.
+2. SEITENANSICHT: Rechts neben der Vorderansicht auf gleicher Höhe. Zeigt die Tiefe/Extrusion.
+3. DRAUFSICHT: Über der Vorderansicht auf gleicher Breite. Zeigt die Breite von oben.
+4. LÄNGSSCHNITT (bei Rotationsteilen): Ansicht mit Strichpunktlinie (Mittellinie) — zeigt die halbe Kontur über/unter der Drehachse. Alle Durchmesser als Ø-Maße, Längen horizontal.
+5. STIRNANSICHT: Einzelner Kreis mit konzentrischen Ringen = Blick auf die Wellenachse.
+
+Für Wellen/Achsen/Spindeln speziell:
+- Der Längsschnitt zeigt die HALBE Kontur über der Mittellinie
+- Durchmesser stehen als Ø-Maße (= voller Durchmesser, NICHT Radius)
+- Gewinde: dünne Linien parallel zur Kontur + M-/Tr-/G-Maßangabe
+- Freistiche: kleine Einkerbungen an jedem Absatzübergang
+- Einstiche: schmale Rechteck-Vertiefungen in der Kontur
+- Alle drei Feature-Typen in die per-View-Daten aufnehmen
+
+---
+
+Analysiere diese technische Zeichnung auf Mehrfachansichten.
+
+Schritt 1: Erkenne ob die Zeichnung mehrere Ansichten enthält (Vorder-, Seiten-, Draufsicht).
+Schritt 2: Extrahiere für jede Ansicht die sichtbaren Maße und Features.
+
+Antworte NUR mit validem JSON ohne Markdown-Backticks:
+{
+  "has_multiple_views": true,
+  "views_detected": ["front", "side", "top"],
+  "unit": "mm",
+  "views": {
+    "front": {
+      "width": 100.0,
+      "height": 60.0,
+      "profile_type": "rectangle",
+      "flange_height": 0.0,
+      "flange_width": 0.0,
+      "web_thickness": 0.0,
+      "holes": [{"x": 15.0, "y": 15.0, "diameter": 8.0, "depth": "through"}],
+      "chamfers": [{"edge": "top-front", "distance": 2.0}],
+      "fillets": [],
+      "threads": [],
+      "undercuts": [],
+      "grooves": [],
+      "contour_points": [[0,0], [100,0], [100,60], [0,60]],
+      "visible_features": ["rechteckige_aussenkante"],
+      "hidden_features": [],
+      "depth_from_this_view": 0.0,
+      "features": "Freitext fuer nicht schematisierbare Details"
+    },
+    "side": {
+      "width": 20.0,
+      "height": 60.0,
+      "profile_type": "rectangle",
+      "flange_height": 0.0,
+      "flange_width": 0.0,
+      "web_thickness": 0.0,
+      "holes": [],
+      "chamfers": [],
+      "fillets": [],
+      "threads": [],
+      "undercuts": [],
+      "grooves": [],
+      "contour_points": [[0,0], [20,0], [20,60], [0,60]],
+      "visible_features": [],
+      "hidden_features": [],
+      "depth_from_this_view": 20.0,
+      "features": ""
+    },
+    "top": {
+      "width": 100.0,
+      "height": 20.0,
+      "profile_type": "rectangle",
+      "flange_height": 0.0,
+      "flange_width": 0.0,
+      "web_thickness": 0.0,
+      "holes": [],
+      "chamfers": [],
+      "fillets": [],
+      "threads": [],
+      "undercuts": [],
+      "grooves": [],
+      "contour_points": [[0,0], [100,0], [100,20], [0,20]],
+      "visible_features": [],
+      "hidden_features": [],
+      "depth_from_this_view": 0.0,
+      "features": ""
+    }
+  }
+}
+
+Neue Felder pro Ansicht:
+- contour_points: Äußere Kontur dieser Ansicht als [[x,y],...] Punktliste (Einheit wie "unit")
+  Für nicht-rechteckige Konturen alle Eckpunkte im Uhrzeigersinn angeben.
+  Für einfache Rechtecke: 4 Eckpunkte. Für Stufenkonturen: alle Stufen-Eckpunkte.
+- visible_features: Sichtbare Geometrie-Elemente als Textliste (Volllinien), z.B. ["stufe_oben", "bohrung_links"]
+- hidden_features: Verdeckte Elemente (gestrichelte Linien), z.B. ["nut_hinten", "sackloch_mitte"]
+- depth_from_this_view: Tiefe die DIESE Ansicht für den Körper liefert (0.0 wenn nicht direkt ablesbar)
+  Seitenansicht liefert typischerweise die Extrusionstiefe des Grundkörpers.
+
+Fuer L-Profile (profile_type="l") und T-Profile (profile_type="t") in der FRONTANSICHT:
+  flange_height  = Hoehe des horizontalen Flansches (Grundplatte), z.B. 20.0
+  flange_width   = Breite des horizontalen Flansches, z.B. 80.0
+  web_thickness  = Dicke des vertikalen Stegs, z.B. 10.0
+  width          = Gesamtbreite des Profils (= flange_width fuer T-Profil)
+  height         = Gesamthoehe (= flange_height + Steghöhe)
+  Bei T-Profil: Falls ein oberer Abschnitt existiert, der gleich breit oder schmäler als
+  der Steg ist: Addiere dessen Höhe zur Steghöhe (kein zweiter Flansch).
+  flange_height = ausschließlich Höhe des breitesten unteren Abschnitts.
+
+Fuer rotationssymmetrische Teile (Wellen, Zylinder, Drehteile) setze profile_type="revolution"
+und ergaenze das View-Objekt der SEITENANSICHT (Profilansicht) um:
+  "steps": [{"diameter": 94.0, "length": 84.0}, {"diameter": 70.0, "length": 40.0}, ...],
+  "bore_diameter": 0.0,
+  "total_length": 184.0
+
+Regeln fuer Wellen (profile_type="revolution"):
+- steps: von LINKS nach RECHTS, jede Stufe mit ihrem Aussendurchmesser und ihrer Laenge
+- Jede sichtbare Masslinie (z.B. 40, 30, 20) einer konkreten Stufe zuordnen
+- Masszahlen in Klammern z.B. (84) = Referenzmaß des dazugehoerigen Abschnitts
+- Durchmesser nehmen normalerweise von links nach rechts ab (z.B. 94 → 70 → 56 → 40 → 30)
+- total_length = Summe aller steps.length (entspricht der Gesamtlaengenmasslinie)
+
+Regeln:
+- Erlaubte Ansichtsbezeichnungen: "front", "side", "top", "back", "bottom", "isometric"
+- profile_type: "rectangle" | "circle" | "l" | "t" | "revolution"
+- has_multiple_views = false wenn nur eine Ansicht vorhanden (views enthaelt nur "front")
+- Alle Masse in der in "unit" angegebenen Einheit
+- holes[].depth: "through" | "blind"
+- Fehlende Masse als 0.0, fehlende Listen als []
+
+Positions-basierte Ansichtserkennung (Erste-Winkel-Projektion / Dritte-Winkel):
+- Deutsche Zeichnungen verwenden meist ERSTE-WINKEL-PROJEKTION (DIN/ISO):
+  Seitenansicht RECHTS zeigt die LINKE Seite des Teils
+  Draufsicht UNTEN zeigt das Teil von OBEN
+- Amerikanische Zeichnungen: DRITTE-WINKEL-PROJEKTION:
+  Seitenansicht RECHTS zeigt die RECHTE Seite
+  Draufsicht OBEN zeigt das Teil von OBEN
+- Prüfe das Projektionssymbol im Schriftfeld (Kegelstumpf) wenn vorhanden
+- Default für deutsche Zeichnungen: Erste-Winkel-Projektion
+
+Isometrische/axonometrische Ansichten (3D-Schrägbild) sind KEINE
+Projektionsansichten — sie dienen nur der Visualisierung. Maße daraus
+nur verwenden wenn sie explizit bemaßt sind.
+"""
+
+_CONSOLIDATION_SCHEMA = """\
+{
+  "unit": "mm",
+  "view": "multi",
+  "base_profile": {
+    "type": "rectangle",
+    "width": 100.0,
+    "height": 60.0,
+    "thickness": 0.0,
+    "radius": null,
+    "flange_width": null,
+    "flange_height": null,
+    "web_thickness": null
+  },
+  "extrusion_depth": 20.0,
+  "holes": [
+    {
+      "x": 15.0, "y": 15.0, "diameter": 8.0,
+      "depth": "through", "depth_value": null,
+      "countersink": false, "countersink_angle": null
+    }
+  ],
+  "chamfers": [{"edge": "top-front", "distance": 2.0}],
+  "fillets":  [{"edge": "bottom-left", "radius": 3.0}],
+  "threads":  [],
+  "undercuts": [],
+  "grooves":  [],
+  "confidence": 0.9,
+  "notes": "Masse aus N Ansichten konsolidiert. Widersprueche: ..."
+}\
+"""
+
+_CONSOLIDATION_SCHEMA_REVOLUTION = """\
+{
+  "unit": "mm",
+  "view": "multi",
+  "base_profile": {
+    "type": "revolution",
+    "steps": [
+      {"diameter": 94.0, "length": 84.0},
+      {"diameter": 70.0, "length": 40.0},
+      {"diameter": 56.0, "length": 10.0},
+      {"diameter": 40.0, "length": 30.0},
+      {"diameter": 30.0, "length": 20.0}
+    ],
+    "bore_diameter": 0.0
+  },
+  "extrusion_depth": 184.0,
+  "holes": [],
+  "chamfers": [{"edge": "step", "distance": 2.0}],
+  "fillets":  [],
+  "threads":  [
+    {"designation": "M12", "thread_type": "metric", "start_position": 0.0,
+     "length": 20.0, "step_index": 0, "pitch": 0.0, "hand": "right", "internal": false}
+  ],
+  "undercuts": [
+    {"undercut_type": "DIN509_E", "position": 0.0, "step_index": 0,
+     "width": 0.0, "depth": 0.0, "radius": 0.0}
+  ],
+  "grooves":  [
+    {"groove_type": "circlip_din471", "position": 0.0, "width": 0.0,
+     "depth": 0.0, "step_index": 0}
+  ],
+  "confidence": 0.9,
+  "notes": "Welle aus N Ansichten konsolidiert. Gesamtlaenge = Summe aller steps.length."
+}\
+"""
+
+_CONSOLIDATION_SCHEMA_T = """\
+{
+  "unit": "mm",
+  "view": "multi",
+  "base_profile": {
+    "type": "t",
+    "width": 80.0,
+    "height": 60.0,
+    "flange_width": 80.0,
+    "flange_height": 20.0,
+    "web_thickness": 20.0,
+    "thickness": 0.0,
+    "radius": null
+  },
+  "extrusion_depth": 40.0,
+  "holes": [],
+  "chamfers": [{"edge": "top-front", "distance": 2.0}],
+  "fillets":  [],
+  "threads":  [],
+  "undercuts": [],
+  "grooves":  [],
+  "confidence": 0.9,
+  "notes": "T-Profil aus N Ansichten konsolidiert."
+}\
+"""
+
+_CONSOLIDATION_SCHEMA_L = """\
+{
+  "unit": "mm",
+  "view": "multi",
+  "base_profile": {
+    "type": "l",
+    "width": 80.0,
+    "height": 60.0,
+    "flange_width": 80.0,
+    "flange_height": 15.0,
+    "web_thickness": 15.0,
+    "thickness": 0.0,
+    "radius": null
+  },
+  "extrusion_depth": 40.0,
+  "holes": [],
+  "chamfers": [{"edge": "top-front", "distance": 2.0}],
+  "fillets":  [],
+  "threads":  [],
+  "undercuts": [],
+  "grooves":  [],
+  "confidence": 0.9,
+  "notes": "L-Profil (Winkelstahl) aus N Ansichten konsolidiert."
+}\
+"""
+
+_CONSOLIDATION_SCHEMA_OPERATIONS = """\
+{
+  "unit": "mm",
+  "view": "multi",
+  "modeling_mode": "operations",
+  "base_profile": {"type": "none"},
+  "extrusion_depth": 0.0,
+  "holes": [],
+  "chamfers": [],
+  "fillets": [],
+  "threads": [],
+  "undercuts": [],
+  "grooves": [],
+  "operations": [
+    {
+      "operation": "extrude_add",
+      "sketch_plane": "XY",
+      "contour": {
+        "points": [[0,0],[100,0],[100,20],[30,20],[30,60],[70,60],[70,20],[100,20],[100,0]],
+        "closed": true
+      },
+      "depth": 20.0,
+      "description": "Grundkörper aus Vorderansicht-Kontur, Tiefe aus Seitenansicht"
+    }
+  ],
+  "confidence": 0.9,
+  "notes": "Operations-Modus: nicht-rechteckige Kontur erkannt. Aus N Ansichten konsolidiert."
+}\
+"""
+
+
+def _has_complex_contour(pts: list) -> bool:
+    """Return True when pts represents a non-rectangular (and non-empty) contour."""
+    if not pts:
+        return False
+    if len(pts) > 4:
+        return True
+    if len(pts) == 4:
+        xs = [p[0] for p in pts if isinstance(p, (list, tuple)) and len(p) >= 2]
+        ys = [p[1] for p in pts if isinstance(p, (list, tuple)) and len(p) >= 2]
+        if len(xs) != 4:
+            return False
+        return not (len(set(xs)) == 2 and len(set(ys)) == 2)
+    return False
+
+
+class VisionAnalyzer:
+    def __init__(self, api_key: str, model: str = None):
+        if not api_key or not api_key.strip():
+            raise ValueError("api_key darf nicht leer sein.")
+        self._api_key = api_key.strip()
+        self._model   = model or config.DEFAULT_MODEL
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def analyze_image(self, image_path: str) -> dict:
+        """Send image to Claude, return raw parsed JSON dict."""
+        encoded, media_type = self._encode_image(image_path)
+        payload = self._build_payload(encoded, media_type)
+        raw = self._post(payload)
+        data = self._extract_json(raw)
+
+        if not self.validate_response(data):
+            raise ValueError(
+                f"API-Antwort enthält nicht alle Pflichtfelder {_REQUIRED_FIELDS}. "
+                f"Erhaltene Schlüssel: {set(data.keys())}"
+            )
+
+        self._log_result(data)
+        return data
+
+    def analyze(self, image_path: str) -> DrawingAnalysis:
+        """Convenience wrapper — returns a typed DrawingAnalysis."""
+        return DrawingAnalysis.from_dict(self.analyze_image(image_path))
+
+    def analyze_image_from_base64(
+        self, base64_str: str, media_type: str = "image/png"
+    ) -> dict:
+        """Accept a pre-encoded base64 string (from the HTML palette) and return raw JSON dict.
+
+        Supports image/png, image/jpeg, image/webp and application/pdf.
+        PDFs are sent natively as document type — no rasterization required.
+        """
+        if not base64_str:
+            raise ValueError("base64_str darf nicht leer sein.")
+
+        if media_type not in _VALID_MEDIA_TYPES:
+            raise ValueError(
+                f"Nicht unterstützter MIME-Typ: '{media_type}'. "
+                f"Erlaubt: {', '.join(sorted(_VALID_MEDIA_TYPES))}"
+            )
+
+        payload = self._build_payload(base64_str, media_type)
+        raw = self._post(payload)
+        data = self._extract_json(raw)
+
+        if not self.validate_response(data):
+            raise ValueError(
+                f"API-Antwort enthält nicht alle Pflichtfelder {_REQUIRED_FIELDS}. "
+                f"Erhaltene Schlüssel: {set(data.keys())}"
+            )
+
+        self._log_result(data)
+        return data
+
+    def analyze_multiview_image(self, image_path: str) -> dict:
+        """Multi-view pipeline from a file path — detects views then consolidates."""
+        encoded, media_type = self._encode_image(image_path)
+        return self._multiview_pipeline(encoded, media_type)
+
+    def analyze_multiview_from_base64(
+        self, base64_str: str, media_type: str = "image/png"
+    ) -> dict:
+        """Multi-view pipeline from pre-encoded base64 (from HTML palette).
+
+        Makes two API calls:
+          1. View detection + per-view dimension extraction.
+          2. Consolidation into a standard DrawingAnalysis JSON (resolves contradictions).
+        Falls back gracefully when only one view is detected.
+        Supports image/png, image/jpeg, image/webp and application/pdf natively.
+        """
+        if not base64_str:
+            raise ValueError("base64_str darf nicht leer sein.")
+
+        if media_type not in _VALID_MEDIA_TYPES:
+            raise ValueError(
+                f"Nicht unterstützter MIME-Typ: '{media_type}'. "
+                f"Erlaubt: {', '.join(sorted(_VALID_MEDIA_TYPES))}"
+            )
+
+        return self._multiview_pipeline(base64_str, media_type)
+
+    def validate_response(self, data: dict) -> bool:
+        """Return True when all required top-level fields are present and well-formed."""
+        if not isinstance(data, dict):
+            return False
+        if not _REQUIRED_FIELDS.issubset(data.keys()):
+            return False
+        profile = data.get("base_profile")
+        if not isinstance(profile, dict) or "type" not in profile:
+            return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _encode_image(self, path: str) -> tuple:
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Bilddatei nicht gefunden: {path}")
+
+        ext = os.path.splitext(path)[1].lower()
+        media_type = _MIME_TYPES.get(ext)
+        if media_type is None:
+            raise ValueError(
+                f"Nicht unterstütztes Bildformat '{ext}'. "
+                f"Erlaubt: {', '.join(_MIME_TYPES)}"
+            )
+
+        with open(path, "rb") as fh:
+            encoded = base64.standard_b64encode(fh.read()).decode("ascii")
+        return encoded, media_type
+
+    def _build_payload(self, encoded: str, media_type: str, prompt=None) -> bytes:
+        if prompt is None:
+            prompt = _USER_PROMPT
+
+        if media_type == "application/pdf":
+            content_block = {
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": encoded,
+                },
+            }
+        else:
+            content_block = {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": encoded,
+                },
+            }
+
+        payload = {
+            "model": self._model,
+            "max_tokens": config.MAX_TOKENS,
+            "system": _SYSTEM_PROMPT,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        content_block,
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
+        }
+        return json.dumps(payload).encode("utf-8")
+
+    def _build_text_payload(self, user_text: str) -> bytes:
+        """Build a text-only (no image) API payload — used for the consolidation step."""
+        payload = {
+            "model": self._model,
+            "max_tokens": config.MAX_TOKENS,
+            "system": _SYSTEM_PROMPT,
+            "messages": [{"role": "user", "content": user_text}],
+        }
+        return json.dumps(payload).encode("utf-8")
+
+    def _multiview_pipeline(self, encoded: str, media_type: str) -> dict:
+        # Call 1 — per-view extraction
+        payload1 = self._build_payload(encoded, media_type, prompt=_MULTIVIEW_EXTRACTION_PROMPT)
+        raw1 = self._post(payload1)
+        mv_data = self._extract_json(raw1)
+
+        if not isinstance(mv_data, dict) or "has_multiple_views" not in mv_data:
+            raise ValueError(
+                f"Ungültige Mehrfachansichten-Antwort von der API.\n"
+                f"Erhaltene Schlüssel: {set(mv_data.keys()) if isinstance(mv_data, dict) else type(mv_data)}"
+            )
+
+        # Call 2 — consolidation into standard DrawingAnalysis schema
+        consolidated = self._consolidate_views(mv_data)
+
+        has_multi = bool(mv_data.get("has_multiple_views"))
+        consolidated["multi_view"] = has_multi
+        if has_multi:
+            views_raw = mv_data.get("views", {})
+            consolidated["view_analyses"] = [
+                {"view": k, **v} for k, v in views_raw.items()
+            ]
+
+        if not self.validate_response(consolidated):
+            raise ValueError(
+                f"Konsolidierte Antwort enthält nicht alle Pflichtfelder {_REQUIRED_FIELDS}. "
+                f"Erhaltene Schlüssel: {set(consolidated.keys())}"
+            )
+
+        self._log_result(consolidated)
+        return consolidated
+
+    def _consolidate_views(self, mv_data: dict) -> dict:
+        """Second API call (text-only): resolve contradictions and produce unified JSON."""
+        views_detected = mv_data.get("views_detected", [])
+        n = len(views_detected)
+        views_json = json.dumps(mv_data, ensure_ascii=False, indent=2)
+
+        # Detect profile type from extraction result
+        views = mv_data.get("views", {})
+        profile_types = {v.get("profile_type", "").lower() for v in views.values()}
+        is_revolution = bool(profile_types & {"revolution", "lathe", "shaft", "welle"})
+        is_t_profile  = bool(profile_types & {"t", "tprofile"})
+        is_l_profile  = bool(profile_types & {"l", "lprofile"})
+        is_operations = (
+            not is_revolution
+            and any(
+                _has_complex_contour(v.get("contour_points", []))
+                for v in views.values()
+            )
+        )
+
+        if is_revolution:
+            schema = _CONSOLIDATION_SCHEMA_REVOLUTION
+            extra_rules = (
+                "5. Dieses Bauteil ist ROTATIONSSYMMETRISCH (Welle/Drehteil):\n"
+                "   - Nutze die Seitenansicht (Profilansicht) fuer die Stufengeometrie\n"
+                "   - Ordne JEDE bemaßte Laenge der richtigen Stufe zu:\n"
+                "     * Folge den Pfeillinien der Masszahlen zur zugehoerigen Stufe\n"
+                "     * Masszahlen in Klammern (z.B. (84)) = Referenzmaß des Abschnitts\n"
+                "     * Durchmesser nehmen i.d.R. von links nach rechts ab\n"
+                "   - Berechne fehlende Laengen als Differenz: Gesamtlaenge - Summe bekannter Laengen\n"
+                "   - WICHTIG: Summe aller steps.length MUSS = extrusion_depth sein\n"
+                "   - bore_diameter nur setzen wenn eine durchgehende Innenbohrung vorhanden\n"
+                "   - Die Frontansicht (konzentrische Kreise) bestaetigt nur die Durchmesser,\n"
+                "     liefert aber KEINE Laengeninformation\n"
+                "   - Konsolidiere threads aus ALLEN Ansichten; der Laengsschnitt hat die\n"
+                "     genauesten Positionsdaten — bevorzuge ihn bei Widerspruechen\n"
+                "   - Konsolidiere undercuts: pruefe jeden Absatzuebergang der steps-Liste\n"
+                "     auf erkannte Freistiche und weise sie dem richtigen step_index zu\n"
+                "   - Konsolidiere grooves: Position und Breite aus dem Laengsschnitt,\n"
+                "     Tiefe ggf. aus der Stirnansicht\n"
+                "   - Dedupliziere: Wenn der gleiche Thread/Undercut/Groove in mehreren\n"
+                "     Ansichten erkannt wurde, behalte die Version mit den meisten Massangaben\n\n"
+            )
+        elif is_t_profile:
+            schema = _CONSOLIDATION_SCHEMA_T
+            extra_rules = (
+                "5. Dieses Bauteil ist ein T-PROFIL (Traeger/T-Stueck):\n"
+                "   - Nutze die FRONTANSICHT fuer das Querschnittsprofil\n"
+                "   - base_profile.type = 't'\n"
+                "   - width = Gesamtbreite des Flansches (horizontaler Teil)\n"
+                "   - height = Gesamthoehe (= flange_height + web_height)\n"
+                "   - flange_height = Hoehe des horizontalen Flansches (Grundplatte)\n"
+                "   - flange_width = Breite des Flansches (= width bei symmetrischem T)\n"
+                "   - web_thickness = Dicke des vertikalen Stegs\n"
+                "   - extrusion_depth = Laenge des Profils (aus der Seitenansicht)\n"
+                "   - WICHTIG: Uebernehme flange_height und web_thickness direkt aus den\n"
+                "     Frontansicht-Werten, nicht aus width/height der Seitenansicht\n"
+                "   - KRITISCH: Falls die Frontansicht 3 Abschnitte zeigt (unten breit, Mitte\n"
+                "     schmal, oben schmal gleicher Breite wie Mitte): Der oberste Abschnitt\n"
+                "     gehoert zum Steg — addiere seine Hoehe zur Steghöhe. Der Flansch ist\n"
+                "     NUR der unterste, breiteste Abschnitt.\n"
+                "   - flange_height = Hoehe des untersten breitesten Abschnitts\n"
+                "   - height = flange_height + volle Steghöhe inkl. aller deckungsgleichen\n"
+                "     Abschnitte oberhalb des Flansches\n"
+                "   - web_thickness = Breite des Stegs / der schmaleren Abschnitte\n\n"
+            )
+        elif is_l_profile:
+            schema = _CONSOLIDATION_SCHEMA_L
+            extra_rules = (
+                "5. Dieses Bauteil ist ein L-PROFIL (Winkelstahl/Winkel):\n"
+                "   - Nutze die FRONTANSICHT fuer das Querschnittsprofil\n"
+                "   - base_profile.type = 'l'\n"
+                "   - width = Breite des horizontalen Schenkels\n"
+                "   - height = Hoehe des vertikalen Schenkels\n"
+                "   - flange_height = Materialdicke des horizontalen Schenkels\n"
+                "   - web_thickness = Materialdicke des vertikalen Schenkels\n"
+                "   - extrusion_depth = Laenge des Profils (aus der Seitenansicht)\n"
+                "   - WICHTIG: Uebernehme flange_height und web_thickness direkt aus\n"
+                "     den Frontansicht-Werten\n\n"
+            )
+        elif is_operations:
+            schema = _CONSOLIDATION_SCHEMA_OPERATIONS
+            extra_rules = (
+                "5. Dieses Bauteil hat eine NICHT-RECHTECKIGE Kontur → Operations-Modus:\n"
+                "   - modeling_mode = 'operations'\n"
+                "   - base_profile = {'type': 'none'}, extrusion_depth = 0\n"
+                "   - Nutze contour_points der FRONTANSICHT als Grundkörper-Kontur für den\n"
+                "     ersten extrude_add-Schritt\n"
+                "   - depth des ersten Schritts = depth_from_this_view der SEITENANSICHT\n"
+                "   - Weitere Schritte: extrude_cut / hole / slot für alle erkannten Features\n"
+                "     (visible_features und hidden_features der jeweiligen Ansichten)\n"
+                "   - Gestrichelte Linien einer Ansicht → hidden_features → als extrude_cut\n"
+                "     oder hole von der gegenüberliegenden Seite modellieren\n"
+                "   - Wenn die Frontkontur das vollständige Profil zeigt und die Tiefe überall\n"
+                "     gleich ist: eine einzelne extrude_add mit der vollen Kontur bevorzugen\n\n"
+            )
+        else:
+            schema = _CONSOLIDATION_SCHEMA
+            extra_rules = (
+                "5. Wenn keine Seitenansicht: schaetze extrusion_depth aus Draufsicht-Hoehe\n\n"
+            )
+
+        user_text = (
+            "Konsolidiere diese Mehrfachansichten-Analyse zu einer konsistenten DrawingAnalysis.\n\n"
+            "Erkannte Ansichten (" + str(n) + "):\n"
+            + views_json
+            + "\n\nAufgabe:\n"
+            "1. Bestimme die Geometrie des Bauteils aus allen Ansichten\n"
+            "2. Loese Widersprueche: Falls Masse widersprechen, nutze den haeufigsten Wert\n"
+            "   und dokumentiere alle Widersprueche in 'notes'\n"
+            "3. Uebernehme Bohrungen aus der Frontansicht (x/y-Koordinaten bleiben)\n"
+            "4. Prismatische Koerper: Frontansicht=Breite/Hoehe, Seitenansicht=Tiefe\n"
+            + extra_rules
+            + "Antworte NUR mit validem JSON ohne Markdown-Backticks, exakt nach diesem Schema:\n"
+            + schema
+        )
+
+        payload = self._build_text_payload(user_text)
+        raw = self._post(payload)
+        return self._extract_json(raw)
+
+    def _post(self, payload: bytes) -> str:
+        headers = {
+            "x-api-key": self._api_key,
+            "anthropic-version": _API_VERSION,
+            "content-type": "application/json",
+        }
+        req = urllib.request.Request(_API_URL, data=payload, headers=headers, method="POST")
+
+        print(
+            f"[VisionAnalyzer] Sende Request, Größe: {len(payload)} Bytes",
+            file=sys.stderr,
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                body = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"Claude API HTTP {exc.code}: {exc.reason}\n{error_body}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Verbindung zur Claude API fehlgeschlagen: {exc.reason}"
+            ) from exc
+
+        try:
+            response = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"Ungültiges JSON in der API-Antwort: {exc}\nBody: {body[:300]}"
+            ) from exc
+
+        if "error" in response:
+            err = response["error"]
+            raise RuntimeError(
+                f"Claude API Fehler [{err.get('type')}]: {err.get('message')}"
+            )
+
+        try:
+            return response["content"][0]["text"]
+        except (KeyError, IndexError) as exc:
+            raise RuntimeError(
+                f"Unerwartete Antwortstruktur von Claude API: {response}"
+            ) from exc
+
+    def _extract_json(self, raw: str) -> dict:
+        # Strip optional markdown code fences the model may emit despite instructions
+        text = raw.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1]
+            text = text.rsplit("```", 1)[0]
+
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start == -1 or end == 0:
+            raise ValueError(
+                f"Kein JSON-Objekt in der API-Antwort gefunden.\nAntwort: {raw[:300]}"
+            )
+
+        try:
+            return json.loads(text[start:end])
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"JSON konnte nicht geparst werden: {exc}\nRohdaten: {text[start:end][:300]}"
+            ) from exc
+
+    def _log_result(self, data: dict):
+        confidence = data.get("confidence", 0.0)
+        notes = data.get("notes", "")
+        views = data.get("view_analyses", [])
+        view_info = (
+            f" | Ansichten: {len(views)} ({', '.join(v.get('view','?') for v in views)})"
+            if views else ""
+        )
+        message = (
+            f"[DrawingToFusion] Analyse abgeschlossen — "
+            f"Confidence: {confidence:.0%}"
+            + view_info
+            + (f" | Notes: {notes}" if notes else "")
+        )
+        try:
+            import adsk.core
+            adsk.core.Application.get().log(message)
+        except Exception:
+            pass
+        self.save_last_response(data)
+
+    # last_response.json is written next to the add-in root (DrawingToFusion/)
+    _LAST_RESPONSE_PATH = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "last_response.json",
+    )
+
+    def save_last_response(self, response_dict: dict) -> None:
+        """Persist response_dict as last_response.json next to the add-in.
+
+        Allows re-running geometry construction from the cached result without
+        a repeated (and billable) API call:
+
+            import json
+            from DrawingToFusion.core.vision_analyzer import VisionAnalyzer
+            data = json.loads(open(VisionAnalyzer._LAST_RESPONSE_PATH).read())["data"]
+        """
+        payload = {
+            "_saved_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "_model":    self._model,
+            "data":      response_dict,
+        }
+        try:
+            with open(self._LAST_RESPONSE_PATH, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            try:
+                import adsk.core
+                adsk.core.Application.get().log(
+                    f"[DrawingToFusion] save_last_response fehlgeschlagen: {exc}"
+                )
+            except Exception:
+                pass
