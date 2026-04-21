@@ -58,7 +58,81 @@ WICHTIG für Oblong-Profile (Laschen, Pleuel, Verbindungsstücke):
 - holes: Bohrungen zentriert auf den Kreismittelpunkten, \
 x-Positionen aus dem Abstandsmaß berechnen
 
-Antworte NUR mit validem JSON ohne Markdown-Backticks, kein Text davor oder danach.\
+Antworte NUR mit validem JSON ohne Markdown-Backticks, kein Text davor oder danach.
+
+## Gewinde (threads)
+
+Für revolution-Profile (Wellen, Achsen, Spindeln) erkenne Gewinde und gib sie als "threads"-Array zurück:
+
+"threads": [
+  {
+    "designation": "M12x1.5",
+    "thread_type": "metric_fine",
+    "start_position": 5.0,
+    "length": 20.0,
+    "step_index": 0,
+    "pitch": 1.5,
+    "hand": "right",
+    "internal": false
+  }
+]
+
+Erkennungsregeln für Gewinde:
+- Dünne Linien parallel zur Wellenkontur = Gewindekern-/Kammlinie
+- Maßangaben: "M12", "M8x1", "Tr20x4", "G1/2", "UNC 1/4"
+- In der Stirnansicht: Dreiviertelkreis am Kerndurchmesser (ca. 75% Vollkreis)
+- thread_type bestimmen: "M" = metric, "M...x..." mit Steigung = metric_fine, "Tr" = trapezoidal, "G" = pipe, "UNC/UNF" = whitworth
+- pitch: nur angeben wenn explizit in der Zeichnung (z.B. "M12x1.5" → pitch=1.5). Bei "M12" ohne Steigung → pitch=0 (Regelgewinde)
+- start_position: Abstand von der linken Bezugskante des Steps bis zum Gewindeanfang
+- step_index: Index in der steps-Liste auf dem das Gewinde sitzt
+
+## Freistiche (undercuts)
+
+"undercuts": [
+  {
+    "undercut_type": "DIN509_E",
+    "position": 40.0,
+    "step_index": 1,
+    "width": 2.5,
+    "depth": 0.3,
+    "radius": 0.2
+  }
+]
+
+Erkennungsregeln für Freistiche:
+- Kleine Einkerbung/Vertiefung am Übergang zwischen zwei Wellendurchmessern
+- Oft mit "DIN 509" Verweis oder t1/t2-Bemaßung in der Zeichnung
+- Freistiche sitzen IMMER an einem Absatz (Durchmessersprung)
+- Typisch VOR einem Gewinde oder einer Passfläche
+- undercut_type: "DIN509_E" (Standard, nur Breite+Tiefe), "DIN509_F" (mit Radius), "custom"
+- position: axiale Position des Freistich-Anfangs
+- Wenn kein Maß angegeben: width und depth auf 0 setzen, undercut_type auf "DIN509_E" — der Builder verwendet dann DIN-Tabellenwerte
+
+## Einstiche / Nuten (grooves)
+
+"grooves": [
+  {
+    "groove_type": "circlip_din471",
+    "position": 55.0,
+    "width": 1.8,
+    "depth": 1.1,
+    "step_index": 2
+  }
+]
+
+Erkennungsregeln für Einstiche:
+- Schmale rechteckige Vertiefungen/Einschnitte IN die Wellenkontur
+- Sicherungsringnuten: DIN 471/472 Verweis, "Sicherungsring", Wellenmuster-Symbol
+- O-Ring-Nuten: breitere Nut mit Radiusübergang am Grund
+- groove_type: "circlip_din471" (Außensicherungsring), "circlip_din472" (Innensicherungsring), "o_ring", "custom"
+- position: Axiale Mitte der Nut
+- width/depth: Aus Bemaßung ablesen, bei DIN-Verweis können Tabellenwerte verwendet werden
+
+## Wichtig für alle drei Feature-Typen:
+- Nur zurückgeben wenn in der Zeichnung tatsächlich erkennbar
+- step_index bezieht sich auf den Index in der "steps"-Liste des revolution-Profils
+- Positionen und Maße in der Einheit der Zeichnung angeben (wie alle anderen Maße)
+- Leeres Array [] wenn keine Features dieses Typs erkennbar sind\
 """
 
 _USER_PROMPT = """\
@@ -129,6 +203,7 @@ Erlaubte Werte:
   extrusion_depth = Gesamtlaenge der Welle (= Summe der steps.length)
 - holes[].depth: "through" | "blind"
 - confidence: 0.0 bis 1.0
+- Für Wellen/Achsen (revolution): Erkenne auch threads, undercuts und grooves wie im System-Prompt beschrieben.
 """
 
 # ── Multi-view prompts ─────────────────────────────────────────────────────────
