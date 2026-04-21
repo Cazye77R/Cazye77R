@@ -95,6 +95,11 @@ class GeometryBuilder:
         self._add_chamfers(comp, body, analysis.chamfers, factor, p_names.get("chamfers", []))
         self._add_fillets(comp, body, analysis.fillets, factor, p_names.get("fillets", []))
 
+        # Wellenspezifische Features
+        self._apply_threads(comp, body, analysis)
+        self._apply_undercuts(comp, body, analysis)
+        self._apply_grooves(comp, body, analysis)
+
     # ──────────────────────────────────────────────────────────────────────
     # Unit conversion
     # ──────────────────────────────────────────────────────────────────────
@@ -214,6 +219,45 @@ class GeometryBuilder:
                f"DrawingToFusion: fillet {i} radius")
             for i, fi in enumerate(analysis.fillets, 1)
         ]
+
+        # ── Threads ────────────────────────────────────────────────────────
+        if getattr(analysis, 'threads', None):
+            pn["threads"] = [
+                {
+                    "len":    ep(design, f"DTF_ThreadLen_{i}",    t.length,         u,
+                                f"DrawingToFusion: thread {i} length"),
+                    "offset": ep(design, f"DTF_ThreadOffset_{i}", t.start_position, u,
+                                f"DrawingToFusion: thread {i} offset"),
+                }
+                for i, t in enumerate(analysis.threads, 1)
+                if t.length > 0
+            ]
+
+        # ── Undercuts ──────────────────────────────────────────────────────
+        if getattr(analysis, 'undercuts', None):
+            pn["undercuts"] = [
+                {
+                    "width": ep(design, f"DTF_UndercutWidth_{i}", uc.width, u,
+                                f"DrawingToFusion: undercut {i} width"),
+                    "depth": ep(design, f"DTF_UndercutDepth_{i}", uc.depth, u,
+                                f"DrawingToFusion: undercut {i} depth"),
+                }
+                for i, uc in enumerate(analysis.undercuts, 1)
+                if uc.width > 0 and uc.depth > 0
+            ]
+
+        # ── Grooves ────────────────────────────────────────────────────────
+        if getattr(analysis, 'grooves', None):
+            pn["grooves"] = [
+                {
+                    "width": ep(design, f"DTF_GrooveWidth_{i}", gr.width, u,
+                                f"DrawingToFusion: groove {i} width"),
+                    "depth": ep(design, f"DTF_GrooveDepth_{i}", gr.depth, u,
+                                f"DrawingToFusion: groove {i} depth"),
+                }
+                for i, gr in enumerate(analysis.grooves, 1)
+                if gr.width > 0 and gr.depth > 0
+            ]
 
         return pn
 
@@ -575,7 +619,8 @@ class GeometryBuilder:
             adsk.fusion.FeatureOperations.NewBodyFeatureOperation
         )
         rev_input.setAngleExtent(False, adsk.core.ValueInput.createByString("360 deg"))
-        revolves.add(rev_input)
+        rev_feat = revolves.add(rev_input)
+        body = rev_feat.bodies.item(0)
 
         if analysis.holes:
             self._app.log(
@@ -592,6 +637,10 @@ class GeometryBuilder:
                 f"[DrawingToFusion] {len(analysis.fillets)} Verrundungen auf Drehteil — "
                 "bitte manuell hinzufügen."
             )
+
+        self._apply_threads(comp, body, analysis)
+        self._apply_undercuts(comp, body, analysis)
+        self._apply_grooves(comp, body, analysis)
 
     def _sketch_revolution_profile(
         self, sketch, p: RevolutionProfile, factor: float
@@ -625,6 +674,215 @@ class GeometryBuilder:
         pts.append((x, bore_r if bore_r > 0 else 0.0))
 
         self._add_closed_polyline(sketch, pts)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Shaft features: threads, undercuts, grooves
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _find_cylindrical_face_for_step(
+        self, body, analysis: DrawingAnalysis, step_index: int, cm_factor: float
+    ):
+        """Return the cylindrical BRepFace whose radius matches steps[step_index].
+
+        Returns None when no matching face is found.
+        """
+        if not isinstance(analysis.base_profile, RevolutionProfile):
+            return None
+        steps = analysis.base_profile.steps
+        if step_index >= len(steps):
+            return None
+        target_r = steps[step_index].diameter / 2.0 * cm_factor
+        tol = 0.01  # 0.01 cm = 0.1 mm
+        for face in body.faces:
+            try:
+                if not isinstance(face.geometry, adsk.core.Cylinder):
+                    continue
+                if abs(face.geometry.radius - target_r) <= tol:
+                    return face
+            except Exception:
+                continue
+        return None
+
+    def _apply_threads(self, comp, body, analysis: DrawingAnalysis) -> None:
+        """Create thread features on the cylindrical faces of body."""
+        if not getattr(analysis, 'threads', None):
+            return
+        f = analysis.to_cm_factor()
+        thread_feats = comp.features.threadFeatures
+        for i, t in enumerate(analysis.threads):
+            try:
+                target_face = self._find_cylindrical_face_for_step(
+                    body, analysis, t.step_index, f
+                )
+                if not target_face:
+                    self._app.log(
+                        f"[DrawingToFusion] Keine Zylinderfläche für Gewinde "
+                        f"{t.designation} an step {t.step_index} gefunden"
+                    )
+                    continue
+
+                input_faces = adsk.core.ObjectCollection.create()
+                input_faces.add(target_face)
+                thread_input = thread_feats.createInput(input_faces, True)
+
+                try:
+                    thread_input.threadInfo.threadDesignation = t.designation
+                    thread_input.threadInfo.isRightHanded = (t.hand == "right")
+                    thread_input.threadInfo.isInternal = t.internal
+                except Exception:
+                    pass  # auto-detected values from face geometry are acceptable
+
+                length_cm = t.length * f
+                if length_cm > 0:
+                    thread_input.isFullLength = False
+                    thread_input.threadLength = adsk.core.ValueInput.createByReal(length_cm)
+                if t.start_position > 0:
+                    thread_input.threadOffset = adsk.core.ValueInput.createByReal(
+                        t.start_position * f
+                    )
+
+                thread_feats.add(thread_input)
+            except Exception as exc:
+                self._app.log(
+                    f"[DrawingToFusion] Gewinde {i} ({t.designation}) fehlgeschlagen: {exc}"
+                )
+
+    def _apply_undercuts(self, comp, body, analysis: DrawingAnalysis) -> None:
+        """Create DIN 509 undercuts as revolve-cuts on the shaft body."""
+        if not getattr(analysis, 'undercuts', None):
+            return
+        f = analysis.to_cm_factor()
+        steps = getattr(analysis.base_profile, 'steps', [])
+        for i, u in enumerate(analysis.undercuts):
+            try:
+                # DIN 509 E table fallback when no explicit dimensions given
+                if u.width == 0 or u.depth == 0:
+                    step = steps[u.step_index] if u.step_index < len(steps) else None
+                    d = step.diameter if step else 20.0
+                    if d <= 18:
+                        u_width, u_depth = 2.0, 0.2
+                    elif d <= 50:
+                        u_width, u_depth = 2.5, 0.3
+                    else:
+                        u_width, u_depth = 3.0, 0.5
+                else:
+                    u_width, u_depth = u.width, u.depth
+
+                step = steps[u.step_index] if u.step_index < len(steps) else None
+                if step is None:
+                    self._app.log(
+                        f"[DrawingToFusion] Freistich {i}: step_index "
+                        f"{u.step_index} ungültig — übersprungen"
+                    )
+                    continue
+
+                r_cm   = step.diameter / 2.0 * f
+                pos_cm = u.position * f
+                w_cm   = u_width * f
+                d_cm   = u_depth * f
+
+                sketch = comp.sketches.add(comp.xYConstructionPlane)
+                lines  = sketch.sketchCurves.sketchLines
+                p1 = adsk.core.Point3D.create(pos_cm,         r_cm - d_cm, 0)
+                p2 = adsk.core.Point3D.create(pos_cm,         r_cm,        0)
+                p3 = adsk.core.Point3D.create(pos_cm + w_cm,  r_cm,        0)
+                p4 = adsk.core.Point3D.create(pos_cm + w_cm,  r_cm - d_cm, 0)
+                lines.addByTwoPoints(p1, p2)
+                lines.addByTwoPoints(p2, p3)
+                lines.addByTwoPoints(p3, p4)
+                lines.addByTwoPoints(p4, p1)
+
+                prof = self._largest_profile(sketch)
+                if not prof:
+                    continue
+
+                rev_input = comp.features.revolveFeatures.createInput(
+                    prof,
+                    comp.xConstructionAxis,
+                    adsk.fusion.FeatureOperations.CutFeatureOperation,
+                )
+                rev_input.setAngleExtent(
+                    False, adsk.core.ValueInput.createByString("360 deg")
+                )
+                comp.features.revolveFeatures.add(rev_input)
+            except Exception as exc:
+                self._app.log(
+                    f"[DrawingToFusion] Freistich {i} fehlgeschlagen: {exc}"
+                )
+
+    def _apply_grooves(self, comp, body, analysis: DrawingAnalysis) -> None:
+        """Create circlip / O-ring grooves as revolve-cuts on the shaft body."""
+        if not getattr(analysis, 'grooves', None):
+            return
+        f = analysis.to_cm_factor()
+        steps = getattr(analysis.base_profile, 'steps', [])
+        for i, g in enumerate(analysis.grooves):
+            try:
+                # DIN 471 table fallback
+                if g.width == 0 or g.depth == 0:
+                    step = steps[g.step_index] if g.step_index < len(steps) else None
+                    d = step.diameter if step else 20.0
+                    if d <= 8:
+                        g_width, g_depth = 1.2, 0.6
+                    elif d <= 12:
+                        g_width, g_depth = 1.4, 0.7
+                    elif d <= 18:
+                        g_width, g_depth = 1.6, 0.8
+                    elif d <= 24:
+                        g_width, g_depth = 1.6, 1.0
+                    elif d <= 32:
+                        g_width, g_depth = 1.8, 1.1
+                    elif d <= 45:
+                        g_width, g_depth = 2.0, 1.3
+                    elif d <= 65:
+                        g_width, g_depth = 2.5, 1.6
+                    else:
+                        g_width, g_depth = 3.0, 2.0
+                else:
+                    g_width, g_depth = g.width, g.depth
+
+                step = steps[g.step_index] if g.step_index < len(steps) else None
+                if step is None:
+                    self._app.log(
+                        f"[DrawingToFusion] Nut {i}: step_index "
+                        f"{g.step_index} ungültig — übersprungen"
+                    )
+                    continue
+
+                r_cm    = step.diameter / 2.0 * f
+                pos_cm  = g.position * f
+                w_cm    = g_width * f
+                d_cm    = g_depth * f
+                half_w  = w_cm / 2.0
+
+                sketch = comp.sketches.add(comp.xYConstructionPlane)
+                lines  = sketch.sketchCurves.sketchLines
+                p1 = adsk.core.Point3D.create(pos_cm - half_w, r_cm - d_cm, 0)
+                p2 = adsk.core.Point3D.create(pos_cm - half_w, r_cm,        0)
+                p3 = adsk.core.Point3D.create(pos_cm + half_w, r_cm,        0)
+                p4 = adsk.core.Point3D.create(pos_cm + half_w, r_cm - d_cm, 0)
+                lines.addByTwoPoints(p1, p2)
+                lines.addByTwoPoints(p2, p3)
+                lines.addByTwoPoints(p3, p4)
+                lines.addByTwoPoints(p4, p1)
+
+                prof = self._largest_profile(sketch)
+                if not prof:
+                    continue
+
+                rev_input = comp.features.revolveFeatures.createInput(
+                    prof,
+                    comp.xConstructionAxis,
+                    adsk.fusion.FeatureOperations.CutFeatureOperation,
+                )
+                rev_input.setAngleExtent(
+                    False, adsk.core.ValueInput.createByString("360 deg")
+                )
+                comp.features.revolveFeatures.add(rev_input)
+            except Exception as exc:
+                self._app.log(
+                    f"[DrawingToFusion] Einstich/Nut {i} fehlgeschlagen: {exc}"
+                )
 
     def _apply_shell(self, comp, body, thickness: float, factor: float) -> None:
         """Hollow out a solid box by removing its front face (Z=0) and shelling
