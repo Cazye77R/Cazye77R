@@ -5,6 +5,7 @@ import pyautogui
 import numpy as np
 
 import config
+from gestures import GestureDetector
 
 pyautogui.FAILSAFE = False
 
@@ -25,12 +26,6 @@ def normalize_to_screen(norm_x, norm_y):
     x = np.clip(x, 0.0, 1.0)
     y = np.clip(y, 0.0, 1.0)
     return int(x * screen_w), int(y * screen_h)
-
-
-def pinch_distance(lm):
-    thumb = np.array([lm[4].x, lm[4].y])
-    index = np.array([lm[8].x, lm[8].y])
-    return float(np.linalg.norm(thumb - index))
 
 
 def main():
@@ -56,8 +51,10 @@ def main():
 
             if result.multi_hand_landmarks:
                 lm = result.multi_hand_landmarks[0].landmark
+                gesture = GestureDetector(lm)
 
-                raw_x, raw_y = normalize_to_screen(lm[8].x, lm[8].y)
+                norm_x, norm_y = gesture.cursor_position()
+                raw_x, raw_y = normalize_to_screen(norm_x, norm_y)
 
                 curr_x = int(prev_x + (raw_x - prev_x) * config.SMOOTH_FACTOR)
                 curr_y = int(prev_y + (raw_y - prev_y) * config.SMOOTH_FACTOR)
@@ -65,10 +62,12 @@ def main():
 
                 pyautogui.moveTo(curr_x, curr_y)
 
-                dist = pinch_distance(lm)
                 now = time.time()
-                if dist < config.PINCH_THRESHOLD and (now - last_click_time) > config.CLICK_COOLDOWN:
+                if gesture.is_left_click() and (now - last_click_time) > config.CLICK_COOLDOWN:
                     pyautogui.click()
+                    last_click_time = now
+                elif gesture.is_right_click() and (now - last_click_time) > config.CLICK_COOLDOWN:
+                    pyautogui.rightClick()
                     last_click_time = now
 
                 mp_draw.draw_landmarks(
