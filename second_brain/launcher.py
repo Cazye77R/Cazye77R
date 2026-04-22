@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import threading
 import webbrowser
 from pathlib import Path
 
@@ -30,6 +31,33 @@ def main():
         input("\nEnter zum Beenden...")
         sys.exit(1)
 
+    # --- Database ---
+    print("\n🗄  Initialisiere Datenbank...")
+    from core.database import full_sync, init_db
+    from core.config import VAULT_DIR
+    init_db()
+    print("   ✔ Tabellen bereit.")
+
+    print("   🔄 Synchronisiere Vault...")
+    stats = full_sync(VAULT_DIR)
+    print(
+        f"   ✔ Sync abgeschlossen – "
+        f"{stats['inserted']} neu, {stats['updated']} aktualisiert, "
+        f"{stats['deleted']} entfernt."
+    )
+
+    # --- File watcher ---
+    from core.file_watcher import VaultWatcher
+    watcher = VaultWatcher()
+
+    def _on_vault_event(event_type: str, filename: str) -> None:
+        icon = "📝" if event_type == "upsert" else "🗑"
+        print(f"  {icon} Vault-Event: {event_type} → {filename}")
+
+    watcher.start_watching(VAULT_DIR, callback=_on_vault_event)
+    print("   ✔ Vault-Watcher läuft im Hintergrund.")
+
+    # --- Ollama ---
     print("\n🤖 Prüfe Ollama-Verbindung...")
     if check_ollama():
         print("   ✔ Ollama läuft auf http://localhost:11434")
@@ -37,6 +65,7 @@ def main():
         print("   ⚠ Ollama nicht erreichbar – KI-Funktionen sind eingeschränkt.")
         print("     Starte Ollama und führe 'ollama pull llama3' aus, um KI zu aktivieren.")
 
+    # --- Streamlit ---
     if not STREAMLIT_APP.exists():
         print(f"\n⚠ ui/streamlit_app.py nicht gefunden. Erstelle Platzhalter...")
         STREAMLIT_APP.parent.mkdir(parents=True, exist_ok=True)
@@ -63,6 +92,7 @@ def main():
     try:
         input("\nEnter zum Beenden...")
     finally:
+        watcher.stop_watching()
         proc.terminate()
         print("👋 SecondBrain Agent beendet.")
 
