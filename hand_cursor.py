@@ -14,10 +14,6 @@ mp_draw = mp.solutions.drawing_utils
 
 screen_w, screen_h = pyautogui.size()
 
-prev_x, prev_y = 0, 0
-last_click_time = 0
-scroll_prev_y: float | None = None
-
 
 def normalize_to_screen(norm_x, norm_y):
     x_min, x_max = config.MAP_X
@@ -30,7 +26,10 @@ def normalize_to_screen(norm_x, norm_y):
 
 
 def main():
-    global prev_x, prev_y, last_click_time, scroll_prev_y
+    prev_x, prev_y = 0, 0
+    last_right_click_time = 0
+    scroll_prev_y: float | None = None
+    gesture = GestureDetector()
 
     cap = cv2.VideoCapture(config.CAM_INDEX)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAM_W)
@@ -52,7 +51,9 @@ def main():
 
             if result.multi_hand_landmarks:
                 lm = result.multi_hand_landmarks[0].landmark
-                gesture = GestureDetector(lm)
+                gesture.update(lm)
+
+                frame_h, frame_w = frame.shape[:2]
 
                 if gesture.is_scroll_mode():
                     if scroll_prev_y is not None:
@@ -78,13 +79,28 @@ def main():
 
                     pyautogui.moveTo(curr_x, curr_y)
 
-                    now = time.time()
-                    if gesture.is_left_click() and (now - last_click_time) > config.CLICK_COOLDOWN:
+                    if gesture.drag_just_started():
+                        pyautogui.mouseDown()
+                    elif gesture.drag_just_ended():
+                        pyautogui.mouseUp()
+                    elif gesture.click_just_fired():
                         pyautogui.click()
-                        last_click_time = now
-                    elif gesture.is_right_click() and (now - last_click_time) > config.CLICK_COOLDOWN:
+
+                    now = time.time()
+                    if gesture.is_right_click() and (now - last_right_click_time) > config.CLICK_COOLDOWN:
                         pyautogui.rightClick()
-                        last_click_time = now
+                        last_right_click_time = now
+
+                    if gesture.is_dragging():
+                        tip_px = (int(norm_x * frame_w), int(norm_y * frame_h))
+                        cv2.circle(frame, tip_px, 16, (0, 0, 255), -1)
+                        cv2.putText(
+                            frame, "DRAG", (10, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 2,
+                        )
+                    else:
+                        tip_px = (int(norm_x * frame_w), int(norm_y * frame_h))
+                        cv2.circle(frame, tip_px, 8, (0, 255, 0), -1)
 
                 mp_draw.draw_landmarks(
                     frame,
