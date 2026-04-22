@@ -27,7 +27,8 @@ def normalize_to_screen(norm_x, norm_y):
 
 def main():
     prev_x, prev_y = 0, 0
-    last_right_click_time = 0
+    last_right_click_time = 0.0
+    double_click_until = 0.0
     scroll_prev_y: float | None = None
     gesture = GestureDetector()
 
@@ -48,6 +49,8 @@ def main():
             frame = cv2.flip(frame, 1)
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             result = hands.process(rgb)
+
+            now = time.time()
 
             if result.multi_hand_landmarks:
                 lm = result.multi_hand_landmarks[0].landmark
@@ -83,10 +86,14 @@ def main():
                         pyautogui.mouseDown()
                     elif gesture.drag_just_ended():
                         pyautogui.mouseUp()
-                    elif gesture.click_just_fired():
-                        pyautogui.click()
+                    else:
+                        action = gesture.get_click_action()
+                        if action == "click":
+                            pyautogui.click()
+                        elif action == "double_click":
+                            pyautogui.doubleClick()
+                            double_click_until = now + 0.5
 
-                    now = time.time()
                     if gesture.is_right_click() and (now - last_right_click_time) > config.CLICK_COOLDOWN:
                         pyautogui.rightClick()
                         last_right_click_time = now
@@ -106,6 +113,12 @@ def main():
                     frame,
                     result.multi_hand_landmarks[0],
                     mp_hands.HAND_CONNECTIONS,
+                )
+
+            if now < double_click_until:
+                cv2.putText(
+                    frame, "DOUBLE CLICK", (10, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 165, 255), 2,
                 )
 
             cv2.imshow("HandCursor", frame)

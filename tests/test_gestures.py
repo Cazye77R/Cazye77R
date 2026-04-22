@@ -223,3 +223,74 @@ class TestDragState:
             d.update(pinch)
             d.update(release)
             assert d.click_just_fired() is False
+
+
+def _quick_click(detector, t_start, mock_time):
+    """Simulate one quick pinch-release at t_start (same timestamp, no drag)."""
+    mock_time.time.return_value = t_start
+    detector.update(_pinch_lm(close=True))
+    detector.update(_pinch_lm(close=False))
+
+
+class TestGetClickAction:
+    def test_returns_none_before_any_gesture(self):
+        assert GestureDetector().get_click_action() is None
+
+    def test_returns_none_while_waiting_for_second_click(self):
+        d = GestureDetector()
+        t0 = 1000.0
+        with patch("gestures.time") as mock_time:
+            _quick_click(d, t0, mock_time)
+            # still within window
+            mock_time.time.return_value = t0 + config.DOUBLE_CLICK_WINDOW * 0.5
+            assert d.get_click_action() is None
+
+    def test_returns_click_after_window_expires(self):
+        d = GestureDetector()
+        t0 = 1000.0
+        with patch("gestures.time") as mock_time:
+            _quick_click(d, t0, mock_time)
+            mock_time.time.return_value = t0 + config.DOUBLE_CLICK_WINDOW + 0.01
+            assert d.get_click_action() == "click"
+
+    def test_returns_none_after_click_consumed(self):
+        d = GestureDetector()
+        t0 = 1000.0
+        with patch("gestures.time") as mock_time:
+            _quick_click(d, t0, mock_time)
+            mock_time.time.return_value = t0 + config.DOUBLE_CLICK_WINDOW + 0.01
+            d.get_click_action()
+            assert d.get_click_action() is None
+
+    def test_returns_double_click_on_second_click_within_window(self):
+        d = GestureDetector()
+        t0 = 1000.0
+        with patch("gestures.time") as mock_time:
+            _quick_click(d, t0, mock_time)
+            t1 = t0 + config.DOUBLE_CLICK_WINDOW * 0.6
+            _quick_click(d, t1, mock_time)
+            assert d.get_click_action() == "double_click"
+
+    def test_double_click_consumed_only_once(self):
+        d = GestureDetector()
+        t0 = 1000.0
+        with patch("gestures.time") as mock_time:
+            _quick_click(d, t0, mock_time)
+            t1 = t0 + config.DOUBLE_CLICK_WINDOW * 0.6
+            _quick_click(d, t1, mock_time)
+            d.get_click_action()
+            assert d.get_click_action() is None
+
+    def test_second_click_after_window_starts_new_sequence(self):
+        d = GestureDetector()
+        t0 = 1000.0
+        with patch("gestures.time") as mock_time:
+            _quick_click(d, t0, mock_time)
+            # consume the first click (window expired)
+            mock_time.time.return_value = t0 + config.DOUBLE_CLICK_WINDOW + 0.01
+            assert d.get_click_action() == "click"
+            # second click starts a fresh sequence
+            t1 = t0 + config.DOUBLE_CLICK_WINDOW + 0.05
+            _quick_click(d, t1, mock_time)
+            mock_time.time.return_value = t1 + config.DOUBLE_CLICK_WINDOW * 0.5
+            assert d.get_click_action() is None  # still waiting

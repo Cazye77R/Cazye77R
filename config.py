@@ -14,3 +14,5 @@ MAP_Y = (0.1, 0.9)  # normalized y range mapped to screen height
 SCROLL_SENSITIVITY = 10
 
 DRAG_THRESHOLD_SEC = 0.3
+
+DOUBLE_CLICK_WINDOW = 0.35
