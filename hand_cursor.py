@@ -16,6 +16,7 @@ screen_w, screen_h = pyautogui.size()
 
 prev_x, prev_y = 0, 0
 last_click_time = 0
+scroll_prev_y: float | None = None
 
 
 def normalize_to_screen(norm_x, norm_y):
@@ -29,7 +30,7 @@ def normalize_to_screen(norm_x, norm_y):
 
 
 def main():
-    global prev_x, prev_y, last_click_time
+    global prev_x, prev_y, last_click_time, scroll_prev_y
 
     cap = cv2.VideoCapture(config.CAM_INDEX)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAM_W)
@@ -53,22 +54,37 @@ def main():
                 lm = result.multi_hand_landmarks[0].landmark
                 gesture = GestureDetector(lm)
 
-                norm_x, norm_y = gesture.cursor_position()
-                raw_x, raw_y = normalize_to_screen(norm_x, norm_y)
+                if gesture.is_scroll_mode():
+                    if scroll_prev_y is not None:
+                        delta = gesture.get_scroll_delta(scroll_prev_y)
+                        scroll_amount = -int(delta * config.SCROLL_SENSITIVITY * 100)
+                        if scroll_amount != 0:
+                            pyautogui.scroll(scroll_amount)
+                    scroll_prev_y = lm[8].y
 
-                curr_x = int(prev_x + (raw_x - prev_x) * config.SMOOTH_FACTOR)
-                curr_y = int(prev_y + (raw_y - prev_y) * config.SMOOTH_FACTOR)
-                prev_x, prev_y = curr_x, curr_y
+                    cv2.putText(
+                        frame, "SCROLL", (10, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 80, 0), 2,
+                    )
+                else:
+                    scroll_prev_y = None
 
-                pyautogui.moveTo(curr_x, curr_y)
+                    norm_x, norm_y = gesture.cursor_position()
+                    raw_x, raw_y = normalize_to_screen(norm_x, norm_y)
 
-                now = time.time()
-                if gesture.is_left_click() and (now - last_click_time) > config.CLICK_COOLDOWN:
-                    pyautogui.click()
-                    last_click_time = now
-                elif gesture.is_right_click() and (now - last_click_time) > config.CLICK_COOLDOWN:
-                    pyautogui.rightClick()
-                    last_click_time = now
+                    curr_x = int(prev_x + (raw_x - prev_x) * config.SMOOTH_FACTOR)
+                    curr_y = int(prev_y + (raw_y - prev_y) * config.SMOOTH_FACTOR)
+                    prev_x, prev_y = curr_x, curr_y
+
+                    pyautogui.moveTo(curr_x, curr_y)
+
+                    now = time.time()
+                    if gesture.is_left_click() and (now - last_click_time) > config.CLICK_COOLDOWN:
+                        pyautogui.click()
+                        last_click_time = now
+                    elif gesture.is_right_click() and (now - last_click_time) > config.CLICK_COOLDOWN:
+                        pyautogui.rightClick()
+                        last_click_time = now
 
                 mp_draw.draw_landmarks(
                     frame,
