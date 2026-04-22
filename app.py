@@ -10,7 +10,19 @@ import pyautogui
 import streamlit as st
 
 import config
+import profile_manager
 from gestures import GestureDetector
+
+_PROFILE_KEYS = (
+    "smooth_factor", "pinch_threshold", "click_cooldown",
+    "scroll_sensitivity", "drag_threshold", "double_click_window",
+)
+
+
+def _apply_profile(rt: dict, profile: dict) -> None:
+    for k in _PROFILE_KEYS:
+        if k in profile:
+            rt[k] = profile[k]
 
 pyautogui.FAILSAFE = False
 _mp_hands = mp.solutions.hands
@@ -109,8 +121,9 @@ def _camera_loop(
             scroll_s = rt.get("scroll_sensitivity", config.SCROLL_SENSITIVITY)
 
             # Patch module-level thresholds so GestureDetector uses updated values
-            config.PINCH_THRESHOLD    = rt.get("pinch_threshold", config.PINCH_THRESHOLD)
-            config.DRAG_THRESHOLD_SEC = rt.get("drag_threshold",  config.DRAG_THRESHOLD_SEC)
+            config.PINCH_THRESHOLD      = rt.get("pinch_threshold",    config.PINCH_THRESHOLD)
+            config.DRAG_THRESHOLD_SEC   = rt.get("drag_threshold",     config.DRAG_THRESHOLD_SEC)
+            config.DOUBLE_CLICK_WINDOW  = rt.get("double_click_window", config.DOUBLE_CLICK_WINDOW)
 
             label  = "none"
             fh, fw = frame.shape[:2]
@@ -231,13 +244,20 @@ def _init_state() -> None:
         st.session_state.stop_evt = threading.Event()
     if "rt" not in st.session_state:
         st.session_state.rt = {
-            "control_active":     False,
-            "smooth_factor":      config.SMOOTH_FACTOR,
-            "pinch_threshold":    config.PINCH_THRESHOLD,
-            "click_cooldown":     config.CLICK_COOLDOWN,
-            "scroll_sensitivity": config.SCROLL_SENSITIVITY,
-            "drag_threshold":     config.DRAG_THRESHOLD_SEC,
+            "control_active":      False,
+            "smooth_factor":       config.SMOOTH_FACTOR,
+            "pinch_threshold":     config.PINCH_THRESHOLD,
+            "click_cooldown":      config.CLICK_COOLDOWN,
+            "scroll_sensitivity":  config.SCROLL_SENSITIVITY,
+            "drag_threshold":      config.DRAG_THRESHOLD_SEC,
+            "double_click_window": config.DOUBLE_CLICK_WINDOW,
         }
+        try:
+            _apply_profile(st.session_state.rt, profile_manager.load_profile("default"))
+        except FileNotFoundError:
+            pass
+    if "active_profile" not in st.session_state:
+        st.session_state.active_profile = "default"
     if "gesture_log" not in st.session_state:
         st.session_state.gesture_log = []
 
@@ -267,20 +287,46 @@ glog = st.session_state.gesture_log
 col_left, col_right = st.columns([2, 1])
 
 with col_right:
+    # ── Profile section ───────────────────────────────────────────────────────
+    st.subheader("Profil")
+    profiles = profile_manager.list_profiles()
+    active   = st.session_state.active_profile
+    sel_idx  = profiles.index(active) if active in profiles else 0
+    selected = st.selectbox("Profil wählen", profiles, index=sel_idx)
+    st.caption(f"Aktiv: **{active}**")
+
+    if st.button("Laden", use_container_width=True):
+        _apply_profile(rt, profile_manager.load_profile(selected))
+        st.session_state.active_profile = selected
+        st.rerun()
+
+    with st.expander("Profil speichern"):
+        save_name = st.text_input("Name:", value=active, key="save_name_input")
+        if st.button("Speichern", key="btn_save_profile"):
+            settings = {"name": save_name, **{k: rt[k] for k in _PROFILE_KEYS}}
+            profile_manager.save_profile(save_name, settings)
+            st.session_state.active_profile = save_name
+            st.success(f"Profil '{save_name}' gespeichert.")
+
+    st.divider()
+
+    # ── Settings form ─────────────────────────────────────────────────────────
     st.subheader("Einstellungen")
     with st.form("cfg_form"):
-        smooth   = st.slider("Smooth Factor",        0.05, 1.0,  float(rt["smooth_factor"]),      0.05)
-        pinch    = st.slider("Pinch Threshold",       0.01, 0.15, float(rt["pinch_threshold"]),    0.005, format="%.3f")
-        cooldown = st.slider("Click Cooldown (s)",    0.1,  1.0,  float(rt["click_cooldown"]),     0.05)
-        scroll_s = st.slider("Scroll Sensitivity",    1,    30,   int(rt["scroll_sensitivity"]),   1)
-        drag_thr = st.slider("Drag Threshold (s)",    0.1,  1.0,  float(rt["drag_threshold"]),     0.05)
+        smooth   = st.slider("Smooth Factor",          0.05, 1.0,  float(rt["smooth_factor"]),       0.05)
+        pinch    = st.slider("Pinch Threshold",         0.01, 0.15, float(rt["pinch_threshold"]),     0.005, format="%.3f")
+        cooldown = st.slider("Click Cooldown (s)",      0.1,  1.0,  float(rt["click_cooldown"]),      0.05)
+        scroll_s = st.slider("Scroll Sensitivity",      1,    30,   int(rt["scroll_sensitivity"]),    1)
+        drag_thr = st.slider("Drag Threshold (s)",      0.1,  1.0,  float(rt["drag_threshold"]),      0.05)
+        dc_win   = st.slider("Double-Click Fenster (s)", 0.1, 0.8,  float(rt["double_click_window"]), 0.05)
         apply    = st.form_submit_button("Übernehmen")
         if apply:
-            rt["smooth_factor"]      = smooth
-            rt["pinch_threshold"]    = pinch
-            rt["click_cooldown"]     = cooldown
-            rt["scroll_sensitivity"] = scroll_s
-            rt["drag_threshold"]     = drag_thr
+            rt["smooth_factor"]       = smooth
+            rt["pinch_threshold"]     = pinch
+            rt["click_cooldown"]      = cooldown
+            rt["scroll_sensitivity"]  = scroll_s
+            rt["drag_threshold"]      = drag_thr
+            rt["double_click_window"] = dc_win
 
     ctrl = st.checkbox(
         "Steuerung aktiv",
@@ -289,6 +335,7 @@ with col_right:
     )
     rt["control_active"] = ctrl
 
+    st.divider()
     st.subheader("Gesten-Log")
     log_ph = st.empty()
     log_ph.markdown(_log_table(glog), unsafe_allow_html=True)
