@@ -1,7 +1,11 @@
 import json
+import sys
 from pathlib import Path
 
-_DIR = Path(__file__).parent / "profiles"
+# When running as a PyInstaller one-file bundle the unpacked files live under
+# sys._MEIPASS; fall back to the source tree for normal Python execution.
+_BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+_DIR  = _BASE / "profiles"
 
 _KEYS = {
     "name", "smooth_factor", "pinch_threshold", "click_cooldown",

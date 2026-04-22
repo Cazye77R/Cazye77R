@@ -1,56 +1,143 @@
-# Stock Return Forecasting Model
+# HandCursor
 
-Dieses Repository enthält ein einfaches, trainingsfähiges KI-Modell, das auf historischen Aktienkursbewegungen basiert. Es nutzt ein LSTM, um aus vergangenen Renditefenstern die nächste Rendite abzuleiten und kann auf beliebige Kurs-CSV-Dateien angewendet werden.
+Maussteuerung per Handgesten über die Webcam – kein Maus-Hardware nötig.
+MediaPipe erkennt Handlandmarken in Echtzeit; definierte Gesten werden in
+Mausbewegungen, Klicks, Scrollen und Drag & Drop übersetzt.
 
-## Funktionsumfang
-- CSV-Einlesung und Bereinigung (Sortierung nach Datum, Prozentänderungen, optionale Normalisierung).
-- Erzeugung von Sequenz-Datensätzen beliebiger Fensterlänge.
-- LSTM-Modell mit LayerNorm, Dropout und frei konfigurierbarer Hidden-Size/Layer-Anzahl.
-- Trainings-Skript mit Train/Val-Split, Loss-Reporting und Speicherung der Gewichte.
+---
 
 ## Installation
+
+### Aus dem Quellcode (empfohlen für Entwicklung)
+
 ```bash
 python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# macOS / Linux
 source .venv/bin/activate
+
 pip install -r requirements.txt
 ```
 
-## Datenerwartung
-Eine CSV-Datei mit mindestens zwei Spalten:
-- `date`: Zeitstempel oder Datum (wird per `pandas` geparst)
-- `close`: Schlusskurs oder Preiswert
-
-Die Reihenfolge der Zeilen ist egal, das Skript sortiert automatisch nach Datum.
-
-## Training starten
-```bash
-python -m stock_model.train path/zum/daten.csv \
-  --window 60 \
-  --batch-size 128 \
-  --epochs 30 \
-  --lr 5e-4 \
-  --hidden-size 256 \
-  --layers 2 \
-  --dropout 0.2 \
-  --train-ratio 0.85 \
-  --output artifacts
-```
-Standardwerte sind im Skript hinterlegt, sodass Sie optional nur den CSV-Pfad angeben müssen.
-
-## Forecast-Oberfläche im Dark Mode
-Starte die moderne Web-Oberfläche, um Daten hochzuladen, ein Modell zu laden oder kurzfristig zu trainieren und sofort einen Forecast zu erzeugen:
+Starten:
 
 ```bash
-streamlit run stock_model/app.py
+# Reines OpenCV-Fenster (Produktion)
+python hand_cursor.py
+
+# Streamlit-App mit Live-Feed, Profilverwaltung und Kalibrierung
+streamlit run app.py
 ```
 
-Die App bietet:
-- Dark-Theme mit Plotly-Visualisierungen.
-- Upload von CSV-Daten sowie optional eines `.pt`-Checkpoints.
-- Wahl der Fenstergröße, Forecast-Horizont und Schnelltraining mit wenigen Epochen.
-- Anzeige der prognostizierten Renditen und fortgeschriebenen Preise.
+### Als standalone EXE (Windows)
 
-## Ergebnisse
-Nach dem Training wird ein Checkpoint unter `artifacts/return_lstm.pt` gespeichert, der sowohl die Modellgewichte als auch die wichtigsten Hyperparameter (inkl. Normalisierungs-Statistiken) enthält. Dieses Format kann mit PyTorch geladen und für Inferenz oder weiteres Feintuning verwendet werden.
+Lade die fertige `HandCursor.exe` aus dem [Releases-Bereich](../../releases) herunter
+und führe sie direkt aus – keine Python-Installation erforderlich.
 
-Viel Erfolg beim Experimentieren mit Ihren Kursdaten!
+Selbst bauen:
+
+```bash
+pip install pyinstaller
+python build.py          # Release-Build (kein Konsolenfenster)
+python build.py --debug  # mit Konsolenfenster zur Fehlersuche
+```
+Die EXE landet unter `dist/HandCursor.exe`.
+
+---
+
+## Gesten-Übersicht
+
+| Geste | Aktion | Erkennung |
+|---|---|---|
+| Zeigefingerspitze bewegen | Maus bewegen | `lm[8]` x/y-Position |
+| Daumen + Zeigefinger Pinch (kurz) | Linksklick | Pinch < `PINCH_THRESHOLD`, < 0,3 s |
+| Doppel-Pinch (schnell wiederholt) | Doppelklick | 2× Pinch innerhalb `DOUBLE_CLICK_WINDOW` |
+| Daumen + Mittelfinger Pinch | Rechtsklick | `lm[4]` + `lm[12]` < `PINCH_THRESHOLD` |
+| Daumen + Zeigefinger Pinch halten | Drag & Drop | Pinch ≥ `DRAG_THRESHOLD_SEC` → `mouseDown` |
+| Zeige- + Mittelfinger gestreckt, Rest eingeklappt | Scroll-Modus | `lm[8]`/`lm[12]` y < PIP-Gelenk; Ring/Klein eingeklappt |
+| Hand im Scroll-Modus nach oben | Scroll up | y-Delta negativ |
+| Hand im Scroll-Modus nach unten | Scroll down | y-Delta positiv |
+
+---
+
+## Streamlit-App
+
+```bash
+streamlit run app.py
+```
+
+- **Linke Spalte:** Live-Kamerafeed mit Gesten-Overlay, Badge mit aktueller Geste, FPS-Anzeige
+- **Rechte Spalte:** Profil-Dropdown (Default / Gaming / Accessibility), Einstellungs-Slider,
+  „Steuerung aktiv"-Checkbox (Gesten testen ohne Mausübernahme), Gesten-Log
+
+### Kalibrierungs-Wizard
+
+```bash
+streamlit run app.py  # → Seitennavigation: "calibrate"
+```
+
+Dreistufiger Assistent:
+1. **Pinch-Kalibrierung** – misst die engste Pinch-Distanz (30 Frames) → neuer `PINCH_THRESHOLD`
+2. **Mapping-Bereich** – zeichnet live-Rechteck, während Zeigefinger in alle Ecken geführt wird → neue `MAP_X`/`MAP_Y`
+3. **Smooth-Faktor** – Slider mit Live-Vorschau (blau = geglättet, grün = roh)
+
+Ergebnisse werden als benanntes Profil gespeichert.
+
+---
+
+## Profile
+
+Profile liegen als JSON in `profiles/`:
+
+| Profil | Anwendungsfall |
+|---|---|
+| `default` | Allgemeine Nutzung |
+| `gaming` | Niedrige Schwellwerte, schnelle Reaktion |
+| `accessibility` | Große Toleranzen, träge Bewegung |
+| `calibrated` | Automatisch vom Kalibrierungs-Wizard erstellt |
+
+Eigene Profile über die Streamlit-App oder direkt als JSON in `profiles/` anlegen.
+
+---
+
+## Bekannte Einschränkungen
+
+| Einschränkung | Hinweis |
+|---|---|
+| **Beleuchtung** | Homogenes, diffuses Licht verbessert die Erkennungsrate deutlich. Gegenlicht (Fenster hinter der Hand) führt zu Aussetzern. |
+| **Kamera-Distanz** | Optimale Distanz: 40–70 cm. Bei > 80 cm sinkt die Landmark-Präzision, Pinch-Erkennung wird unzuverlässig. |
+| **Einfarbiger Hintergrund** | Strukturierter oder bewegter Hintergrund erhöht False-Positive-Rate bei der Handerkennung. |
+| **Eine Hand** | Aktuell wird nur eine Hand gleichzeitig verarbeitet (`max_num_hands=1`). |
+| **Betriebssysteme** | Getestet auf Windows 10/11 und Ubuntu 22.04. macOS funktioniert grundsätzlich, PyAutoGUI benötigt dort Accessibility-Rechte. |
+| **Webcam-Framerate** | Bei < 20 FPS werden Gesten träger erkannt. USB-Webcam mit 30 FPS empfohlen. |
+| **EXE-Startzeit** | Die PyInstaller-EXE entpackt MediaPipe-Modelle beim ersten Start (~5–10 s). Folgestarts sind schneller. |
+
+---
+
+## Screenshots
+
+> *Platzhalter – Screenshots folgen nach erster stabiler Version.*
+
+| Ansicht | |
+|---|---|
+| OpenCV-Fenster mit Landmark-Overlay | `docs/screenshots/opencv_window.png` |
+| Streamlit-App Hauptansicht | `docs/screenshots/streamlit_main.png` |
+| Kalibrierungs-Wizard Schritt 2 | `docs/screenshots/calibration_step2.png` |
+
+---
+
+## Projektstruktur
+
+```
+hand_cursor.py       Einstiegspunkt (OpenCV-Loop)
+gestures.py          GestureDetector-Klasse
+config.py            Alle konfigurierbaren Werte
+profile_manager.py   Profil laden/speichern/auflisten
+app.py               Streamlit-App
+pages/calibrate.py   Kalibrierungs-Wizard (Streamlit-Page)
+profiles/            Gespeicherte Profile (JSON)
+build.py             PyInstaller-Build-Script
+version.py           Versionsnummer und App-Name
+tests/               Unit-Tests (pytest)
+```
