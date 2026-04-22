@@ -23,6 +23,10 @@ def _apply_profile(rt: dict, profile: dict) -> None:
     for k in _PROFILE_KEYS:
         if k in profile:
             rt[k] = profile[k]
+    if "map_x" in profile:
+        config.MAP_X = tuple(profile["map_x"])
+    if "map_y" in profile:
+        config.MAP_Y = tuple(profile["map_y"])
 
 pyautogui.FAILSAFE = False
 _mp_hands = mp.solutions.hands

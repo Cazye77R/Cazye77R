@@ -6,6 +6,7 @@ _DIR = Path(__file__).parent / "profiles"
 _KEYS = {
     "name", "smooth_factor", "pinch_threshold", "click_cooldown",
     "scroll_sensitivity", "drag_threshold", "double_click_window",
+    "map_x", "map_y",
 }
 
 
