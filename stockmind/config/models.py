@@ -27,3 +27,8 @@ MODEL_DESCRIPTIONS: dict[str, str] = {
     "gemma2":  "Googles Modell",
     "qwen2":   "Mehrsprachig",
 }
+
+# --- Multi-Provider ---
+LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama")
+NVIDIA_API_KEY: str = os.getenv("NVIDIA_API_KEY", "")
+NVIDIA_MODEL: str = os.getenv("NVIDIA_MODEL", "meta/llama-3.3-70b-instruct")

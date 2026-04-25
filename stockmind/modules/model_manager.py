@@ -1,7 +1,8 @@
 """
-StockMind – Ollama Modell-Verwaltung
-Modell-Erkennung, Download via subprocess, Verbindungscheck und
-Inferenz via ollama Python-Client mit Retry-Logik.
+StockMind – LLM Modell-Verwaltung (Provider-agnostisch)
+
+Alle LLM-Calls werden durch den konfigurierten Provider geleitet.
+Bestehende Funktions-Schnittstellen bleiben als Shims erhalten.
 """
 
 from __future__ import annotations
@@ -12,12 +13,14 @@ import re
 import subprocess
 import sys
 import time
-from typing import Generator, Optional
+from typing import Generator
 
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import AVAILABLE_MODELS, DEFAULT_MODEL, MODEL_DESCRIPTIONS, OLLAMA_BASE_URL, OLLAMA_TIMEOUT_S
+from config import OLLAMA_BASE_URL, OLLAMA_TIMEOUT_S
+
+from modules.llm_providers import get_provider
 from modules.logger import logger
 
 logger.debug(f"Module loaded: {__name__}")
@@ -35,93 +38,26 @@ def _strip_ansi(text: str) -> str:
 # 1. Verbindungscheck
 # ---------------------------------------------------------------------------
 
-_INSTALL_GUIDE = """
-**Ollama ist nicht erreichbar.**
-
-Installation:
-```bash
-# macOS / Linux
-curl -fsSL https://ollama.ai/install.sh | sh
-
-# Windows
-# → https://ollama.ai/download/windows
-```
-
-Dienst starten:
-```bash
-ollama serve
-```
-
-Erstes Modell laden:
-```bash
-ollama pull llama3
-```
-""".strip()
-
-
 def is_ollama_running() -> bool:
-    """
-    Prüft ob der Ollama-Dienst unter OLLAMA_BASE_URL erreichbar ist.
+    """Prüft ob Ollama erreichbar ist. Shim für Rückwärtskompatibilität."""
+    from modules.llm_providers.ollama_provider import OllamaProvider
+    return OllamaProvider().health()
 
-    Returns:
-        True wenn Ollama antwortet, False sonst.
-    """
-    try:
-        resp = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=3)
-        return resp.status_code == 200
-    except Exception as _exc:
-        logger.debug(f"Ollama nicht erreichbar: {_exc}")
-        return False
+
+def is_llm_ready() -> bool:
+    """Prüft ob der konfigurierte LLM-Provider bereit ist."""
+    return get_provider().health()
 
 
 def get_ollama_status() -> dict:
-    """
-    Gibt erweiterten Verbindungsstatus zurück.
+    """Status des Ollama-Providers. Shim für Rückwärtskompatibilität."""
+    from modules.llm_providers.ollama_provider import OllamaProvider
+    return OllamaProvider().get_status()
 
-    Returns:
-        {
-          "running": bool,
-          "url": str,
-          "model_count": int,
-          "error": str,          # leer wenn running=True
-          "install_guide": str,  # leer wenn running=True
-        }
-    """
-    try:
-        resp = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=3)
-        resp.raise_for_status()
-        models = resp.json().get("models", [])
-        return {
-            "running": True,
-            "url": OLLAMA_BASE_URL,
-            "model_count": len(models),
-            "error": "",
-            "install_guide": "",
-        }
-    except requests.exceptions.ConnectionError:
-        return {
-            "running": False,
-            "url": OLLAMA_BASE_URL,
-            "model_count": 0,
-            "error": f"Verbindung zu {OLLAMA_BASE_URL} abgelehnt.",
-            "install_guide": _INSTALL_GUIDE,
-        }
-    except requests.exceptions.Timeout:
-        return {
-            "running": False,
-            "url": OLLAMA_BASE_URL,
-            "model_count": 0,
-            "error": f"Timeout beim Verbinden mit {OLLAMA_BASE_URL} (>3s).",
-            "install_guide": _INSTALL_GUIDE,
-        }
-    except Exception as exc:
-        return {
-            "running": False,
-            "url": OLLAMA_BASE_URL,
-            "model_count": 0,
-            "error": str(exc),
-            "install_guide": _INSTALL_GUIDE,
-        }
+
+def get_llm_status() -> dict:
+    """Status des konfigurierten Providers (provider-agnostisch)."""
+    return get_provider().get_status()
 
 
 # ---------------------------------------------------------------------------
@@ -129,60 +65,22 @@ def get_ollama_status() -> dict:
 # ---------------------------------------------------------------------------
 
 def get_available_models() -> list[str]:
-    """
-    Fragt die lokale Ollama-Instanz nach installierten Modellen ab
-    (GET /api/tags).
-
-    Returns:
-        Liste der Modell-Namen ohne Tag-Suffix, z.B. ["llama3", "mistral"].
-        Leere Liste wenn Ollama nicht erreichbar ist.
-    """
-    try:
-        resp = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
-        resp.raise_for_status()
-        models = resp.json().get("models", [])
-        # "llama3:latest" → "llama3"
-        return [m["name"].split(":")[0] for m in models]
-    except Exception as _exc:
-        logger.debug(f"get_available_models fehlgeschlagen: {_exc}")
-        return []
+    """Verfügbare Modelle des aktuellen Providers."""
+    return get_provider().list_models()
 
 
 def get_available_models_with_info() -> list[dict]:
-    """
-    Wie get_available_models(), aber mit Größe und Modifikationsdatum.
-
-    Returns:
-        [{"name": str, "size_gb": float, "modified": str, "description": str}]
-    """
-    try:
-        resp = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
-        resp.raise_for_status()
-        models = resp.json().get("models", [])
-        result = []
-        for m in models:
-            name = m["name"].split(":")[0]
-            size_bytes = m.get("size", 0)
-            result.append({
-                "name": name,
-                "full_name": m["name"],
-                "size_gb": round(size_bytes / 1024**3, 2) if size_bytes else 0.0,
-                "modified": m.get("modified_at", "")[:10],
-                "description": MODEL_DESCRIPTIONS.get(name, ""),
-            })
-        return result
-    except Exception as _exc:
-        logger.debug(f"get_available_models_with_info fehlgeschlagen: {_exc}")
-        return []
+    """Modell-Infos des aktuellen Providers (name, size_gb, modified, description)."""
+    return get_provider().list_models_with_info()
 
 
 def is_model_available(model: str) -> bool:
-    """Prüft ob ein Modell lokal installiert ist."""
+    """Prüft ob ein Modell beim aktuellen Provider verfügbar ist."""
     return model in get_available_models()
 
 
 # ---------------------------------------------------------------------------
-# 3. Modell herunterladen (subprocess-Streaming)
+# 3. Modell herunterladen (Ollama-spezifisch)
 # ---------------------------------------------------------------------------
 
 def download_model(model_name: str) -> Generator[str, None, None]:
@@ -190,18 +88,15 @@ def download_model(model_name: str) -> Generator[str, None, None]:
     Lädt ein Ollama-Modell via `ollama pull` herunter und streamt den
     Fortschritt als einzelne Strings (geeignet für Streamlit st.empty()).
 
-    Strategie: subprocess.Popen mit stdout=PIPE, ANSI-Codes werden gefiltert.
-    Der Generator beendet sich wenn der Prozess fertig ist.
-
     Yields:
-        Fortschritts-Strings wie "pulling manifest", "pulling a3…  45%",
-        "✅ llama3 erfolgreich heruntergeladen" oder "⚠️ Fehler: …"
+        Fortschritts-Strings wie "pulling manifest", "✅ llama3 erfolgreich heruntergeladen"
 
     Raises:
         RuntimeError: wenn `ollama` CLI nicht im PATH ist
         ConnectionError: wenn Ollama-Dienst nicht läuft
     """
-    if not is_ollama_running():
+    from modules.llm_providers.ollama_provider import OllamaProvider
+    if not OllamaProvider().health():
         raise ConnectionError(
             f"Ollama-Dienst nicht erreichbar ({OLLAMA_BASE_URL}).\n"
             "Bitte starte Ollama mit `ollama serve` und versuche es erneut."
@@ -240,7 +135,7 @@ def download_model(model_name: str) -> Generator[str, None, None]:
 
 
 # ---------------------------------------------------------------------------
-# 4. Inferenz via ollama Python-Client (mit Retry)
+# 4. Inferenz
 # ---------------------------------------------------------------------------
 
 def query_model(
@@ -251,49 +146,34 @@ def query_model(
     max_retries: int = 2,
 ) -> str:
     """
-    Sendet eine Prompt-Anfrage an das lokale Ollama-Modell via
-    ollama Python-Client. Fällt automatisch auf HTTP-API zurück wenn
-    das ollama-Package nicht installiert ist.
+    Sendet eine Prompt-Anfrage an den konfigurierten LLM-Provider.
 
     Args:
-        model_name:   Modell-Name (z.B. 'llama3')
-        prompt:       Benutzer-Prompt
-        system_prompt: Optionaler System-Prompt (Persona / Instruktionen)
-        temperature:  Kreativität 0.0–1.0 (0 = deterministisch)
-        max_retries:  Anzahl Wiederholungsversuche nach Fehlern (default: 2)
+        model_name:    Modell-Name
+        prompt:        Benutzer-Prompt
+        system_prompt: Optionaler System-Prompt
+        temperature:   Kreativität 0.0–1.0
+        max_retries:   Anzahl Wiederholungsversuche nach Fehlern
 
     Returns:
         Modell-Antwort als String
 
     Raises:
         RuntimeError: nach Erschöpfung aller Versuche
-        ConnectionError: wenn Ollama nicht erreichbar ist
     """
-    if not is_ollama_running():
-        raise ConnectionError(
-            f"Ollama nicht erreichbar ({OLLAMA_BASE_URL}). "
-            "Bitte `ollama serve` starten."
-        )
-
-    messages: list[dict] = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
-
+    provider = get_provider()
     last_exc: Exception = RuntimeError("Unbekannter Fehler")
 
     for attempt in range(max_retries + 1):
         try:
-            return _query_via_client(model_name, messages, temperature)
-        except ImportError:
-            # ollama package nicht installiert → HTTP-Fallback
-            return _query_via_http(model_name, messages, temperature)
+            return provider.query(model_name, prompt, system_prompt, temperature)
         except Exception as exc:
             last_exc = exc
-            logger.warning(f"query_model Versuch {attempt + 1}/{max_retries + 1} fehlgeschlagen: {exc}")
+            logger.warning(
+                f"query_model Versuch {attempt + 1}/{max_retries + 1} fehlgeschlagen: {exc}"
+            )
             if attempt < max_retries:
-                wait = 2 ** attempt          # 1s, 2s
-                time.sleep(wait)
+                time.sleep(2 ** attempt)
 
     raise RuntimeError(
         f"Anfrage an '{model_name}' nach {max_retries + 1} Versuchen fehlgeschlagen: "
@@ -301,48 +181,47 @@ def query_model(
     )
 
 
-def _query_via_client(
-    model_name: str,
+def chat(
+    model: str,
     messages: list[dict],
-    temperature: float,
-) -> str:
-    """Inferenz via ollama Python-Package."""
-    import ollama  # type: ignore[import]
+    temperature: float = 0.3,
+    stream: bool = False,
+) -> str | Generator[str, None, None]:
+    """
+    Niedrig-Level Chat-Schnittstelle.
+    Stream-Modus wird nur bei Ollama unterstützt.
+    """
+    if stream:
+        # Streaming direkt über Ollama HTTP-API
+        payload = {
+            "model": model,
+            "messages": messages,
+            "options": {"temperature": temperature},
+            "stream": True,
+        }
+        try:
+            resp = requests.post(
+                f"{OLLAMA_BASE_URL}/api/chat",
+                json=payload,
+                stream=True,
+                timeout=OLLAMA_TIMEOUT_S,
+            )
+            resp.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            raise ConnectionError(
+                f"Ollama nicht erreichbar ({OLLAMA_BASE_URL}). Bitte `ollama serve` starten."
+            )
 
-    client = ollama.Client(
-        host=OLLAMA_BASE_URL,
-        timeout=OLLAMA_TIMEOUT_S,
-    )
-    response = client.chat(
-        model=model_name,
-        messages=messages,
-        options={"temperature": temperature},
-    )
-    # ollama-Client gibt entweder dict oder ChatResponse-Objekt zurück
-    if isinstance(response, dict):
-        return response["message"]["content"]
-    return response.message.content
+        def _token_gen() -> Generator[str, None, None]:
+            for line in resp.iter_lines():
+                if line:
+                    data = json.loads(line)
+                    delta = data.get("message", {}).get("content", "")
+                    if delta:
+                        yield delta
+        return _token_gen()
 
-
-def _query_via_http(
-    model_name: str,
-    messages: list[dict],
-    temperature: float,
-) -> str:
-    """Inferenz via direkter HTTP-Anfrage (Fallback ohne ollama-Package)."""
-    payload = {
-        "model": model_name,
-        "messages": messages,
-        "options": {"temperature": temperature},
-        "stream": False,
-    }
-    resp = requests.post(
-        f"{OLLAMA_BASE_URL}/api/chat",
-        json=payload,
-        timeout=OLLAMA_TIMEOUT_S,
-    )
-    resp.raise_for_status()
-    return resp.json()["message"]["content"]
+    return get_provider().chat(messages, model=model, temperature=temperature)
 
 
 # ---------------------------------------------------------------------------
@@ -364,18 +243,7 @@ def analyze_stock(
     context: str,
     method: str = "Auto (KI wählt)",
 ) -> str:
-    """
-    Erstellt eine strukturierte Aktienanalyse mit dem LLM.
-
-    Args:
-        model:   Ollama-Modellname
-        ticker:  Aktien-Ticker
-        context: Technische Indikatoren / Kursdaten als Textzusammenfassung
-        method:  Gewählte Analysemethode
-
-    Returns:
-        Analyse-Text des Modells
-    """
+    """Erstellt eine strukturierte Aktienanalyse mit dem LLM."""
     user_prompt = (
         f"Analysiere die Aktie **{ticker}** mit der Methode **{method}**.\n\n"
         f"Aktuelle Marktdaten und Indikatoren:\n{context}\n\n"
@@ -398,20 +266,17 @@ def analyze_stock(
 # ---------------------------------------------------------------------------
 
 def list_local_models() -> list[str]:
-    """Alias für get_available_models() – Rückwärtskompatibilität."""
+    """Alias für get_available_models()."""
     return get_available_models()
 
 
 def pull_model(model: str) -> Generator[str, None, None]:
-    """Alias für download_model() – Rückwärtskompatibilität."""
+    """Alias für download_model()."""
     return download_model(model)
 
 
 def ensure_model(model: str) -> tuple[bool, str]:
-    """
-    Prüft ob ein Modell verfügbar ist.
-    Returns (True, '') oder (False, Fehlermeldung).
-    """
+    """Prüft ob ein Modell verfügbar ist. Returns (True, '') oder (False, Fehlermeldung)."""
     if is_model_available(model):
         return True, ""
     return (
@@ -419,47 +284,3 @@ def ensure_model(model: str) -> tuple[bool, str]:
         f"Modell '{model}' ist nicht lokal installiert. "
         "Bitte über die Sidebar herunterladen.",
     )
-
-
-def chat(
-    model: str,
-    messages: list[dict],
-    temperature: float = 0.3,
-    stream: bool = False,
-) -> str | Generator[str, None, None]:
-    """
-    Niedrig-Level Chat-Schnittstelle (HTTP-API direkt).
-    Für Streaming oder wenn messages manuell zusammengebaut werden.
-
-    Für den Standardfall query_model() bevorzugen.
-    """
-    payload = {
-        "model": model,
-        "messages": messages,
-        "options": {"temperature": temperature},
-        "stream": stream,
-    }
-    try:
-        resp = requests.post(
-            f"{OLLAMA_BASE_URL}/api/chat",
-            json=payload,
-            stream=stream,
-            timeout=OLLAMA_TIMEOUT_S,
-        )
-        resp.raise_for_status()
-    except requests.exceptions.ConnectionError:
-        raise ConnectionError(
-            f"Ollama nicht erreichbar ({OLLAMA_BASE_URL}). Bitte `ollama serve` starten."
-        )
-
-    if stream:
-        def _token_gen() -> Generator[str, None, None]:
-            for line in resp.iter_lines():
-                if line:
-                    data = json.loads(line)
-                    delta = data.get("message", {}).get("content", "")
-                    if delta:
-                        yield delta
-        return _token_gen()
-
-    return resp.json()["message"]["content"]

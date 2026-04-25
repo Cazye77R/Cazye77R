@@ -20,11 +20,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 from config import (
     APP_TITLE, APP_ICON, APP_VERSION,
     ANALYSIS_METHODS, DEFAULT_BUDGET_EUR, DEFAULT_PERIOD,
-    LAMBO_PRICE_EUR, ORDER_COST_EUR, SPREAD_PERCENT, AVAILABLE_MODELS,
+    LAMBO_PRICE_EUR, MODEL_DESCRIPTIONS, ORDER_COST_EUR, SPREAD_PERCENT, AVAILABLE_MODELS,
     EXPLORATION_CONSTANT, ENABLE_EASTER_EGGS, CACHE_TTL_HOURS,
 )
 from modules.model_manager import (
-    MODEL_DESCRIPTIONS, is_ollama_running, get_ollama_status,
+    is_ollama_running, get_ollama_status, get_llm_status,
     get_available_models, get_available_models_with_info, download_model,
     analyze_stock,
 )
@@ -66,6 +66,12 @@ def _check_ollama() -> bool:
 def _ollama_status() -> dict:
     """Gecachter erweiterter Ollama-Status (60 s TTL)."""
     return get_ollama_status()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _llm_status() -> dict:
+    """Gecachter Status des konfigurierten Providers (60 s TTL)."""
+    return get_llm_status()
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -1493,39 +1499,69 @@ with tab2:
 # TAB 3 – MODELL-MANAGER
 # ═════════════════════════════════════════════════════════════════════════════
 with tab3:
-    _section("🔌 Ollama Status")
+    # ── Provider-Auswahl ─────────────────────────────────────────────────────
+    _section("🤖 KI-Provider")
 
-    ollama_st = _ollama_status()
-    running   = ollama_st["running"]
+    _provider_opts = ["ollama", "nvidia"]
+    _default_provider = os.environ.get("LLM_PROVIDER", "ollama").lower()
+    _default_idx = _provider_opts.index(_default_provider) if _default_provider in _provider_opts else 0
+
+    _selected_provider = st.selectbox(
+        "Provider",
+        _provider_opts,
+        index=_default_idx,
+        key="llm_provider_sel",
+        help="Wechsel gilt für diese Sitzung. Für dauerhafte Änderung LLM_PROVIDER in .env setzen.",
+    )
+
+    # Env-Variable live aktualisieren damit get_provider() den richtigen Provider wählt
+    os.environ["LLM_PROVIDER"] = _selected_provider
+    _llm_status.clear()   # Cache leeren bei Provider-Wechsel
+
+    # ── Provider-Status ───────────────────────────────────────────────────────
+    st.divider()
+    _section("🔌 Status")
+
+    _prov_st = _llm_status()
+    running  = _prov_st["running"]
 
     if running:
-        model_count = ollama_st.get("model_count", 0)
+        model_count = _prov_st.get("model_count", 0)
         st.markdown(
             f'<div class="sm-card-accent">'
             f'<span class="sm-online">● ONLINE</span>'
             f'&nbsp;&nbsp;<span style="color:#8b949e;font-size:12px;">'
-            f'{ollama_st.get("url","http://localhost:11434")} · '
-            f'{model_count} Modell(e) installiert</span>'
+            f'{_prov_st.get("url", "")} · '
+            f'{model_count} Modell(e) verfügbar</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
     else:
         st.markdown(
             f'<div class="sm-card" style="border-color:#ff4444;">'
-            f'<span class="sm-offline">● OFFLINE</span>'
+            f'<span class="sm-offline">● OFFLINE / NICHT KONFIGURIERT</span>'
             f'&nbsp;&nbsp;<span style="color:#8b949e;font-size:12px;">'
-            f'{ollama_st.get("error","Ollama nicht erreichbar.")}</span>'
+            f'{_prov_st.get("error", "Provider nicht erreichbar.")}</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
-        with st.expander("📖 Installationsanleitung"):
-            st.markdown(ollama_st.get("install_guide", "Bitte Ollama unter https://ollama.ai installieren."))
+        _guide = _prov_st.get("install_guide", "")
+        if _guide:
+            with st.expander("📖 Einrichtungsanleitung"):
+                st.markdown(_guide)
 
-    # ── Installierte Modelle ──────────────────────────────────────────────────
+    # ── Installierte Modelle (nur Ollama) ─────────────────────────────────────
     st.divider()
     _section("📦 Installierte Modelle")
 
-    if running:
+    if _selected_provider == "nvidia":
+        st.info(
+            "NVIDIA NIM – Modelle werden über die Cloud bereitgestellt. "
+            "Kein lokaler Download nötig. "
+            "Aktuell konfiguriertes Modell: "
+            f"`{os.environ.get('NVIDIA_MODEL', 'meta/llama-3.3-70b-instruct')}`"
+        )
+    elif running:
         installed = _models_info()
         if installed:
             active_model = st.session_state.model
@@ -1552,74 +1588,79 @@ with tab3:
                 st.rerun()
         else:
             st.info("Ollama läuft, aber noch kein Modell installiert.")
-    else:
+    elif _selected_provider != "nvidia":
         st.info("Ollama offline – keine Modelle verfügbar.")
 
-    # ── Download ──────────────────────────────────────────────────────────────
-    st.divider()
-    _section("⬇️ Modell herunterladen")
-
-    installed_names = set(_models_list()) if running else set()
-    download_opts   = [m for m in AVAILABLE_MODELS if m not in installed_names]
-
-    if not download_opts:
-        st.success("✅ Alle empfohlenen Modelle sind bereits installiert.")
+    # ── Download (nur Ollama) ─────────────────────────────────────────────────
+    if _selected_provider == "nvidia":
+        st.divider()
+        st.info(
+            "NVIDIA NIM benötigt keinen Modell-Download. "
+            "Setze `NVIDIA_API_KEY` in deiner `.env`-Datei um die API zu nutzen."
+        )
     else:
-        dl_col1, dl_col2 = st.columns([2, 1])
-        with dl_col1:
-            dl_model = st.selectbox(
-                "Modell wählen", download_opts, key="dl_model_sel",
-            )
-            descr = MODEL_DESCRIPTIONS.get(dl_model, "")
-            if descr:
-                st.caption(f"ℹ️ {descr}")
-        with dl_col2:
-            st.write("")
-            btn_dl = st.button(
-                f"⬇️ {dl_model} herunterladen",
-                use_container_width=True,
-                type="primary",
-                key="btn_dl",
-                disabled=not running,
-            )
+        st.divider()
+        _section("⬇️ Modell herunterladen")
 
-        if not running:
-            st.warning("Ollama muss laufen um Modelle herunterzuladen.")
+        installed_names = set(_models_list()) if running else set()
+        download_opts   = [m for m in AVAILABLE_MODELS if m not in installed_names]
 
-        if btn_dl and running:
-            st.markdown(_ticker_html(), unsafe_allow_html=True)
-            progress_slot = st.empty()
-            bar_slot      = st.empty()
-            done = False
-            total_bytes = 0
-            pulled_bytes = 0
-            try:
-                for i, line in enumerate(download_model(dl_model)):
-                    if not line.strip():
-                        continue
-                    progress_slot.markdown(
-                        f'<div class="sm-card" style="font-family:IBM Plex Mono;'
-                        f'font-size:11px;color:#8b949e;">{line}</div>',
-                        unsafe_allow_html=True,
-                    )
-                    # Einfacher Zähler als Fortschrittsindikator
-                    pct = min((i % 200) / 200, 1.0)
-                    bar_slot.progress(pct, text=f"Lade {dl_model}…")
-                    done = True
-            except Exception as e:
-                st.toast(f"Download-Fehler: {e}", icon="🚨")
-                st.error(f"Download-Fehler: {e}")
-
-            progress_slot.empty()
-            bar_slot.empty()
-            if done:
-                _models_list.clear()   # Modell-Cache invalidieren → sofortige Anzeige
-                _models_info.clear()
-                st.success(
-                    f"✅ **{dl_model}** erfolgreich heruntergeladen! "
-                    "Seite neu laden um das Modell zu nutzen."
+        if not download_opts:
+            st.success("✅ Alle empfohlenen Modelle sind bereits installiert.")
+        else:
+            dl_col1, dl_col2 = st.columns([2, 1])
+            with dl_col1:
+                dl_model = st.selectbox(
+                    "Modell wählen", download_opts, key="dl_model_sel",
                 )
-                st.rerun()
+                descr = MODEL_DESCRIPTIONS.get(dl_model, "")
+                if descr:
+                    st.caption(f"ℹ️ {descr}")
+            with dl_col2:
+                st.write("")
+                btn_dl = st.button(
+                    f"⬇️ {dl_model} herunterladen",
+                    use_container_width=True,
+                    type="primary",
+                    key="btn_dl",
+                    disabled=not running,
+                )
+
+            if not running:
+                st.warning("Ollama muss laufen um Modelle herunterzuladen.")
+
+            if btn_dl and running:
+                st.markdown(_ticker_html(), unsafe_allow_html=True)
+                progress_slot = st.empty()
+                bar_slot      = st.empty()
+                done = False
+                try:
+                    for i, line in enumerate(download_model(dl_model)):
+                        if not line.strip():
+                            continue
+                        progress_slot.markdown(
+                            f'<div class="sm-card" style="font-family:IBM Plex Mono;'
+                            f'font-size:11px;color:#8b949e;">{line}</div>',
+                            unsafe_allow_html=True,
+                        )
+                        # Einfacher Zähler als Fortschrittsindikator
+                        pct = min((i % 200) / 200, 1.0)
+                        bar_slot.progress(pct, text=f"Lade {dl_model}…")
+                        done = True
+                except Exception as e:
+                    st.toast(f"Download-Fehler: {e}", icon="🚨")
+                    st.error(f"Download-Fehler: {e}")
+
+                progress_slot.empty()
+                bar_slot.empty()
+                if done:
+                    _models_list.clear()   # Modell-Cache invalidieren → sofortige Anzeige
+                    _models_info.clear()
+                    st.success(
+                        f"✅ **{dl_model}** erfolgreich heruntergeladen! "
+                        "Seite neu laden um das Modell zu nutzen."
+                    )
+                    st.rerun()
 
     # ── Modell-Vergleichstabelle ──────────────────────────────────────────────
     st.divider()

@@ -142,7 +142,7 @@ class StockTrainer:
              "method": "RSI", "method_accuracy": 0.6, "overall_accuracy": 0.64}
         """
         from modules.data_fetcher import fetch_ohlcv
-        from modules.model_manager import is_ollama_running, query_model
+        from modules.model_manager import is_llm_ready, query_model
 
         # --- Daten laden ---
         df = fetch_ohlcv(symbol, period=self.TRAINING_PERIOD)
@@ -163,8 +163,8 @@ class StockTrainer:
         actual_chg = (close_now - close_prev) / close_prev * 100
 
         # --- LLM-Anfrage ---
-        if not is_ollama_running():
-            return self._error_result("Ollama nicht erreichbar", symbol, method)
+        if not is_llm_ready():
+            return self._error_result("KI-Anbieter nicht erreichbar", symbol, method)
 
         prompt = self._build_prompt(symbol, train_df, method)
         system = self._system_prompt()
