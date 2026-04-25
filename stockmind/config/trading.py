@@ -45,3 +45,11 @@ EXPLORATION_CONSTANT: float = float(os.getenv("EXPLORATION_CONSTANT", "1.414"))
 # --- Feature-Flags ---
 # Easter Eggs (Lambo-Währung, Konfetti, versteckte Überraschungen)
 ENABLE_EASTER_EGGS: bool = os.getenv("ENABLE_EASTER_EGGS", "true").lower() == "true"
+
+# --- Risk Management ---
+MAX_RISK_PER_TRADE_PCT:       float = float(os.getenv("MAX_RISK_PER_TRADE_PCT",       "2.0"))
+MAX_POSITION_SIZE_PCT:        float = float(os.getenv("MAX_POSITION_SIZE_PCT",        "25.0"))
+MAX_DRAWDOWN_PCT:             float = float(os.getenv("MAX_DRAWDOWN_PCT",             "15.0"))
+MAX_CORRELATED_EXPOSURE_PCT:  float = float(os.getenv("MAX_CORRELATED_EXPOSURE_PCT",  "40.0"))
+STOP_LOSS_ATR_MULTIPLE:       float = float(os.getenv("STOP_LOSS_ATR_MULTIPLE",       "2.0"))
+TAKE_PROFIT_ATR_MULTIPLE:     float = float(os.getenv("TAKE_PROFIT_ATR_MULTIPLE",     "3.0"))
