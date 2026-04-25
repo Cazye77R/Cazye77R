@@ -46,6 +46,14 @@ EXPLORATION_CONSTANT: float = float(os.getenv("EXPLORATION_CONSTANT", "1.414"))
 # Easter Eggs (Lambo-Währung, Konfetti, versteckte Überraschungen)
 ENABLE_EASTER_EGGS: bool = os.getenv("ENABLE_EASTER_EGGS", "true").lower() == "true"
 
+# --- Slippage-Modell ---
+# Basis-Spread in Prozent (fixed Komponente)
+SLIPPAGE_BASE_PCT:          float = float(os.getenv("SLIPPAGE_BASE_PCT",          "0.05"))
+# Volumen-Faktor k: slippage += k * (order_size / avg_daily_volume)
+SLIPPAGE_VOLUME_FACTOR:     float = float(os.getenv("SLIPPAGE_VOLUME_FACTOR",     "0.1"))
+# Fallback für avg_daily_volume wenn kein echtes Volumen vorhanden
+SLIPPAGE_DAILY_VOLUME_DEFAULT: float = float(os.getenv("SLIPPAGE_DAILY_VOLUME_DEFAULT", "1000000.0"))
+
 # --- Risk Management ---
 MAX_RISK_PER_TRADE_PCT:       float = float(os.getenv("MAX_RISK_PER_TRADE_PCT",       "2.0"))
 MAX_POSITION_SIZE_PCT:        float = float(os.getenv("MAX_POSITION_SIZE_PCT",        "25.0"))

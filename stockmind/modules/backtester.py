@@ -25,6 +25,9 @@ from config import (
     LAMBO_PRICE_EUR,
     ORDER_COST_EUR,
     PORTFOLIO_DIR,
+    SLIPPAGE_BASE_PCT,
+    SLIPPAGE_DAILY_VOLUME_DEFAULT,
+    SLIPPAGE_VOLUME_FACTOR,
     SPREAD_PERCENT,
 )
 from modules.logger import logger
@@ -697,6 +700,35 @@ def reset_portfolio(name: str = "default", budget: float = DEFAULT_BUDGET_EUR) -
     return pf
 
 
+def compute_slippage(
+    price:             float,
+    order_size:        float,
+    avg_daily_volume:  float = SLIPPAGE_DAILY_VOLUME_DEFAULT,
+    base_pct:          float = SLIPPAGE_BASE_PCT,
+    volume_factor:     float = SLIPPAGE_VOLUME_FACTOR,
+) -> float:
+    """
+    Volumenabhängiges Slippage-Modell.
+
+    slippage_pct = base_pct + volume_factor * (order_size / avg_daily_volume)
+
+    Args:
+        price:            Marktpreis.
+        order_size:       Auftragsgröße in Stück.
+        avg_daily_volume: Durchschnittliches Tagesvolumen (Stück).
+        base_pct:         Fixer Basis-Spread in Prozent.
+        volume_factor:    Gewichtungsfaktor für Volumen-Impact.
+
+    Returns:
+        Slippage in EUR (absolut, positiv für BUY-Seite).
+    """
+    if avg_daily_volume <= 0:
+        avg_daily_volume = SLIPPAGE_DAILY_VOLUME_DEFAULT
+    volume_impact = volume_factor * (order_size / avg_daily_volume)
+    slippage_pct  = base_pct + volume_impact
+    return price * slippage_pct / 100.0
+
+
 def _eff_price(price: float, action: str, spread_pct: float = SPREAD_PERCENT) -> float:
     sp = price * spread_pct / 100
     return price + sp if action == "BUY" else price - sp
@@ -814,13 +846,16 @@ def backtest_signals(
     """
     Simuliert Handelssignale auf historischen Daten.
 
+    Verwendet volumenabhängiges Slippage-Modell wenn "Volume" im DataFrame
+    vorhanden ist; fällt sonst auf fixen spread_pct zurück.
+
     Args:
         ticker:       Aktien-Symbol
         df:           OHLCV-DataFrame
         signals:      pd.Series mit "KAUFEN" | "HALTEN" | "VERKAUFEN" je Datum
         initial_cash: Startkapital (EUR)
         order_cost:   Ordergebühr (EUR)
-        spread_pct:   Spread (%)
+        spread_pct:   Spread (%) – Fallback wenn kein Volumen vorhanden
 
     Returns:
         BacktestResult mit Equity-Kurve und Kennzahlen
@@ -831,23 +866,45 @@ def backtest_signals(
     equity_curve: list[float] = []
     trades:       list[dict]  = []
 
+    has_volume = "Volume" in df.columns
+    if has_volume:
+        avg_vol = float(df["Volume"].replace(0, np.nan).mean())
+        if np.isnan(avg_vol) or avg_vol <= 0:
+            avg_vol = SLIPPAGE_DAILY_VOLUME_DEFAULT
+    else:
+        avg_vol = SLIPPAGE_DAILY_VOLUME_DEFAULT
+
     aligned           = df[["Close"]].copy()
     aligned["signal"] = signals.reindex(df.index).fillna("HALTEN")
 
     for date, row in aligned.iterrows():
         price    = float(row["Close"])
         sig      = row["signal"]
-        eff_buy  = _eff_price(price, "BUY",  spread_pct)
-        eff_sell = _eff_price(price, "SELL", spread_pct)
+
+        if has_volume:
+            buy_slip  = compute_slippage(price, max(shares, 1), avg_vol)
+            sell_slip = compute_slippage(price, max(shares, 1), avg_vol)
+            eff_buy   = price + buy_slip
+            eff_sell  = price - sell_slip
+        else:
+            eff_buy  = _eff_price(price, "BUY",  spread_pct)
+            eff_sell = _eff_price(price, "SELL", spread_pct)
 
         if sig == "KAUFEN" and cash > order_cost * 2 and shares == 0:
             invest      = cash * 0.95
             shares      = invest / eff_buy
+            if has_volume:
+                buy_slip  = compute_slippage(price, shares, avg_vol)
+                eff_buy   = price + buy_slip
+                shares    = invest / eff_buy
             cash       -= invest + order_cost
             avg_price   = eff_buy
             trades.append({"date": str(date), "action": "BUY", "price": price, "shares": shares})
 
         elif sig == "VERKAUFEN" and shares > 0:
+            if has_volume:
+                sell_slip = compute_slippage(price, shares, avg_vol)
+                eff_sell  = price - sell_slip
             revenue = shares * eff_sell - order_cost
             pnl     = revenue - shares * avg_price
             cash   += revenue
@@ -888,3 +945,162 @@ def backtest_signals(
         trades=trades,
         equity_curve=equity_curve,
     )
+
+
+# ===========================================================================
+# Erweiterte Performance-Metriken
+# ===========================================================================
+
+def compute_metrics(
+    equity_curve: pd.Series,
+    trades:       pd.DataFrame,
+    periods_per_year: int = 252,
+) -> dict:
+    """
+    Berechnet professionelle Performance-Kennzahlen aus Equity-Kurve und Trades.
+
+    Args:
+        equity_curve:     pd.Series mit Portfoliowerten (DatetimeIndex empfohlen).
+        trades:           pd.DataFrame mit mind. Spalten: date, action, pnl.
+                          Optional: entry_date für Trade-Dauer.
+        periods_per_year: Handelstage pro Jahr (Standard 252).
+
+    Returns:
+        dict mit Kennzahlen:
+          total_return, cagr, sharpe, sortino, calmar,
+          max_drawdown, max_drawdown_duration_days,
+          win_rate, profit_factor, expectancy, payoff_ratio,
+          max_consecutive_losses, n_trades, avg_trade_duration_days
+    """
+    eq = equity_curve.dropna()
+    if len(eq) < 2:
+        return _empty_metrics()
+
+    returns = eq.pct_change().dropna()
+    total_return = float(eq.iloc[-1] / eq.iloc[0] - 1)
+
+    # CAGR
+    if isinstance(eq.index, pd.DatetimeIndex):
+        years = (eq.index[-1] - eq.index[0]).days / 365.25
+    else:
+        years = len(eq) / periods_per_year
+    cagr = float((eq.iloc[-1] / eq.iloc[0]) ** (1 / years) - 1) if years > 0 else 0.0
+
+    # Sharpe (risk-free = 0)
+    mean_r = float(returns.mean())
+    std_r  = float(returns.std(ddof=1))
+    sharpe = mean_r / std_r * math.sqrt(periods_per_year) if std_r > 1e-12 else 0.0
+
+    # Sortino (nur negative Renditen im Nenner)
+    neg = returns[returns < 0]
+    downside_std = float(neg.std(ddof=1)) if len(neg) > 1 else 0.0
+    sortino = mean_r / downside_std * math.sqrt(periods_per_year) if downside_std > 1e-12 else 0.0
+
+    # Max Drawdown
+    peak  = eq.cummax()
+    dd    = (eq - peak) / peak.replace(0, np.nan)
+    max_dd = float(dd.min())
+
+    # Max Drawdown Duration in Handelstagen
+    dd_duration = _max_drawdown_duration(eq)
+
+    # Calmar
+    calmar = cagr / abs(max_dd) if abs(max_dd) > 1e-12 else 0.0
+
+    # Trade-basierte Kennzahlen
+    sells = trades[trades["action"] == "SELL"] if not trades.empty and "action" in trades.columns else pd.DataFrame()
+
+    n_trades = len(sells)
+    if n_trades > 0 and "pnl" in sells.columns:
+        pnl_vals = sells["pnl"].dropna()
+        wins  = pnl_vals[pnl_vals > 0]
+        losses = pnl_vals[pnl_vals <= 0]
+
+        win_rate      = len(wins) / n_trades
+        gross_profit  = float(wins.sum())
+        gross_loss    = float(losses.abs().sum())
+        profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else float("inf")
+        expectancy    = float(pnl_vals.mean())
+        avg_win       = float(wins.mean()) if len(wins) > 0 else 0.0
+        avg_loss      = float(losses.abs().mean()) if len(losses) > 0 else 0.0
+        payoff_ratio  = avg_win / avg_loss if avg_loss > 1e-12 else float("inf")
+        max_consec_losses = _max_consecutive_losses(pnl_vals)
+    else:
+        win_rate = profit_factor = expectancy = payoff_ratio = 0.0
+        max_consec_losses = 0
+
+    # Durchschnittliche Trade-Dauer
+    avg_duration = _avg_trade_duration(trades)
+
+    return {
+        "total_return":              round(total_return * 100, 2),
+        "cagr":                      round(cagr * 100, 2),
+        "sharpe":                    round(sharpe, 3),
+        "sortino":                   round(sortino, 3),
+        "calmar":                    round(calmar, 3),
+        "max_drawdown":              round(max_dd * 100, 2),
+        "max_drawdown_duration_days": dd_duration,
+        "win_rate":                  round(win_rate * 100, 2),
+        "profit_factor":             round(profit_factor, 3),
+        "expectancy":                round(expectancy, 2),
+        "payoff_ratio":              round(payoff_ratio, 3),
+        "max_consecutive_losses":    max_consec_losses,
+        "n_trades":                  n_trades,
+        "avg_trade_duration_days":   avg_duration,
+    }
+
+
+def _empty_metrics() -> dict:
+    return {
+        "total_return": 0.0, "cagr": 0.0, "sharpe": 0.0, "sortino": 0.0,
+        "calmar": 0.0, "max_drawdown": 0.0, "max_drawdown_duration_days": 0,
+        "win_rate": 0.0, "profit_factor": 0.0, "expectancy": 0.0,
+        "payoff_ratio": 0.0, "max_consecutive_losses": 0,
+        "n_trades": 0, "avg_trade_duration_days": 0,
+    }
+
+
+def _max_drawdown_duration(eq: pd.Series) -> int:
+    """Längste Drawdown-Periode in Zeitschritten (Tagen wenn DatetimeIndex)."""
+    peak = eq.cummax()
+    in_dd = eq < peak
+    max_dur = 0
+    cur_dur = 0
+    for v in in_dd:
+        if v:
+            cur_dur += 1
+            max_dur = max(max_dur, cur_dur)
+        else:
+            cur_dur = 0
+    return max_dur
+
+
+def _max_consecutive_losses(pnl: pd.Series) -> int:
+    """Längste Serie aufeinanderfolgender Verlust-Trades."""
+    max_streak = 0
+    cur_streak = 0
+    for v in pnl:
+        if v <= 0:
+            cur_streak += 1
+            max_streak = max(max_streak, cur_streak)
+        else:
+            cur_streak = 0
+    return max_streak
+
+
+def _avg_trade_duration(trades: pd.DataFrame) -> int:
+    """Durchschnittliche Trade-Dauer in Tagen (0 wenn nicht berechenbar)."""
+    if trades.empty or "action" not in trades.columns or "date" not in trades.columns:
+        return 0
+    try:
+        buys  = trades[trades["action"] == "BUY"].reset_index(drop=True)
+        sells = trades[trades["action"] == "SELL"].reset_index(drop=True)
+        n = min(len(buys), len(sells))
+        if n == 0:
+            return 0
+        buy_dates  = pd.to_datetime(buys["date"].iloc[:n])
+        sell_dates = pd.to_datetime(sells["date"].iloc[:n])
+        durations  = (sell_dates.values - buy_dates.values).astype("timedelta64[D]").astype(int)
+        return int(np.mean(durations))
+    except Exception:
+        return 0

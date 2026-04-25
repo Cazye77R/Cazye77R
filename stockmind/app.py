@@ -34,7 +34,8 @@ from modules.data_fetcher import (
 from modules.trainer import StockTrainer, load_state, load_model, train, list_trained_stocks
 from modules.predictor import predict, build_context_string, SIGNAL_FUNCTIONS
 from modules.backtester import (
-    PaperTrader, lambo_value, lambo_display, lambo_progress, backtest_signals,
+    PaperTrader, lambo_value, lambo_display, lambo_progress,
+    backtest_signals, compute_metrics,
 )
 from modules.easter_eggs import (
     check_easter_egg, get_currency_display, get_trade_count_egg,
@@ -655,6 +656,38 @@ def _equity_chart(
     )
     return fig
 
+def _underwater_chart(
+    equity: pd.Series,
+    title: str = "Drawdown",
+) -> go.Figure:
+    """Plotly-Chart: prozentualer Drawdown (Underwater-Kurve) über Zeit."""
+    fig = go.Figure()
+    if equity.empty:
+        fig.update_layout(**_DARK, height=180)
+        return fig
+    peak = equity.cummax()
+    dd   = (equity - peak) / peak.replace(0, float("nan")) * 100
+    fig.add_trace(go.Scatter(
+        x=equity.index,
+        y=dd.values,
+        mode="lines",
+        name="Drawdown",
+        line=dict(color="#ff4444", width=1.5),
+        fill="tozeroy",
+        fillcolor="rgba(255,68,68,0.12)",
+    ))
+    fig.add_hline(y=0, line_color="#30363d", line_width=1)
+    fig.update_layout(
+        **_DARK, height=180,
+        xaxis_title="",
+        yaxis_title="Drawdown (%)",
+        yaxis_tickformat=".1f",
+        title=title,
+        margin=dict(t=36, b=20),
+    )
+    return fig
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Sidebar
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1159,19 +1192,41 @@ with tab1:
                             st.session_state.ticker, df_bt, sig_s,
                             initial_cash=bt_budget,
                         )
+                    # Kompakte KPI-Zeile
                     bc1, bc2, bc3, bc4, bc5 = st.columns(5)
                     bc1.metric("Rendite", f"{result.total_return_pct:+.2f}%")
                     bc2.metric("Buy & Hold", f"{result.buy_and_hold_pct:+.2f}%")
                     bc3.metric("Win-Rate", f"{result.win_rate:.0%}")
                     bc4.metric("Max Drawdown", f"{result.max_drawdown_pct:.2f}%")
                     bc5.metric("Sharpe", f"{result.sharpe_ratio:.2f}")
+
                     if result.equity_curve:
-                        eq_df = pd.DataFrame({
-                            "value": result.equity_curve,
-                        })
+                        eq_idx = df_bt.index[-len(result.equity_curve):]
+                        eq_series = pd.Series(result.equity_curve, index=eq_idx)
+                        trades_df = pd.DataFrame(result.trades)
+                        ext = compute_metrics(eq_series, trades_df)
+
+                        # Erweiterte Metriken-Karte
+                        st.markdown("**Erweiterte Kennzahlen**")
+                        m1, m2, m3, m4, m5, m6 = st.columns(6)
+                        m1.metric("Sharpe", f"{ext['sharpe']:.2f}")
+                        m2.metric("Sortino", f"{ext['sortino']:.2f}")
+                        m3.metric("Calmar", f"{ext['calmar']:.2f}")
+                        m4.metric("Max DD Dauer", f"{ext['max_drawdown_duration_days']}T")
+                        m5.metric("Profit Faktor", f"{ext['profit_factor']:.2f}")
+                        m6.metric("Expectancy", f"{ext['expectancy']:.2f}€")
+
+                        # Equity-Kurve + Underwater-Chart
+                        eq_df = pd.DataFrame({"value": result.equity_curve})
                         st.plotly_chart(
                             _equity_chart(eq_df, bt_budget,
                                           f"Equity Curve – {bt_method}"),
+                            use_container_width=True,
+                        )
+                        st.plotly_chart(
+                            _underwater_chart(eq_series,
+                                              f"Drawdown – {bt_method}"),
+                            use_container_width=True,
                         )
 
         # ── Trainings-Statistiken ────────────────────────────────────────────
