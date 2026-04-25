@@ -1,5 +1,5 @@
 """
-StockMind – Trainings-Engine  
+StockMind – Trainings-Engine
 StockTrainer-Klasse: LLM-gestützte Zyklen, Methoden-Scoring, Persistenz je Symbol.
 Modul-Funktionen bleiben erhalten (Compat: predictor.py, app.py).
 """
@@ -19,15 +19,17 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils.class_weight import compute_sample_weight
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     ANALYSIS_METHODS,
-    DEFAULT_MODEL,
     EXPLORATION_CONSTANT,
     TRAINING_STATE_DIR,
 )
+
 from modules.logger import logger
 
 logger.debug(f"Module loaded: {__name__}")
@@ -475,8 +477,8 @@ class StockTrainer:
         elif method == "Support/Resistance":
             sr_levels = self._calc_support_resistance(df)
             price = float(close.iloc[-1])
-            resistances = sorted([l for l in sr_levels if l > price])[:2]
-            supports    = sorted([l for l in sr_levels if l <= price], reverse=True)[:2]
+            resistances = sorted([lv for lv in sr_levels if lv > price])[:2]
+            supports    = sorted([lv for lv in sr_levels if lv <= price], reverse=True)[:2]
             lines.append(f"Widerstände     : {', '.join(f'{x:.2f}' for x in resistances) or 'keine'}")
             lines.append(f"Unterstützungen : {', '.join(f'{x:.2f}' for x in supports) or 'keine'}")
 
@@ -510,11 +512,11 @@ class StockTrainer:
         levels: list[float] = []
         for i in range(window, len(df) - window):
             h = float(highs.iloc[i])
-            l = float(lows.iloc[i])
+            lo = float(lows.iloc[i])
             if h == float(highs.iloc[i - window:i + window + 1].max()):
                 levels.append(h)
-            if l == float(lows.iloc[i - window:i + window + 1].min()):
-                levels.append(l)
+            if lo == float(lows.iloc[i - window:i + window + 1].min()):
+                levels.append(lo)
         # Cluster: Niveaus innerhalb 0.5% zusammenfassen
         merged: list[float] = []
         for lv in sorted(levels):
@@ -532,12 +534,12 @@ class StockTrainer:
         for i in range(len(df)):
             o = float(df["Open"].iloc[i])
             h = float(df["High"].iloc[i])
-            l = float(df["Low"].iloc[i])
+            lo = float(df["Low"].iloc[i])
             c = float(df["Close"].iloc[i])
             body   = abs(c - o)
-            rng    = h - l if h != l else 1e-9
+            rng    = h - lo if h != lo else 1e-9
             up_shd = h - max(c, o)
-            dn_shd = min(c, o) - l
+            dn_shd = min(c, o) - lo
 
             if body / rng < 0.1:
                 patterns.append("Doji")
@@ -753,9 +755,16 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 def build_labels(
     df: pd.DataFrame, horizon: int = 5, threshold: float = 0.01
 ) -> pd.Series:
-    """Binäre Labels: 1 = Kurs steigt ≥ threshold in `horizon` Tagen."""
+    """
+    Binäre Labels: 1 = Kurs steigt ≥ threshold in `horizon` Tagen.
+
+    Die letzten `horizon` Zeilen haben keinen bekannten Future-Return und werden
+    explizit gedroppt. Ohne diesen Drop würde NaN → 0 (False) gecasted,
+    was einen Look-Ahead-Bias-ähnlichen Fehler beim Training verursacht.
+    """
     future_ret = df["Close"].pct_change(horizon).shift(-horizon)
-    return (future_ret >= threshold).astype(int)
+    valid_mask = future_ret.notna()
+    return (future_ret[valid_mask] >= threshold).astype(int)
 
 
 # ---------------------------------------------------------------------------
@@ -781,17 +790,29 @@ def train(ticker: str, df: pd.DataFrame, horizon: int = 5) -> dict:
             f"Zu wenige Datenpunkte für Training: {len(X)} (mind. 60 nötig)"
         )
 
-    split          = int(len(X) * 0.8)
-    X_train, X_test = X[:split], X[split:]
-    y_train, y_test = y[:split], y[split:]
+    # TimeSeriesSplit: kein zufälliges Sampling, strenge zeitliche Reihenfolge.
+    # Jeder Fold: Scaler nur auf Train-Slice fitten (kein Data Leakage).
+    tscv       = TimeSeriesSplit(n_splits=5)
+    cv_scores  = []
+    model, scaler = None, None
 
-    scaler      = StandardScaler()
-    X_train_s   = scaler.fit_transform(X_train)
-    X_test_s    = scaler.transform(X_test)
+    for fold_train_idx, fold_test_idx in tscv.split(X):
+        X_tr, X_te = X[fold_train_idx], X[fold_test_idx]
+        y_tr, y_te = y[fold_train_idx], y[fold_test_idx]
 
-    model       = GradientBoostingClassifier(n_estimators=100, max_depth=3, random_state=42)
-    model.fit(X_train_s, y_train)
-    accuracy    = float(model.score(X_test_s, y_test))
+        sc = StandardScaler()
+        X_tr_s = sc.fit_transform(X_tr)   # fit NUR auf Train
+        X_te_s = sc.transform(X_te)       # transform (kein fit) auf Test
+
+        # GBC unterstützt kein class_weight → sample_weights für Balance
+        sw  = compute_sample_weight("balanced", y_tr)
+        clf = GradientBoostingClassifier(n_estimators=100, max_depth=3, random_state=42)
+        clf.fit(X_tr_s, y_tr, sample_weight=sw)
+
+        cv_scores.append(float(clf.score(X_te_s, y_te)))
+        model, scaler = clf, sc  # letzter Fold = aktuellstes Training
+
+    accuracy = float(np.mean(cv_scores))
 
     with open(_model_path(ticker), "wb") as f:
         pickle.dump(
