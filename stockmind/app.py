@@ -33,6 +33,8 @@ from modules.data_fetcher import (
 )
 from modules.trainer import StockTrainer, load_state, load_model, train, list_trained_stocks
 from modules.predictor import predict, build_context_string, SIGNAL_FUNCTIONS
+from modules.sentiment_analyzer import analyze_news
+from modules.explainer import explain_decision
 from modules.backtester import (
     PaperTrader, lambo_value, lambo_display, lambo_progress,
     backtest_signals, compute_metrics,
@@ -381,6 +383,8 @@ def _init_session() -> None:
         "info": {},
         "prediction": None,
         "analysis_text": "",
+        "sentiment_result": None,
+        "explanation_text": "",
         "portfolio_name": "default",
         "model": "llama3",
         "method": "Auto (KI wählt)",
@@ -716,8 +720,10 @@ with st.sidebar:
                     if not df_h.empty:
                         st.session_state.df   = df_h
                         st.session_state.info = _info(hist_ticker)
-                        st.session_state.prediction  = None
+                        st.session_state.prediction    = None
                         st.session_state.analysis_text = ""
+                        st.session_state.sentiment_result = None
+                        st.session_state.explanation_text = ""
                 st.rerun()
     else:
         st.caption("Noch keine Aktien analysiert.")
@@ -859,8 +865,10 @@ with tab1:
                 st.session_state.ticker = actual_ticker
                 st.session_state.df     = df_new
                 st.session_state.info   = _info(actual_ticker)
-                st.session_state.prediction   = None
+                st.session_state.prediction    = None
                 st.session_state.analysis_text = ""
+                st.session_state.sentiment_result = None
+                st.session_state.explanation_text = ""
                 # Verlauf aktualisieren
                 hist = st.session_state.history
                 if actual_ticker not in hist:
@@ -947,34 +955,89 @@ with tab1:
                 if pred.summary:
                     st.caption(pred.summary[:120])
 
-            # KI-Analyse
-            if _check_ollama():
-                if st.button("🤖 KI-Analyse starten", use_container_width=True,
+            # KI-Analyse (Sentiment + Erklärung)
+            llm_ok = _check_ollama()
+            if llm_ok:
+                if st.button("🤖 Sentiment & Erklärung", use_container_width=True,
                              key="btn_quick_ai"):
                     pred = st.session_state.prediction or predict(
                         ticker, df, method=st.session_state.method,
                         ml_bundle=load_model(ticker), training_state=load_state(ticker),
                     )
-                    ctx = build_context_string(ticker, df, pred)
-                    with st.spinner("KI analysiert…"):
+                    with st.spinner("Analysiere News-Sentiment…"):
                         try:
-                            text = analyze_stock(
-                                st.session_state.model, ticker, ctx,
-                                method=st.session_state.method,
+                            from modules.llm_providers import get_provider
+                            _prov = get_provider()
+                            sent = analyze_news(
+                                ticker, n=5,
+                                provider=_prov,
+                                model_name=st.session_state.model,
                             )
-                            st.session_state.analysis_text = text
-                        except Exception as e:
-                            st.error(str(e))
+                            st.session_state.sentiment_result = sent
+                        except Exception as _e:
+                            st.session_state.sentiment_result = {
+                                "score": 0.0, "n_news": 0, "samples": [],
+                                "error": str(_e),
+                            }
+                    sent = st.session_state.sentiment_result or {}
+                    with st.spinner("Erstelle Erklärung…"):
+                        try:
+                            ml_b = load_model(ticker)
+                            feat_dict: dict = {}
+                            imp_dict: dict  = {}
+                            if ml_b and len(df) > 0:
+                                from modules.predictor import _build_features
+                                fdf = _build_features(df, sent.get("score", 0.0))
+                                if len(fdf) > 0:
+                                    feat_dict = fdf.iloc[-1].to_dict()
+                                imp_raw = getattr(ml_b.get("model"), "feature_importances_", None)
+                                fn  = ml_b.get("feature_names", list(feat_dict.keys()))
+                                if imp_raw is not None and len(imp_raw) == len(fn):
+                                    imp_dict = dict(zip(fn, imp_raw.tolist()))
+                            expl = explain_decision(
+                                features=feat_dict,
+                                prediction=pred.signal,
+                                sentiment_score=sent.get("score", 0.0),
+                                feature_importances=imp_dict,
+                                provider=_prov,
+                                model_name=st.session_state.model,
+                            )
+                            st.session_state.explanation_text = expl
+                        except Exception as _e:
+                            st.session_state.explanation_text = str(_e)
             else:
-                st.warning("Ollama offline → Tab ⚙️")
+                st.warning("LLM offline → Tab ⚙️")
 
-            if st.session_state.analysis_text:
+            # Ergebnis-Anzeige: Sentiment-Karte + Erklärung
+            sent = st.session_state.sentiment_result
+            expl = st.session_state.explanation_text
+            if sent or expl:
                 st.divider()
-                _section("📝 KI-Analyse")
-                st.markdown(
-                    _quote_html(st.session_state.analysis_text[:400] + "…"),
-                    unsafe_allow_html=True,
-                )
+                _section("🧠 KI-Analyse")
+                if sent:
+                    score = sent.get("score", 0.0)
+                    n_news = sent.get("n_news", 0)
+                    score_color = (
+                        "#00ff88" if score > 0.2
+                        else "#ff4444" if score < -0.2
+                        else "#f0b429"
+                    )
+                    st.markdown(
+                        f'<div class="sm-card" style="margin-bottom:8px;">'
+                        f'<div class="sm-label">News-Sentiment ({n_news} Headlines)</div>'
+                        f'<div style="font-family:IBM Plex Mono;font-size:22px;'
+                        f'font-weight:700;color:{score_color};margin-top:4px;">'
+                        f'{score:+.2f}</div>'
+                        f'<div class="sm-label" style="margin-top:2px;">'
+                        f'Skala -1 (sehr negativ) bis +1 (sehr positiv)</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                if expl:
+                    st.markdown(
+                        _quote_html(expl),
+                        unsafe_allow_html=True,
+                    )
 
         with col_right:
             _section("📈 Candlestick-Chart")

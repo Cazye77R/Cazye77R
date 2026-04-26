@@ -719,8 +719,17 @@ def list_trained_stocks() -> list[str]:
 # Feature-Engineering (predictor.py)
 # ---------------------------------------------------------------------------
 
-def build_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Berechnet numerische ML-Features aus OHLCV-Daten."""
+def build_features(df: pd.DataFrame, sentiment_score: float = 0.0) -> pd.DataFrame:
+    """
+    Berechnet numerische ML-Features aus OHLCV-Daten.
+
+    Args:
+        df:              OHLCV-DataFrame.
+        sentiment_score: Aktueller News-Sentiment-Score [-1, +1].
+                         Beim Training historischer Daten auf 0.0 (neutral) belassen,
+                         da historische Sentiment-Daten nicht verfügbar sind.
+                         Bei Live-Vorhersagen den echten Wert aus analyze_news() übergeben.
+    """
     feat   = pd.DataFrame(index=df.index)
     close  = df["Close"]
     high   = df["High"]
@@ -751,6 +760,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     bb_std  = close.rolling(20).std()
     feat["bb_pos"]  = (close - bb_mid) / (2 * bb_std)
     feat["hl_range"] = (high - low) / close
+
+    feat["sentiment"] = float(sentiment_score)
 
     feat.dropna(inplace=True)
     return feat

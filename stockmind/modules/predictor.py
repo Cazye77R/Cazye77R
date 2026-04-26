@@ -108,8 +108,17 @@ SCORE_TO_SIGNAL = {1: "KAUFEN", 0: "HALTEN", -1: "VERKAUFEN"}
 # ML-Feature-Berechnung (inline, kein Trainer-Import nötig)
 # ---------------------------------------------------------------------------
 
-def _build_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Berechnet numerische ML-Features aus OHLCV-Daten."""
+def _build_features(df: pd.DataFrame, sentiment_score: float = 0.0) -> pd.DataFrame:
+    """
+    Berechnet numerische ML-Features aus OHLCV-Daten.
+
+    Muss dieselben Spalten erzeugen wie trainer.build_features() —
+    beide Funktionen werden zusammen geändert.
+
+    Args:
+        df:              OHLCV-DataFrame.
+        sentiment_score: News-Sentiment-Score [-1, +1]; Standard 0.0 (neutral).
+    """
     feat = pd.DataFrame(index=df.index)
     close, high, low, volume = df["Close"], df["High"], df["Low"], df["Volume"]
     feat["ret_1d"]         = close.pct_change(1)
@@ -129,8 +138,9 @@ def _build_features(df: pd.DataFrame) -> pd.DataFrame:
     macd  = ema12 - ema26
     feat["macd_hist"] = macd - macd.ewm(span=9, adjust=False).mean()
     bb_mid = close.rolling(20).mean()
-    feat["bb_pos"]   = (close - bb_mid) / (2 * close.rolling(20).std())
-    feat["hl_range"] = (high - low) / close
+    feat["bb_pos"]    = (close - bb_mid) / (2 * close.rolling(20).std())
+    feat["hl_range"]  = (high - low) / close
+    feat["sentiment"] = float(sentiment_score)
     feat.dropna(inplace=True)
     return feat
 
@@ -146,6 +156,7 @@ def predict(
     horizon_days: int = 5,
     ml_bundle: Optional[dict] = None,
     training_state: Optional[dict] = None,
+    sentiment_score: float = 0.0,
 ) -> Prediction:
     """
     ml_bundle:      Optional dict mit 'model' und 'scaler' (aus trainer.load_model).
@@ -189,12 +200,23 @@ def predict(
     ml_prob: Optional[float] = None
     if ml_bundle:
         try:
-            features = _build_features(df)
+            features = _build_features(df, sentiment_score=sentiment_score)
             if len(features) > 0:
-                X = ml_bundle["scaler"].transform(features.iloc[[-1]].values)
+                last_row = features.iloc[[-1]].values
+                # Rückwärtskompatibilität: Modelle die vor dem Sentiment-Feature
+                # trainiert wurden haben n_features_in_ == 12; wir degradieren
+                # dann auf die ursprünglichen 12 Spalten ohne sentiment.
+                expected = getattr(ml_bundle["scaler"], "n_features_in_", last_row.shape[1])
+                if expected != last_row.shape[1]:
+                    warnings.append(
+                        "ML-Modell wurde vor Sentiment-Feature trainiert – "
+                        "bitte Modell neu trainieren für volle Genauigkeit."
+                    )
+                    last_row = last_row[:, :expected]
+                X = ml_bundle["scaler"].transform(last_row)
                 ml_prob = float(ml_bundle["model"].predict_proba(X)[0][1])
-                ml_score = (ml_prob - 0.5) * 2          # Skalierung auf [-1, 1]
-                scores.append(ml_score * 0.8)            # ML bekommt Gewicht 0.8
+                ml_score = (ml_prob - 0.5) * 2
+                scores.append(ml_score * 0.8)
                 indicator_signals["ML-Modell"] = {
                     "signal": "KAUFEN" if ml_prob > 0.55 else ("VERKAUFEN" if ml_prob < 0.45 else "HALTEN"),
                     "confidence": round(abs(ml_prob - 0.5) * 2, 3),
