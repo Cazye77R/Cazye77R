@@ -12,36 +12,60 @@ from typing import Optional
 
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
+from plotly.subplots import make_subplots
 
 sys.path.insert(0, os.path.dirname(__file__))
 
 from config import (
-    APP_TITLE, APP_ICON, APP_VERSION,
-    ANALYSIS_METHODS, DEFAULT_BUDGET_EUR, DEFAULT_PERIOD,
-    LAMBO_PRICE_EUR, MODEL_DESCRIPTIONS, ORDER_COST_EUR, SPREAD_PERCENT, AVAILABLE_MODELS,
-    EXPLORATION_CONSTANT, ENABLE_EASTER_EGGS, CACHE_TTL_HOURS,
+    ANALYSIS_METHODS,
+    APP_ICON,
+    APP_TITLE,
+    APP_VERSION,
+    AVAILABLE_MODELS,
+    CACHE_TTL_HOURS,
+    DEFAULT_BUDGET_EUR,
+    DUCB_GAMMA,
+    ENABLE_EASTER_EGGS,
+    EXPLORATION_CONSTANT,
+    LAMBO_PRICE_EUR,
+    MODEL_DESCRIPTIONS,
+    ORDER_COST_EUR,
+    SPREAD_PERCENT,
 )
-from modules.model_manager import (
-    is_ollama_running, get_ollama_status, get_llm_status,
-    get_available_models, get_available_models_with_info, download_model,
-    analyze_stock,
-)
-from modules.data_fetcher import (
-    search_stocks, fetch_ohlcv, fetch_info,
-)
-from modules.trainer import StockTrainer, load_state, load_model, train, list_trained_stocks
-from modules.predictor import predict, build_context_string, SIGNAL_FUNCTIONS
-from modules.sentiment_analyzer import analyze_news
-from modules.explainer import explain_decision
 from modules.backtester import (
-    PaperTrader, lambo_value, lambo_display, lambo_progress,
-    backtest_signals, compute_metrics,
+    PaperTrader,
+    backtest_signals,
+    compute_metrics,
+    lambo_display,
+    lambo_progress,
 )
+from modules.data_fetcher import fetch_info, fetch_ohlcv, search_stocks
 from modules.easter_eggs import (
-    check_easter_egg, get_currency_display, get_trade_count_egg,
-    CURRENCIES, CURRENCY_UNLOCK_CLICKS, CONFETTI_MARKER,
+    CONFETTI_MARKER,
+    CURRENCIES,
+    CURRENCY_UNLOCK_CLICKS,
+    check_easter_egg,
+    get_currency_display,
+    get_trade_count_egg,
+)
+from modules.explainer import explain_decision
+from modules.model_manager import (
+    download_model,
+    get_available_models,
+    get_available_models_with_info,
+    get_llm_status,
+    get_ollama_status,
+    is_ollama_running,
+)
+from modules.predictor import SIGNAL_FUNCTIONS, predict
+from modules.sentiment_analyzer import analyze_news
+from modules.trainer import (
+    _BANDIT_NAMES,
+    StockTrainer,
+    compare_bandits,
+    load_model,
+    load_state,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -388,6 +412,7 @@ def _init_session() -> None:
         "portfolio_name": "default",
         "model": "llama3",
         "method": "Auto (KI wählt)",
+        "bandit_algo": "UCB1",
         "period": "1y",
         # Search
         "search_query": "",
@@ -641,7 +666,6 @@ def _equity_chart(
         return fig
     x = perf_df.get("timestamp", perf_df.index)
     y = perf_df["value"]
-    above = [v >= start_budget for v in y]
     fig.add_trace(go.Scatter(
         x=x, y=y, mode="lines",
         name="Portfolio",
@@ -1170,6 +1194,23 @@ with tab1:
             col_x, col_y = st.columns([1, 2])
             with col_x:
                 n_auto = st.slider("Zyklen", 1, 20, 3, key="auto_n")
+
+                # Bandit-Auswahl
+                bandit_idx = list(_BANDIT_NAMES).index(st.session_state.bandit_algo) \
+                    if st.session_state.bandit_algo in _BANDIT_NAMES else 0
+                selected_bandit = st.selectbox(
+                    "Bandit-Algorithmus",
+                    list(_BANDIT_NAMES),
+                    index=bandit_idx,
+                    key="bandit_sel",
+                    help=(
+                        "UCB1: klassisch, für stabile Märkte.\n"
+                        "D-UCB: gewichtet neue Rewards höher, besser bei Regime-Wechseln.\n"
+                        "Thompson: Bayesianisch, adaptiv ohne Tuning."
+                    ),
+                )
+                st.session_state.bandit_algo = selected_bandit
+
                 btn_auto = st.button("🔄 Auto starten", use_container_width=True,
                                      type="primary", key="btn_auto")
             with col_y:
@@ -1180,7 +1221,8 @@ with tab1:
                         st.markdown(_ticker_html(), unsafe_allow_html=True)
                         last_res = None
                         with st.status(
-                            f"Auto-Training: {n_auto} Zyklen für {st.session_state.ticker}",
+                            f"Auto-Training: {n_auto} Zyklen für "
+                            f"{st.session_state.ticker} [{selected_bandit}]",
                             expanded=True,
                         ) as status:
                             for i in range(n_auto):
@@ -1190,6 +1232,7 @@ with tab1:
                                 res = trainer.auto_mode(
                                     st.session_state.ticker,
                                     st.session_state.model,
+                                    bandit_name=selected_bandit,
                                 )
                                 last_res = res
                                 if res.get("error"):
@@ -1219,6 +1262,25 @@ with tab1:
                                     st.info(egg)
                             st.session_state.prev_cycles = last_res.get("cycle", 0)
                             st.rerun()
+
+                # Bandit A/B-Vergleich (wenn genug History vorhanden)
+                state_now = load_state(st.session_state.ticker)
+                _hist = state_now.get("accuracy_history", [])
+                if len(_hist) >= 6:
+                    st.divider()
+                    _section("📊 Bandit-Vergleich (A/B Replay)")
+                    with st.spinner("Berechne Vergleich…"):
+                        from modules.trainer import _METHODS as _AVAIL_METHODS
+                        _cmp = compare_bandits(_hist, _AVAIL_METHODS)
+                    if _cmp["figure"].data:
+                        st.plotly_chart(_cmp["figure"], use_container_width=True)
+                        fr = _cmp.get("final_rewards", {})
+                        _cr1, _cr2, _cr3 = st.columns(3)
+                        _cr1.metric("UCB1 Gesamt",     f"{fr.get('UCB1', 0):.1f}")
+                        _cr2.metric("D-UCB Gesamt",    f"{fr.get('D-UCB', 0):.1f}")
+                        _cr3.metric("Thompson Gesamt", f"{fr.get('Thompson', 0):.1f}")
+                elif len(_hist) > 0:
+                    st.caption(f"A/B-Vergleich ab 6 Zyklen verfügbar ({len(_hist)}/6).")
 
         # ── Backtesting ──────────────────────────────────────────────────────
         with sub3:
@@ -1835,9 +1897,12 @@ with tab3:
     st.markdown(
         '<div class="sm-card">'
         '<table style="width:100%;font-size:13px;color:#c9d1d9;">'
-        f'<tr><td style="color:#8b949e;width:220px;">UCB1 Exploration-Konstante</td>'
+        f'<tr><td style="color:#8b949e;width:220px;">Explorations-Konstante (UCB)</td>'
         f'<td><code style="color:#00ff88;">{EXPLORATION_CONSTANT}</code>&nbsp;'
         f'<span style="color:#8b949e;font-size:11px;">(sqrt(2) = {math.sqrt(2):.4f})</span></td></tr>'
+        f'<tr><td style="color:#8b949e;">D-UCB Gamma (γ)</td>'
+        f'<td><code style="color:#00ff88;">{DUCB_GAMMA}</code>&nbsp;'
+        f'<span style="color:#8b949e;font-size:11px;">Discount-Faktor; 1=kein Vergessen</span></td></tr>'
         f'<tr><td style="color:#8b949e;">Ollama Host</td>'
         f'<td><code>{os.getenv("OLLAMA_HOST", "http://localhost:11434")}</code></td></tr>'
         f'<tr><td style="color:#8b949e;">Cache TTL</td>'

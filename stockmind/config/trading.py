@@ -46,7 +46,10 @@ EXPLORATION_CONSTANT: float = float(os.getenv("EXPLORATION_CONSTANT", "1.414"))
 # Easter Eggs (Lambo-Währung, Konfetti, versteckte Überraschungen)
 ENABLE_EASTER_EGGS: bool = os.getenv("ENABLE_EASTER_EGGS", "true").lower() == "true"
 
-# --- Slippage-Modell ---
+# --- Bandit-Algorithmen ---
+# Discount-Faktor für Discounted-UCB1: γ ∈ (0, 1)
+# Niedrigerer Wert = stärkere Gewichtung neuer Rewards (aggressiverer Vergiss-Effekt)
+DUCB_GAMMA: float = float(os.getenv("DUCB_GAMMA", "0.95"))
 # Basis-Spread in Prozent (fixed Komponente)
 SLIPPAGE_BASE_PCT:          float = float(os.getenv("SLIPPAGE_BASE_PCT",          "0.05"))
 # Volumen-Faktor k: slippage += k * (order_size / avg_daily_volume)

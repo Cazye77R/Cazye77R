@@ -11,6 +11,7 @@ import math
 import os
 import re
 import sys
+from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -26,6 +27,7 @@ from sklearn.utils.class_weight import compute_sample_weight
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     ANALYSIS_METHODS,
+    DUCB_GAMMA,
     EXPLORATION_CONSTANT,
     TRAINING_STATE_DIR,
 )
@@ -36,6 +38,350 @@ logger.debug(f"Module loaded: {__name__}")
 
 # Methoden ohne "Auto (KI wählt)"
 _METHODS = [m for m in ANALYSIS_METHODS if m != "Auto (KI wählt)"]
+
+
+# ===========================================================================
+# Multi-Armed Bandit – Algorithmen
+# ===========================================================================
+
+class BanditBase(ABC):
+    """Gemeinsames Interface für alle Bandit-Algorithmen."""
+
+    @abstractmethod
+    def select(self, state: dict, methods: list[str]) -> str:
+        """
+        Wählt die nächste zu testende Methode anhand des aktuellen Zustands.
+
+        Ungetestete Methoden werden von StockTrainer._select_next_method()
+        bereits vor dem Bandit-Aufruf priorisiert, daher darf hier
+        angenommen werden, dass alle Methoden mindestens einmal beobachtet
+        wurden.
+        """
+
+
+class UCB1Bandit(BanditBase):
+    """
+    Standard-UCB1 (Upper Confidence Bound 1).
+
+    score(m) = accuracy(m) + sqrt(c * ln(total+1) / count(m))
+
+    Alle historischen Rewards werden gleich gewichtet – gut für
+    stationäre Reward-Verteilungen.
+    """
+
+    def __init__(self, c: float = EXPLORATION_CONSTANT) -> None:
+        self.c = c
+
+    def select(self, state: dict, methods: list[str]) -> str:
+        history       = state.get("accuracy_history", [])
+        method_scores = state.get("method_scores", {})
+        total         = max(1, state.get("cycles", 1))
+
+        counts: dict[str, int] = {}
+        for entry in history:
+            m = entry.get("method", "")
+            if m:
+                counts[m] = counts.get(m, 0) + 1
+
+        best_method, best_score = methods[0], -1.0
+        for m in methods:
+            acc = method_scores.get(m, 0.5)
+            n   = max(1, counts.get(m, 1))
+            ucb = acc + math.sqrt(self.c * math.log(total + 1) / n)
+            if ucb > best_score:
+                best_score, best_method = ucb, m
+        return best_method
+
+
+class DiscountedUCB1(BanditBase):
+    """
+    Discounted UCB1 (D-UCB) für nicht-stationäre Reward-Verteilungen.
+
+    Bei Regime-Wechseln (Bull/Bear/Sideways) werden neuere Rewards
+    stärker gewichtet als ältere.
+
+    Formeln (Kocsis & Szepesvári 2006, Moulines & Menard 2019):
+
+      N_t,i(γ) = Σ_{s=1..t} γ^(t-s) · 1{a_s = i}
+      X_t,i    = Σ_{s=1..t} γ^(t-s) · 1{a_s = i} · r_s / N_t,i(γ)
+      ucb_t,i  = X_t,i + c · sqrt( ln(n_t(γ)) / N_t,i(γ) )
+
+    mit n_t(γ) = Σ_{s=1..t} γ^(t-s)  (diskontierter Gesamtzähler)
+
+    Args:
+        gamma: Discount-Faktor γ ∈ (0, 1). Default 0.95.
+               γ nahe 1 → langsames Vergessen (ähnlich wie UCB1)
+               γ nahe 0 → schnelles Vergessen (letzter Reward dominiert)
+        c:     Explorations-Konstante (wie UCB1).
+    """
+
+    def __init__(
+        self,
+        gamma: float = DUCB_GAMMA,
+        c:     float = EXPLORATION_CONSTANT,
+    ) -> None:
+        if not (0.0 < gamma < 1.0):
+            raise ValueError(f"gamma muss in (0, 1) liegen, nicht {gamma!r}.")
+        self.gamma = gamma
+        self.c     = c
+
+    def select(self, state: dict, methods: list[str]) -> str:
+        history = state.get("accuracy_history", [])
+        t       = len(history)          # Gesamtanzahl Beobachtungen
+
+        # Diskontierte Summen pro Methode berechnen
+        disc_count:  dict[str, float] = {m: 0.0 for m in methods}
+        disc_reward: dict[str, float] = {m: 0.0 for m in methods}
+
+        for s, entry in enumerate(history):
+            m = entry.get("method", "")
+            if m not in disc_count:
+                continue
+            weight = self.gamma ** (t - 1 - s)          # γ^(t-s), s läuft ab 0
+            r      = 1.0 if entry.get("correct", False) else 0.0
+            disc_count[m]  += weight
+            disc_reward[m] += weight * r
+
+        # Diskontierter Gesamtzähler n_t(γ) = (1 - γ^t) / (1 - γ)
+        n_total = (1.0 - self.gamma ** t) / (1.0 - self.gamma) if t > 0 else 1.0
+
+        best_method, best_ucb = methods[0], -1.0
+        for m in methods:
+            n_i = max(disc_count[m], 1e-9)
+            x_i = disc_reward[m] / n_i
+            exploration = self.c * math.sqrt(math.log(max(n_total, 1.0)) / n_i)
+            ucb = x_i + exploration
+            if ucb > best_ucb:
+                best_ucb, best_method = ucb, m
+        return best_method
+
+
+class ThompsonSamplingBandit(BanditBase):
+    """
+    Thompson Sampling mit Beta-Prior.
+
+    Modelliert den Erfolg jeder Methode als Beta(α, β)-Verteilung und
+    zieht pro Methode eine Probe. Die Methode mit dem höchsten Sample
+    wird gewählt.
+
+      α_i = Anzahl korrekter Vorhersagen + 1  (Pseudo-Prior)
+      β_i = Anzahl falscher Vorhersagen  + 1
+
+    Konvergiert automatisch gegen die beste Methode ohne Tuning-Parameter.
+    """
+
+    def __init__(self, rng_seed: int | None = None) -> None:
+        self._rng = np.random.default_rng(rng_seed)
+
+    def select(self, state: dict, methods: list[str]) -> str:
+        history = state.get("accuracy_history", [])
+
+        wins:   dict[str, int] = {m: 0 for m in methods}
+        losses: dict[str, int] = {m: 0 for m in methods}
+
+        for entry in history:
+            m = entry.get("method", "")
+            if m not in wins:
+                continue
+            if entry.get("correct", False):
+                wins[m]   += 1
+            else:
+                losses[m] += 1
+
+        samples = {
+            m: float(self._rng.beta(wins[m] + 1, losses[m] + 1))
+            for m in methods
+        }
+        return max(samples, key=lambda k: samples[k])
+
+
+# ---------------------------------------------------------------------------
+# Bandit-Factory
+# ---------------------------------------------------------------------------
+
+_BANDIT_NAMES = ("UCB1", "D-UCB", "Thompson")
+
+
+def get_bandit(
+    name: str,
+    gamma: float = DUCB_GAMMA,
+    c:     float = EXPLORATION_CONSTANT,
+) -> BanditBase:
+    """
+    Erstellt eine Bandit-Instanz anhand des Namens.
+
+    Args:
+        name:  "UCB1" | "D-UCB" | "Thompson"
+        gamma: Discount-Faktor für D-UCB.
+        c:     Explorations-Konstante für UCB1 / D-UCB.
+    """
+    n = name.strip().upper()
+    if n in ("D-UCB", "DUCB", "DISCOUNTED"):
+        return DiscountedUCB1(gamma=gamma, c=c)
+    if n in ("THOMPSON", "TS"):
+        return ThompsonSamplingBandit()
+    return UCB1Bandit(c=c)
+
+
+# ---------------------------------------------------------------------------
+# A/B-Vergleich: compare_bandits
+# ---------------------------------------------------------------------------
+
+def compare_bandits(
+    history: list[dict],
+    methods: list[str],
+    gamma:   float = DUCB_GAMMA,
+    c:       float = EXPLORATION_CONSTANT,
+) -> dict:
+    """
+    Vergleicht UCB1, D-UCB und Thompson Sampling auf einem historischen
+    Reward-Stream (offline-Evaluation).
+
+    Jeder Bandit bekommt dieselben Beobachtungen sequenziell präsentiert.
+    An jedem Schritt t wählt der Bandit basierend auf den ersten t−1
+    Beobachtungen eine Methode. Wenn diese mit der tatsächlich gewählten
+    Methode übereinstimmt, erhält er den echten Reward; sonst den bisher
+    beobachteten Durchschnitt der Methode.
+
+    Args:
+        history: accuracy_history-Liste (dicts mit "method", "correct").
+        methods: Liste der möglichen Methoden.
+        gamma:   Discount-Faktor für D-UCB.
+        c:       Explorations-Konstante für UCB1 / D-UCB.
+
+    Returns:
+        dict mit:
+          "cumulative_rewards": {bandit_name: list[float]}
+          "final_rewards":      {bandit_name: float}
+          "selections":         {bandit_name: list[str]}
+          "figure":             plotly.graph_objects.Figure
+    """
+    import plotly.graph_objects as go
+
+    if len(history) < 2 or not methods:
+        return {
+            "cumulative_rewards": {},
+            "final_rewards": {},
+            "selections": {},
+            "figure": go.Figure(),
+        }
+
+    bandits: dict[str, BanditBase] = {
+        "UCB1":     UCB1Bandit(c=c),
+        "D-UCB":    DiscountedUCB1(gamma=gamma, c=c),
+        "Thompson": ThompsonSamplingBandit(rng_seed=42),
+    }
+
+    cum_rewards:  dict[str, list[float]] = {n: [] for n in bandits}
+    selections:   dict[str, list[str]]   = {n: [] for n in bandits}
+    running_totals: dict[str, float]     = {n: 0.0 for n in bandits}
+
+    # Laufende Methoden-Durchschnitte für Counterfactual-Rewards
+    method_wins: dict[str, int]   = {m: 0 for m in methods}
+    method_cnt:  dict[str, int]   = {m: 0 for m in methods}
+
+    for t, obs in enumerate(history):
+        actual_method = obs.get("method", "")
+        actual_reward = 1.0 if obs.get("correct", False) else 0.0
+
+        for bname, bandit in bandits.items():
+            # Simulierten Zustand bis t aufbauen
+            sim_state = {
+                "accuracy_history": history[:t],
+                "method_scores": _replay_method_scores(history[:t], methods),
+                "cycles": t,
+            }
+
+            # Ungetestete Methoden zuerst (wie _select_next_method)
+            tested = {e.get("method") for e in history[:t]}
+            untested = [m for m in methods if m not in tested]
+            if untested:
+                chosen = untested[0]
+            else:
+                chosen = bandit.select(sim_state, methods)
+
+            selections[bname].append(chosen)
+
+            # Counterfactual-Reward
+            if chosen == actual_method:
+                reward = actual_reward
+            else:
+                cnt = method_cnt.get(chosen, 0)
+                reward = method_wins.get(chosen, 0) / cnt if cnt > 0 else 0.5
+
+            running_totals[bname] += reward
+            cum_rewards[bname].append(running_totals[bname])
+
+        # Beobachtung registrieren
+        if actual_method in method_wins:
+            method_wins[actual_method] += int(actual_reward)
+            method_cnt[actual_method]  += 1
+
+    fig = _make_comparison_figure(cum_rewards, history)
+
+    return {
+        "cumulative_rewards": cum_rewards,
+        "final_rewards":      {n: round(v[-1], 2) for n, v in cum_rewards.items() if v},
+        "selections":         selections,
+        "figure":             fig,
+    }
+
+
+def _replay_method_scores(history: list[dict], methods: list[str]) -> dict[str, float]:
+    """Recomputes method_scores dict from partial history."""
+    wins:   dict[str, int] = {m: 0 for m in methods}
+    counts: dict[str, int] = {m: 0 for m in methods}
+    for entry in history:
+        m = entry.get("method", "")
+        if m in wins:
+            counts[m] += 1
+            if entry.get("correct", False):
+                wins[m] += 1
+    return {
+        m: round(wins[m] / counts[m], 4) if counts[m] > 0 else 0.5
+        for m in methods
+    }
+
+
+def _make_comparison_figure(
+    cum_rewards: dict[str, list[float]],
+    history: list[dict],
+) -> object:
+    """Erstellt Plotly-Chart für den Bandit-Vergleich."""
+    import plotly.graph_objects as go
+
+    _DARK_BG = {
+        "plot_bgcolor":  "#0d1117",
+        "paper_bgcolor": "#0d1117",
+        "font":          {"color": "#c9d1d9", "family": "IBM Plex Mono, monospace"},
+        "margin":        {"t": 40, "b": 30, "l": 40, "r": 10},
+    }
+    _COLORS = {"UCB1": "#58a6ff", "D-UCB": "#00ff88", "Thompson": "#f0b429"}
+
+    x = list(range(1, len(history) + 1))
+    fig = go.Figure()
+    for bname, rewards in cum_rewards.items():
+        if not rewards:
+            continue
+        fig.add_trace(go.Scatter(
+            x=x[:len(rewards)],
+            y=rewards,
+            mode="lines",
+            name=bname,
+            line=dict(color=_COLORS.get(bname, "#aaa"), width=2),
+        ))
+
+    fig.update_layout(
+        **_DARK_BG,
+        height=280,
+        title="Kumulativer Reward – Bandit-Vergleich",
+        xaxis_title="Trainings-Zyklus",
+        yaxis_title="Kumulativer Reward",
+        legend=dict(orientation="h", y=1.1),
+    )
+    return fig
+
+
 
 
 # ===========================================================================
@@ -265,55 +611,61 @@ class StockTrainer:
     # 4. auto_mode
     # ------------------------------------------------------------------
 
-    def auto_mode(self, symbol: str, model_name: str) -> dict:
+    def auto_mode(
+        self,
+        symbol:      str,
+        model_name:  str,
+        bandit_name: str = "UCB1",
+    ) -> dict:
         """
-        Wählt automatisch die nächste zu testende Methode nach UCB1-Logik:
-        - Ungetestete Methoden haben Priorität (Erkundung)
-        - Danach: beste bekannte Methode mit Explorations-Bonus
+        Wählt automatisch die nächste zu testende Methode nach dem gewählten
+        Bandit-Algorithmus.
 
-        Führt einen Zyklus mit der gewählten Methode durch.
+        Args:
+            symbol:      Aktien-Symbol.
+            model_name:  LLM-Modellname.
+            bandit_name: "UCB1" | "D-UCB" | "Thompson"
 
         Returns:
-            run_training_cycle-Ergebnis + {"selected_method", "preferred_method"}
+            run_training_cycle-Ergebnis + {"selected_method", "preferred_method",
+            "bandit_used"}
         """
+        bandit          = get_bandit(bandit_name)
         state           = self.load_state(symbol)
-        selected_method = self._select_next_method(state)
+        selected_method = self._select_next_method(state, bandit=bandit)
         result          = self.run_training_cycle(symbol, selected_method, model_name)
 
-        # Zustand nach dem Zyklus für preferred_method neu lesen
         updated_state = self.load_state(symbol)
         result["selected_method"]  = selected_method
         result["preferred_method"] = updated_state.get("best_method") or selected_method
+        result["bandit_used"]      = bandit_name
         return result
 
-    def _select_next_method(self, state: dict) -> str:
+    def _select_next_method(
+        self,
+        state:  dict,
+        bandit: BanditBase | None = None,
+    ) -> str:
         """
-        UCB1-basierte Methodenwahl (Upper Confidence Bound):
-          score(m) = accuracy(m) + sqrt(EXPLORATION_CONSTANT * ln(total+1) / (count(m)+1))
-        Ungetestete Methoden werden direkt priorisiert.
+        Wählt die nächste Methode.
+
+        Ungetestete Methoden werden immer zuerst priorisiert.
+        Danach entscheidet der übergebene Bandit.
+
+        Args:
+            state:  Aktueller Trainingszustand.
+            bandit: BanditBase-Instanz; None → UCB1Bandit (Rückwärtskompatibilität).
         """
         method_scores = state.get("method_scores", {})
-        total_cycles  = max(1, state["cycles"])
 
-        # Ungetestete Methoden zuerst
         untested = [m for m in _METHODS if m not in method_scores]
         if untested:
             return untested[0]
 
-        # Zählungen aus accuracy_history
-        counts: dict[str, int] = {}
-        for entry in state.get("accuracy_history", []):
-            m = entry.get("method", "")
-            counts[m] = counts.get(m, 0) + 1
+        if bandit is None:
+            bandit = UCB1Bandit()
 
-        best_method, best_score = _METHODS[0], -1.0
-        for m in _METHODS:
-            acc = method_scores.get(m, 0.5)
-            n   = max(1, counts.get(m, 1))
-            ucb = acc + math.sqrt(EXPLORATION_CONSTANT * math.log(total_cycles + 1) / n)
-            if ucb > best_score:
-                best_score, best_method = ucb, m
-        return best_method
+        return bandit.select(state, _METHODS)
 
     # ------------------------------------------------------------------
     # 5. get_next_prediction
