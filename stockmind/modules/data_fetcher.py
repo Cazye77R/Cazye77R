@@ -165,7 +165,7 @@ def _yahoo_search(query: str) -> list[dict]:
     try:
         resp = requests.get(
             _YAHOO_SEARCH_URL,
-            params=params,
+            params=params,  # type: ignore[arg-type]
             headers=_YAHOO_HEADERS,
             timeout=10,
         )
@@ -370,7 +370,7 @@ def _fetch_binance_ohlcv(symbol: str, period: str, interval: str) -> Optional[pd
     try:
         resp = requests.get(
             _BINANCE_URL,
-            params={"symbol": binance_sym, "interval": b_interval, "limit": limit},
+            params={"symbol": binance_sym, "interval": b_interval, "limit": limit},  # type: ignore[arg-type]
             timeout=10,
         )
         resp.raise_for_status()
