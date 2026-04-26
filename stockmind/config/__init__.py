@@ -23,9 +23,9 @@ except ImportError:
 
 # ── Thematische Re-Exporte ─────────────────────────────────────────────────────
 # Reihenfolge ist relevant: dotenv muss VOR den os.getenv()-Aufrufen laufen.
-from config.trading import *  # noqa: F401, F403, E402
-from config.models import *   # noqa: F401, F403, E402
+from config.models import *  # noqa: F401, F403, E402
 from config.storage import *  # noqa: F401, F403, E402
+from config.trading import *  # noqa: F401, F403, E402
 
 # ── App-Metadaten ──────────────────────────────────────────────────────────────
 APP_TITLE: str = "StockMind"
