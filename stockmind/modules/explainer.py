@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from modules.logger import logger  # noqa: E402
@@ -47,7 +48,7 @@ def explain_decision(
     prediction: str,
     sentiment_score: float,
     feature_importances: dict[str, float],
-    provider=None,
+    provider: Any = None,
     model_name: str = "",
 ) -> str:
     """
@@ -98,7 +99,7 @@ def _top_features(
     features: dict[str, float],
     importances: dict[str, float],
     n: int = 3,
-) -> list[tuple[str, float, float]]:
+) -> list[tuple[str, float, float]]:  # (name, value, importance)
     """
     Gibt die ``n`` wichtigsten Features als (name, wert, importance) zurück.
     Features, die nicht in ``features`` vorhanden sind, werden übersprungen.
