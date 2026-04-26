@@ -25,3 +25,8 @@ pydantic>=2.0
 # --- Tests ---
 pytest>=8.0
 pytest-timeout>=2.3
+pytest-cov>=5.0
+
+# --- Typ-Prüfung ---
+mypy>=1.10
+types-requests>=2.28
