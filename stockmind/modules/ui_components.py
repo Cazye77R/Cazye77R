@@ -5,18 +5,18 @@ Alle Streamlit-Widgets die in mehreren Seiten genutzt werden.
 
 from __future__ import annotations
 
+import os
+import sys
 from typing import Optional
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-import sys
-import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import ANALYSIS_METHODS, AVAILABLE_MODELS, DEFAULT_MODEL
-from modules.easter_eggs import format_lambo, lambo_progress_bar
 
+from modules.easter_eggs import format_lambo, lambo_progress_bar
 
 # ---------------------------------------------------------------------------
 # Kurs-Chart
@@ -186,8 +186,9 @@ def sidebar_model_selector() -> str:
     Zeigt installierte Modelle mit Beschreibung; bietet Download-Button für
     nicht installierte Modelle via subprocess-Streaming.
     """
+    from config import MODEL_DESCRIPTIONS
+
     from modules.model_manager import (
-        MODEL_DESCRIPTIONS,
         download_model,
         get_available_models,
         is_ollama_running,
@@ -253,7 +254,7 @@ def sidebar_analysis_method() -> str:
 
 def sidebar_ticker_search() -> Optional[str]:
     """Ticker-Suche mit Autocomplete-ähnlicher Funktionalität. Unterstützt WKN, Name und Ticker."""
-    from modules.data_fetcher import search_stocks, is_wkn
+    from modules.data_fetcher import is_wkn, search_stocks
 
     st.sidebar.markdown("### 🔍 Aktie suchen")
     query = st.sidebar.text_input("Ticker, Name oder WKN", placeholder="z.B. Apple, AAPL, 716460")
