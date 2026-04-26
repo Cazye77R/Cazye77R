@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import ThemeProvider from "@/components/layout/ThemeProvider";
-import TopHeader    from "@/components/layout/TopHeader";
-import BottomNav    from "@/components/layout/BottomNav";
+import { Toaster }        from "sonner";
+import ThemeProvider      from "@/components/layout/ThemeProvider";
+import TopHeader          from "@/components/layout/TopHeader";
+import BottomNav          from "@/components/layout/BottomNav";
+import PageTransition     from "@/components/layout/PageTransition";
+import SearchModal        from "@/components/layout/SearchModal";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -36,12 +39,32 @@ export default function RootLayout({
     >
       <body className="bg-background text-foreground">
         <ThemeProvider>
+          {/* Global Cmd+K search modal */}
+          <SearchModal />
+
           <TopHeader />
-          {/* pb-20: clearance for fixed BottomNav (h-16 + safe area) */}
-          <main className="min-h-[calc(100dvh-3.5rem)] pb-20">
+
+          {/* Page content with enter transition */}
+          <PageTransition>
             {children}
-          </main>
+          </PageTransition>
+
           <BottomNav />
+
+          {/* Toast notifications – sits above BottomNav */}
+          <Toaster
+            position="bottom-center"
+            offset={84}
+            theme="dark"
+            toastOptions={{
+              style: {
+                background: "#1A2233",
+                border:     "1px solid #2A3344",
+                color:      "#E5E7EB",
+                fontFamily: "var(--font-geist-sans)",
+              },
+            }}
+          />
         </ThemeProvider>
       </body>
     </html>

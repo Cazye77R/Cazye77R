@@ -1,7 +1,9 @@
 "use client";
 
-import { Star } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { motion } from "framer-motion";
+import { Star }   from "lucide-react";
+import { toast }  from "sonner";
+import { cn }     from "@/lib/utils";
 import { useWatchlistStore } from "@/store/watchlist-store";
 
 interface WatchlistToggleProps {
@@ -13,9 +15,27 @@ export default function WatchlistToggle({ ticker, className }: WatchlistTogglePr
   const { has, toggle } = useWatchlistStore();
   const inList = has(ticker);
 
+  function handleClick() {
+    toggle(ticker);
+    if (inList) {
+      toast(`${ticker} aus Watchlist entfernt`, {
+        icon: "⭐",
+        duration: 2500,
+      });
+    } else {
+      toast.success(`${ticker} zur Watchlist hinzugefügt`, {
+        duration: 2500,
+        action: {
+          label: "Anzeigen",
+          onClick: () => (window.location.href = "/watchlist"),
+        },
+      });
+    }
+  }
+
   return (
     <button
-      onClick={() => toggle(ticker)}
+      onClick={handleClick}
       aria-label={inList ? `${ticker} aus Watchlist entfernen` : `${ticker} zur Watchlist hinzufügen`}
       aria-pressed={inList}
       className={cn(
@@ -26,10 +46,24 @@ export default function WatchlistToggle({ ticker, className }: WatchlistTogglePr
         className
       )}
     >
-      <Star
-        className={cn("size-5 transition-all duration-200", inList && "fill-primary")}
-        aria-hidden
-      />
+      {/* Bouncing star animation on toggle */}
+      <motion.span
+        animate={
+          inList
+            ? { scale: [1, 1.45, 0.85, 1.15, 1], rotate: [0, -12, 8, -4, 0] }
+            : { scale: 1, rotate: 0 }
+        }
+        transition={{ type: "spring", stiffness: 400, damping: 12, duration: 0.5 }}
+        className="flex items-center justify-center"
+      >
+        <Star
+          className={cn(
+            "size-5 transition-all duration-200",
+            inList && "fill-primary"
+          )}
+          aria-hidden
+        />
+      </motion.span>
     </button>
   );
 }

@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import type { Stock } from "@/lib/types";
-import StockCard from "./StockCard";
+import StockCard     from "./StockCard";
+import AnimatedList  from "@/components/shared/AnimatedList";
 
 interface StockListProps {
   stocks: Stock[];
@@ -37,13 +38,11 @@ export default function StockList({
 
   return (
     <div className={className}>
-      <ul className="space-y-2" role="list" aria-label="Stock list">
+      <AnimatedList className="space-y-2" aria-label="Stock list">
         {visible.map((stock) => (
-          <li key={stock.ticker}>
-            <StockCard stock={stock} variant={variant} />
-          </li>
+          <StockCard key={stock.ticker} stock={stock} variant={variant} />
         ))}
-      </ul>
+      </AnimatedList>
 
       {hasMore && (
         <button
