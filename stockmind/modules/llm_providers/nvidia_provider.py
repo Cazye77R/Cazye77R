@@ -78,7 +78,7 @@ class NvidiaProvider(LLMProvider):
         messages: list[dict],
         model: str = "",
         temperature: float = 0.2,
-        **kwargs,
+        **kwargs: object,
     ) -> str:
         active_model = model or self._model
         headers = {

@@ -134,7 +134,7 @@ class OllamaProvider(LLMProvider):
         messages: list[dict],
         model: str,
         temperature: float = 0.2,
-        **kwargs,
+        **kwargs: object,
     ) -> str:
         try:
             return self._chat_via_client(model, messages, temperature)
@@ -157,7 +157,7 @@ class OllamaProvider(LLMProvider):
         )
         if isinstance(response, dict):
             return response["message"]["content"]
-        return response.message.content
+        return response.message.content or ""
 
     def _chat_via_http(
         self,

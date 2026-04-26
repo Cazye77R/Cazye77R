@@ -31,7 +31,7 @@ class LLMProvider(ABC):
         messages: list[dict],
         model: str,
         temperature: float = 0.2,
-        **kwargs,
+        **kwargs: object,
     ) -> str:
         """Sendet eine Nachrichtenliste an den Provider, gibt Antwort zurück."""
         ...

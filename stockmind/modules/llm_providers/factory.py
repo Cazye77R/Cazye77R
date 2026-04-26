@@ -19,7 +19,7 @@ def get_provider(name: str | None = None) -> LLMProvider:
     Returns:
         Instanz von OllamaProvider oder NvidiaProvider.
     """
-    n = (name or os.getenv("LLM_PROVIDER", "ollama")).lower()
+    n = (name or os.getenv("LLM_PROVIDER") or "ollama").lower()
     if n == "nvidia":
         return NvidiaProvider()
     return OllamaProvider()
