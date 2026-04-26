@@ -6,15 +6,14 @@ Trigger-Erkennung, Lambo-Konverter.
 
 from __future__ import annotations
 
+import os
 import random
+import sys
 from dataclasses import dataclass
 from typing import Optional
 
-import sys
-import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import ENABLE_EASTER_EGGS, LAMBO_PRICE_EUR
-
 
 # ===========================================================================
 # 1. Währungs-Easter-Egg
@@ -388,12 +387,18 @@ def format_lambo(eur: float) -> str:
 
 def lambo_progress_bar(eur: float) -> tuple[float, str]:
     pct = min(100.0, eur / LAMBO_PRICE_EUR * 100)
-    if pct >= 100:  msg = "🏎️ LAMBO ACHIEVED! Herzlichen Glückwunsch!"
-    elif pct >= 75: msg = "🔥 Fast da! Die Schlüssel warten schon..."
-    elif pct >= 50: msg = "💪 Halbzeit! Bleib dabei!"
-    elif pct >= 25: msg = "📈 Gut unterwegs! Weiter so!"
-    elif pct >= 10: msg = "🌱 Anfänge sind gut! Geduld zahlt sich aus."
-    else:           msg = "🐣 Jede Reise beginnt mit dem ersten Schritt."
+    if pct >= 100:
+        msg = "🏎️ LAMBO ACHIEVED! Herzlichen Glückwunsch!"
+    elif pct >= 75:
+        msg = "🔥 Fast da! Die Schlüssel warten schon..."
+    elif pct >= 50:
+        msg = "💪 Halbzeit! Bleib dabei!"
+    elif pct >= 25:
+        msg = "📈 Gut unterwegs! Weiter so!"
+    elif pct >= 10:
+        msg = "🌱 Anfänge sind gut! Geduld zahlt sich aus."
+    else:
+        msg = "🐣 Jede Reise beginnt mit dem ersten Schritt."
     return pct, msg
 
 
