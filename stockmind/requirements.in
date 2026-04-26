@@ -5,6 +5,7 @@ pandas
 numpy
 plotly
 scikit-learn
+joblib>=1.3
 ta
 requests
 pydantic

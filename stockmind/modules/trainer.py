@@ -9,13 +9,13 @@ from __future__ import annotations
 import json
 import math
 import os
-import pickle
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier
@@ -689,7 +689,11 @@ def _state_path(ticker: str) -> Path:
 def _model_path(ticker: str) -> Path:
     path = Path(TRAINING_STATE_DIR)
     path.mkdir(parents=True, exist_ok=True)
-    return path / f"{ticker.upper()}_model.pkl"
+    return path / f"{ticker.upper()}_model.joblib"
+
+
+def _legacy_pkl_path(ticker: str) -> Path:
+    return Path(TRAINING_STATE_DIR) / f"{ticker.upper()}_model.pkl"
 
 
 def load_state(ticker: str) -> dict:
@@ -814,10 +818,11 @@ def train(ticker: str, df: pd.DataFrame, horizon: int = 5) -> dict:
 
     accuracy = float(np.mean(cv_scores))
 
-    with open(_model_path(ticker), "wb") as f:
-        pickle.dump(
-            {"model": model, "scaler": scaler, "feature_names": list(features.columns)}, f
-        )
+    joblib.dump(
+        {"model": model, "scaler": scaler, "feature_names": list(features.columns)},
+        _model_path(ticker),
+        compress=3,
+    )
 
     # State aktualisieren (neues + Legacy-Schema)
     state["symbol"]           = ticker.upper()
@@ -847,9 +852,30 @@ def train(ticker: str, df: pd.DataFrame, horizon: int = 5) -> dict:
 
 
 def load_model(ticker: str) -> Optional[dict]:
-    """Lädt gespeichertes sklearn-Modell + Scaler. Gibt None zurück wenn keines existiert."""
-    p = _model_path(ticker)
-    if not p.exists():
-        return None
-    with open(p, "rb") as f:
-        return pickle.load(f)
+    """
+    Lädt gespeichertes sklearn-Modell + Scaler.
+
+    Migration: Falls nur eine alte .pkl-Datei existiert, wird sie einmalig
+    mit pickle geladen, als .joblib gespeichert und die .pkl-Datei gelöscht.
+    Gibt None zurück wenn kein Modell existiert.
+    """
+    import pickle  # lokaler Import – nur für Migrations-Pfad benötigt
+
+    p     = _model_path(ticker)
+    p_old = _legacy_pkl_path(ticker)
+
+    if p.exists():
+        return joblib.load(p)
+
+    if p_old.exists():
+        logger.warning(
+            f"Migriere Legacy-Modell {p_old.name} → {p.name} (pickle → joblib)."
+        )
+        with open(p_old, "rb") as fh:
+            payload = pickle.load(fh)  # noqa: S301 – einmalige Migration bekannter Dateien
+        joblib.dump(payload, p, compress=3)
+        p_old.unlink()
+        logger.info(f"Migration abgeschlossen. Alte Datei {p_old.name} gelöscht.")
+        return payload
+
+    return None
