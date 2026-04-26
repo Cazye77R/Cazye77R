@@ -40,7 +40,7 @@ from modules.backtester import (
     lambo_display,
     lambo_progress,
 )
-from modules.data_fetcher import fetch_info, fetch_ohlcv, search_stocks
+from modules.data_fetcher import fetch_info, fetch_ohlcv, get_data_quality_report, search_stocks
 from modules.easter_eggs import (
     CONFETTI_MARKER,
     CURRENCIES,
@@ -409,6 +409,7 @@ def _init_session() -> None:
         "analysis_text": "",
         "sentiment_result": None,
         "explanation_text": "",
+        "data_quality": None,
         "portfolio_name": "default",
         "model": "llama3",
         "method": "Auto (KI wählt)",
@@ -748,6 +749,7 @@ with st.sidebar:
                         st.session_state.analysis_text = ""
                         st.session_state.sentiment_result = None
                         st.session_state.explanation_text = ""
+                        st.session_state.data_quality = get_data_quality_report(df_h)
                 st.rerun()
     else:
         st.caption("Noch keine Aktien analysiert.")
@@ -893,6 +895,7 @@ with tab1:
                 st.session_state.analysis_text = ""
                 st.session_state.sentiment_result = None
                 st.session_state.explanation_text = ""
+                st.session_state.data_quality = get_data_quality_report(df_new)
                 # Verlauf aktualisieren
                 hist = st.session_state.history
                 if actual_ticker not in hist:
@@ -919,17 +922,40 @@ with tab1:
         prev  = float(df["Close"].iloc[-2]) if len(df) > 1 else last
         chg   = (last - prev) / prev * 100 if prev else 0
         chg_c = _GREEN if chg >= 0 else _RED
+        # Data Quality Badge (inline mit dem Preis-Header)
+        dq = st.session_state.data_quality or get_data_quality_report(df)
+        if dq["ok"]:
+            dq_badge = (
+                '<span title="Datenqualität: keine Auffälligkeiten" '
+                'style="font-size:13px;margin-left:10px;cursor:default;">✅ Datenqualität</span>'
+            )
+        else:
+            issues_html = "&#10;".join(dq["issues"])
+            dq_badge = (
+                f'<span title="Datenqualität: {issues_html}" '
+                f'style="font-size:13px;margin-left:10px;cursor:default;color:#f0b429;">'
+                f'⚠️ Datenqualität</span>'
+            )
+
         st.markdown(
-            f'<div style="margin:8px 0 12px;">'
+            f'<div style="margin:8px 0 4px;">'
             f'<span style="font-family:IBM Plex Mono;font-size:22px;'
             f'font-weight:700;color:#c9d1d9;">{name}</span>&nbsp;&nbsp;'
             f'<span style="color:#8b949e;font-size:14px;">{ticker} · {curr}</span>'
             f'&nbsp;&nbsp;<span style="font-family:IBM Plex Mono;font-size:20px;'
             f'font-weight:700;color:#00ff88;">{last:.2f}</span>'
             f'&nbsp;<span style="color:{chg_c};font-size:14px;">{chg:+.2f}%</span>'
+            f'{dq_badge}'
+            f'</div>'
+            f'<div style="margin:0 0 10px;font-size:11px;color:#8b949e;">'
+            f'{dq["first_date"]} – {dq["last_date"]} &nbsp;·&nbsp; {len(df)} Kerzen'
             f'</div>',
             unsafe_allow_html=True,
         )
+        if not dq["ok"]:
+            with st.expander("⚠️ Datenqualitäts-Hinweise", expanded=False):
+                for issue in dq["issues"]:
+                    st.warning(issue)
 
         col_left, col_right = st.columns([1, 2])
 
@@ -1296,6 +1322,12 @@ with tab1:
                     "Startkapital (€)", value=DEFAULT_BUDGET_EUR,
                     step=1000.0, key="bt_budget",
                 )
+            st.warning(
+                "⚠️ **Survivorship Bias:** yfinance enthält nur derzeit gelistete Aktien. "
+                "Insolvente oder delistete Titel fehlen vollständig – Backtest-Performance ist "
+                "daher optimistisch verzerrt. Reale Performance typischerweise **1–3 % p.a. niedriger**.",
+                icon=None,
+            )
             if st.button("▶ Backtest starten", use_container_width=True,
                          key="btn_bt"):
                 fn = SIGNAL_FUNCTIONS.get(bt_method)

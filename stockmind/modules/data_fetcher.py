@@ -6,7 +6,6 @@ technischen Indikatoren (ta-Bibliothek) und lokalem 24h-Cache.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import sys
@@ -25,6 +24,7 @@ from config import (
     DEFAULT_INTERVAL,
     DEFAULT_PERIOD,
 )
+
 from modules.logger import logger
 
 logger.debug(f"Module loaded: {__name__}")
@@ -321,7 +321,12 @@ def _fetch_yf_history(symbol: str, period: str, interval: str) -> Optional[pd.Da
     try:
         raw = yf.Ticker(symbol).history(
             period=period, interval=interval,
+            # auto_adjust=True:  Bereinigt Splits und Dividenden (OHLCV bleibt vergleichbar).
+            # back_adjust=False: Historische Preise werden NICHT rückwärts skaliert –
+            #   forward-adjustierte Preise sind für ML-Features stabiler und verhindern
+            #   negative Preise bei Reverse-Splits.
             auto_adjust=True,
+            back_adjust=False,
         )
         if raw is None or raw.empty:
             logger.warning(f"yf.Ticker.history: keine Daten für {symbol} (period={period})")
@@ -337,7 +342,10 @@ def _fetch_yf_download(symbol: str, period: str, interval: str) -> Optional[pd.D
     try:
         raw = yf.download(
             symbol, period=period, interval=interval,
-            progress=False, auto_adjust=True,
+            progress=False,
+            # Gleiche Bereinigungsstrategie wie _fetch_yf_history – siehe dort.
+            auto_adjust=True,
+            back_adjust=False,
         )
         if raw is None or raw.empty:
             logger.warning(f"yf.download: keine Daten für {symbol} (period={period})")
@@ -477,8 +485,6 @@ def fetch_ohlcv(
 def _add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Berechnet alle technischen Indikatoren und fügt sie als Spalten hinzu."""
     close = df["Close"]
-    high  = df["High"]
-    low   = df["Low"]
 
     try:
         from ta.momentum import RSIIndicator
@@ -523,7 +529,6 @@ def _add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 def _add_indicators_manual(df: pd.DataFrame) -> pd.DataFrame:
     """Fallback-Indikatorberechnung ohne ta-Bibliothek."""
-    import numpy as np
 
     close = df["Close"]
 
@@ -626,6 +631,97 @@ def invalidate_cache(symbol: str, period: str = DEFAULT_PERIOD, interval: str = 
         path.unlink()
         return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Datenqualitäts-Report
+# ---------------------------------------------------------------------------
+
+_MAX_MOVE_WARN_PCT: float = 20.0   # Tagesbewegung > 20 % als Outlier markieren
+_MISSING_DAYS_WARN: int   = 5      # mehr als 5 fehlende Handelstage → Warning
+
+
+def get_data_quality_report(df: pd.DataFrame) -> dict:
+    """
+    Prüft Datenqualität eines OHLCV-DataFrames.
+
+    Beachte: yfinance enthält ausschließlich derzeit gelistete Aktien
+    (Survivorship Bias). Aus dem Markt ausgeschiedene Titel fehlen
+    vollständig; dies lässt sich auf Daten-Ebene nicht kompensieren.
+
+    Args:
+        df: OHLCV-DataFrame mit DatetimeIndex.
+
+    Returns:
+        dict mit:
+          missing_days       – fehlende Handelstage (Wochentage Mo–Fr, Feiertage
+                               können als fehlende Tage erscheinen)
+          zero_volume_days   – Tage mit Volume == 0 oder NaN
+          max_daily_move_pct – maximale absolute Tagesbewegung in %
+          first_date         – frühestes Datum im DataFrame (ISO-String)
+          last_date          – letztes Datum im DataFrame (ISO-String)
+          issues             – Liste menschenlesbarer Warnungen
+          ok                 – True wenn keine Auffälligkeiten
+    """
+    if df is None or df.empty:
+        return {
+            "missing_days": 0,
+            "zero_volume_days": 0,
+            "max_daily_move_pct": 0.0,
+            "first_date": "",
+            "last_date": "",
+            "issues": ["Kein DataFrame vorhanden."],
+            "ok": False,
+        }
+
+    idx = pd.to_datetime(df.index).tz_localize(None)
+    first_date = idx[0].date().isoformat()
+    last_date  = idx[-1].date().isoformat()
+
+    # --- Fehlende Handelstage (Mo–Fr, Feiertage nicht ausgenommen) ---
+    expected_bdays = pd.bdate_range(idx[0], idx[-1])
+    # Normalisiere beide Seiten auf Datum für den Vergleich
+    actual_dates   = set(d.date() for d in idx)
+    expected_dates = set(d.date() for d in expected_bdays)
+    missing_days   = len(expected_dates - actual_dates)
+
+    # --- Zero-Volume-Tage ---
+    if "Volume" in df.columns:
+        zero_volume_days = int((df["Volume"].fillna(0) == 0).sum())
+    else:
+        zero_volume_days = 0
+
+    # --- Maximale Tagesbewegung ---
+    if "Close" in df.columns and len(df) > 1:
+        pct_changes = df["Close"].pct_change().abs() * 100
+        max_daily_move_pct = float(pct_changes.max())
+    else:
+        max_daily_move_pct = 0.0
+
+    # --- Issues sammeln ---
+    issues: list[str] = []
+    if missing_days > _MISSING_DAYS_WARN:
+        issues.append(
+            f"{missing_days} fehlende Handelstage "
+            f"(Feiertage zählen mit – realer Wert niedriger)"
+        )
+    if zero_volume_days > 0:
+        issues.append(f"{zero_volume_days} Tage mit Volume = 0")
+    if max_daily_move_pct > _MAX_MOVE_WARN_PCT:
+        issues.append(
+            f"Maximale Tagesbewegung {max_daily_move_pct:.1f}% "
+            f"(möglicher Kurs-Split oder Datenfehler)"
+        )
+
+    return {
+        "missing_days":       missing_days,
+        "zero_volume_days":   zero_volume_days,
+        "max_daily_move_pct": round(max_daily_move_pct, 2),
+        "first_date":         first_date,
+        "last_date":          last_date,
+        "issues":             issues,
+        "ok":                 len(issues) == 0,
+    }
 
 
 # ---------------------------------------------------------------------------
