@@ -411,7 +411,7 @@ class StockTrainer:
     MAX_INSIGHTS      = 15      # Maximale gespeicherte Insights
     TABLE_ROWS        = 20      # Detailzeilen in der Kerzen-Tabelle
 
-    def __init__(self, base_dir: str | None = None):
+    def __init__(self, base_dir: str | None = None) -> None:
         root = Path(os.path.dirname(os.path.dirname(__file__)))
         self._state_dir = root / (base_dir or TRAINING_STATE_DIR)
         self._state_dir.mkdir(parents=True, exist_ok=True)
@@ -1194,7 +1194,7 @@ def train(ticker: str, df: pd.DataFrame, horizon: int = 5) -> dict:
     state["accuracy"]         = round(accuracy, 4)
     state["current_accuracy"] = round(accuracy, 4)
     state["feature_importance"] = dict(
-        zip(features.columns, [round(v, 4) for v in model.feature_importances_])
+        zip(features.columns, [round(v, 4) for v in model.feature_importances_])  # type: ignore[union-attr]
     )
     state["training_log"].append({
         "cycle":       state["cycles"],
