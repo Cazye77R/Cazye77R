@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 import re
 import sys
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -36,9 +36,9 @@ _BATCH_SYSTEM_PROMPT = (
 def analyze_news(
     ticker: str,
     n: int = 5,
-    provider=None,
+    provider: Any = None,
     model_name: str = "",
-) -> dict:
+) -> dict[str, object]:
     """
     Bewertet die neuesten News-Headlines für ``ticker`` mit dem LLM.
 
@@ -132,7 +132,7 @@ def _fetch_headlines(ticker: str, n: int) -> list[str]:
 def _score_batch(
     headlines: list[str],
     ticker: str,
-    provider,
+    provider: Any,
     model_name: str,
 ) -> list[Optional[float]]:
     """
