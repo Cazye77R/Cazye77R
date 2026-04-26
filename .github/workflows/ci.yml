@@ -25,8 +25,26 @@ jobs:
       - name: ruff format --check
         run: ruff format --check stockmind/
 
+  typecheck:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install type-check dependencies
+        run: pip install -r stockmind/requirements-test.txt
+
+      - name: mypy
+        # app.py wird ausgelassen – Streamlit-Typen sind nur partiell vorhanden.
+        # models.py und alle Module in modules/ werden vollständig geprüft.
+        run: mypy stockmind/models.py stockmind/modules/
+
   test:
-    name: Test (pytest)
+    name: Test (pytest + coverage)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,5 +59,8 @@ jobs:
         # und python-dotenv ist garantiert installiert bevor config importiert wird.
         run: pip install -r stockmind/requirements-test.txt
 
-      - name: Run tests
-        run: pytest tests/ --timeout=60 -v
+      - name: Run tests with coverage
+        run: >
+          pytest tests/ --timeout=60 -v
+          --cov=stockmind --cov-report=term-missing
+          --cov-fail-under=70
