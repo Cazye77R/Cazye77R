@@ -85,11 +85,11 @@ def _bollinger_signal(df: pd.DataFrame) -> tuple[str, float]:
     upper = mid + 2 * std
     lower = mid - 2 * std
     price = close.iloc[-1]
-    u, l = upper.iloc[-1], lower.iloc[-1]
-    if price < l:
-        return "KAUFEN", min(0.85, 0.5 + (l - price) / (u - l))
+    u, lower_val = upper.iloc[-1], lower.iloc[-1]
+    if price < lower_val:
+        return "KAUFEN", min(0.85, 0.5 + (lower_val - price) / (u - lower_val))
     if price > u:
-        return "VERKAUFEN", min(0.85, 0.5 + (price - u) / (u - l))
+        return "VERKAUFEN", min(0.85, 0.5 + (price - u) / (u - lower_val))
     return "HALTEN", 0.5
 
 
