@@ -12,9 +12,8 @@ import math
 import os
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -30,6 +29,7 @@ from config import (
     SLIPPAGE_VOLUME_FACTOR,
     SPREAD_PERCENT,
 )
+
 from modules.logger import logger
 
 logger.debug(f"Module loaded: {__name__}")
@@ -116,7 +116,7 @@ class PaperTrader:
         order_cost:   float = ORDER_COST_EUR,
         spread_pct:   float = SPREAD_PERCENT,
         base_dir:     str | None = None,
-    ):
+    ) -> None:
         self.name         = name
         self.start_budget = start_budget
         self.order_cost   = order_cost
@@ -190,7 +190,7 @@ class PaperTrader:
         signal:    str = "",
         reasoning: str = "",
         method:    str = "",
-    ) -> dict:
+    ) -> dict[str, object]:
         """
         Platziert eine Order und aktualisiert Cash + Positionen.
 
@@ -313,7 +313,7 @@ class PaperTrader:
         price:     float,
         timestamp: str | None = None,
         reasoning: str = "",
-    ) -> dict:
+    ) -> dict[str, object]:
         """
         Schließt die gesamte offene Position in `symbol`.
 
@@ -342,7 +342,7 @@ class PaperTrader:
     def get_portfolio_summary(
         self,
         current_prices: dict[str, float] | None = None,
-    ) -> dict:
+    ) -> dict[str, object]:
         """
         Gibt vollständige Portfolio-Kennzahlen zurück.
 
@@ -393,7 +393,6 @@ class PaperTrader:
         # Win / Loss
         sell_trades = [t for t in state.trades if t["direction"] == "SELL"]
         wins        = [t for t in sell_trades if t.get("pnl", 0) > 0]
-        losses      = [t for t in sell_trades if t.get("pnl", 0) <= 0]
         win_rate    = len(wins) / len(sell_trades) if sell_trades else 0.0
 
         best_trade  = max(sell_trades, key=lambda t: t.get("pnl", 0), default=None)
@@ -465,7 +464,7 @@ class PaperTrader:
         cycles:     int = 5,
         method:     str = "Auto (KI wählt)",
         invest_pct: float = 0.2,   # Anteil des Cashs je BUY-Signal
-    ) -> list[dict]:
+    ) -> list[dict[str, object]]:
         """
         Automatischer Trading-Modus:
         - Holt KI-Vorhersage via StockTrainer
@@ -617,12 +616,18 @@ def lambo_display(eur_value: float) -> str:
 def lambo_progress(eur_value: float) -> tuple[float, str]:
     """Gibt (Prozent 0-100, Motivationstext) für den Lambo-Fortschrittsbalken zurück."""
     pct = min(100.0, eur_value / LAMBO_PRICE_EUR * 100)
-    if pct >= 100:  msg = "🏎️ LAMBO UNLOCKED! Herzlichen Glückwunsch!"
-    elif pct >= 75: msg = "🔥 Noch ein letzter Sprint!"
-    elif pct >= 50: msg = "💪 Halbzeit! Du schaffst das!"
-    elif pct >= 25: msg = "📈 Solide Basis. Weiter so!"
-    elif pct >= 10: msg = "🌱 Guter Start. Geduld zahlt sich aus."
-    else:           msg = "🐣 Der erste Schritt ist getan."
+    if pct >= 100:
+        msg = "🏎️ LAMBO UNLOCKED! Herzlichen Glückwunsch!"
+    elif pct >= 75:
+        msg = "🔥 Noch ein letzter Sprint!"
+    elif pct >= 50:
+        msg = "💪 Halbzeit! Du schaffst das!"
+    elif pct >= 25:
+        msg = "📈 Solide Basis. Weiter so!"
+    elif pct >= 10:
+        msg = "🌱 Guter Start. Geduld zahlt sich aus."
+    else:
+        msg = "🐣 Der erste Schritt ist getan."
     return pct, msg
 
 
@@ -706,7 +711,7 @@ def compute_slippage(
     avg_daily_volume:  float = SLIPPAGE_DAILY_VOLUME_DEFAULT,
     base_pct:          float = SLIPPAGE_BASE_PCT,
     volume_factor:     float = SLIPPAGE_VOLUME_FACTOR,
-) -> float:
+) -> float:  # EUR, absolut
     """
     Volumenabhängiges Slippage-Modell.
 
@@ -784,7 +789,7 @@ def execute_trade(
     return True, f"{action} {shares:.4f} × {ticker} @ {price:.2f} € | PnL: {pnl:+.2f} €"
 
 
-def portfolio_summary(pf: Portfolio, current_prices: dict[str, float]) -> dict:
+def portfolio_summary(pf: Portfolio, current_prices: dict[str, float]) -> dict[str, object]:
     """Berechnet Legacy-Portfoliokennzahlen (app.py-Compat)."""
     pos_val = sum(
         pos["shares"] * current_prices.get(t, pos["avg_price"])
@@ -955,7 +960,7 @@ def compute_metrics(
     equity_curve: pd.Series,
     trades:       pd.DataFrame,
     periods_per_year: int = 252,
-) -> dict:
+) -> dict[str, object]:
     """
     Berechnet professionelle Performance-Kennzahlen aus Equity-Kurve und Trades.
 
