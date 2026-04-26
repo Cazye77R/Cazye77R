@@ -13,7 +13,7 @@ import {
   ReferenceLine,
 } from "recharts";
 import type { Candle, Prediction } from "@/lib/types";
-import { formatPrice, formatLargeNumber } from "@/lib/format";
+import { formatPrice } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 interface PredictionOverlayProps {
@@ -89,7 +89,6 @@ export default function PredictionOverlay({
 
     const lastCandle = hist[hist.length - 1];
     const lastPrice  = lastCandle.close;
-    const nowLabel   = fmtLabel(lastCandle.time);
 
     // Historical points
     const points: ChartPoint[] = hist.map((c) => ({

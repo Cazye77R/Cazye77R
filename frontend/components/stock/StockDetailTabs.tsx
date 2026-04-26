@@ -1,12 +1,31 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import type { Stock, Candle, Prediction, NewsItem } from "@/lib/types";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { formatLargeNumber, formatPrice, formatRelativeTime } from "@/lib/format";
-import PriceChart       from "@/components/charts/PriceChart";
-import PredictionOverlay from "@/components/charts/PredictionOverlay";
 import PredictionCard   from "@/components/ai/PredictionCard";
+
+const PriceChart = dynamic(
+  () => import("@/components/charts/PriceChart"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="shimmer rounded" style={{ width: "100%", height: 280 }} />
+    ),
+  }
+);
+
+const PredictionOverlay = dynamic(
+  () => import("@/components/charts/PredictionOverlay"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="shimmer rounded" style={{ width: "100%", height: 240 }} />
+    ),
+  }
+);
 
 interface StockDetailTabsProps {
   stock:      Stock;

@@ -1,3 +1,6 @@
+"use client";
+
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { formatPrice, formatLargeNumber } from "@/lib/format";
@@ -5,7 +8,16 @@ import type { Stock } from "@/lib/types";
 import { getCandles } from "@/lib/mock-data";
 import GlowCard     from "@/components/shared/GlowCard";
 import ChangeBadge  from "@/components/shared/ChangeBadge";
-import MiniSparkline from "@/components/charts/MiniSparkline";
+
+const MiniSparkline = dynamic(
+  () => import("@/components/charts/MiniSparkline"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="shimmer rounded" style={{ width: "100%", height: 48 }} />
+    ),
+  }
+);
 
 interface StockCardProps {
   stock:    Stock;

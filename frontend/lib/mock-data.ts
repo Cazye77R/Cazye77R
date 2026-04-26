@@ -74,6 +74,7 @@ const RAW_STOCKS: {
 ];
 
 // ─── Stocks (plain objects, no candles here for perf) ───────────────────────
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const STOCKS: Stock[] = RAW_STOCKS.map(({ drift: _drift, ...s }) => s);
 
 // ─── Candle histories ────────────────────────────────────────────────────────
