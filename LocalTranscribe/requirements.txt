@@ -1,6 +1,7 @@
 faster-whisper
 pyannote.audio
 streamlit
+st-audiorec
 python-dotenv
 requests
 torch

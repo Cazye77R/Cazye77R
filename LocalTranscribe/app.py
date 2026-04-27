@@ -89,6 +89,8 @@ def _init_state() -> None:
         "llm_output": None,         # str  – LLM analysis result
         "ollama_models": None,      # list[str] | None  (None = not yet fetched)
         "last_file_id": None,       # (name, size) tuple – detects new uploads
+        "rec_audio_bytes": None,    # bytes | None – persisted browser recording
+        "rec_audio_id": None,       # int | None  – len(bytes), detects new recordings
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -471,44 +473,109 @@ def main() -> None:
     st.title("🎙️ LocalTranscribe")
     st.caption("Lokales Speech-to-Text mit Sprechererkennung & KI-Analyse")
 
-    # --- File upload ---
-    uploaded = st.file_uploader(
-        "Audiodatei hochladen",
-        type=_ACCEPT,
-        help=f"Unterstützte Formate: {', '.join(SUPPORTED_FORMATS)}",
-    )
+    # ── Audio input: two tabs ──────────────────────────────────────────────
+    # Each tab populates its own local. Priority at the end: upload > recording.
+    _upload_bytes: bytes | None = None
+    _upload_name: str | None = None
 
-    # Reset results when the user uploads a different file.
-    if uploaded is not None:
-        file_id = (uploaded.name, uploaded.size)
-        if file_id != st.session_state["last_file_id"]:
-            st.session_state.update(
-                last_file_id=file_id,
-                segments=None,
-                transcription_meta=None,
-                llm_output=None,
+    tab_upload, tab_record = st.tabs(["📁 Datei hochladen", "🎤 Aufnehmen"])
+
+    # --- Upload tab ---
+    with tab_upload:
+        uploaded = st.file_uploader(
+            "Audiodatei hochladen",
+            type=_ACCEPT,
+            help=f"Unterstützte Formate: {', '.join(SUPPORTED_FORMATS)}",
+        )
+        if uploaded is not None:
+            file_id = (uploaded.name, uploaded.size)
+            if file_id != st.session_state["last_file_id"]:
+                # New file: clear all previous results and any stored recording.
+                st.session_state.update(
+                    last_file_id=file_id,
+                    rec_audio_bytes=None,
+                    rec_audio_id=None,
+                    segments=None,
+                    transcription_meta=None,
+                    llm_output=None,
+                )
+            _upload_bytes = uploaded.getvalue()
+            _upload_name = uploaded.name
+
+    # --- Record tab ---
+    with tab_record:
+        try:
+            from st_audiorec import st_audiorec
+            _has_audiorec = True
+        except ImportError:
+            _has_audiorec = False
+
+        if not _has_audiorec:
+            st.warning(
+                "`st-audiorec` ist nicht installiert.\n\n"
+                "```\npip install st-audiorec\n```"
             )
+        else:
+            st.caption("▶ **Start** drücken · sprechen · ■ **Stop** drücken")
+            wav_bytes: bytes | None = st_audiorec()
 
-    if uploaded is not None:
+            # st_audiorec returns bytes only on the one rerun after Stop is pressed.
+            # Persist them in session state so playback survives further reruns.
+            if wav_bytes is not None and len(wav_bytes) > 100:  # 100 B > bare WAV header
+                rec_id = len(wav_bytes)
+                if rec_id != st.session_state["rec_audio_id"]:
+                    # New recording: clear previous results and upload state.
+                    st.session_state.update(
+                        rec_audio_bytes=wav_bytes,
+                        rec_audio_id=rec_id,
+                        last_file_id=None,
+                        segments=None,
+                        transcription_meta=None,
+                        llm_output=None,
+                    )
+
+            stored_rec: bytes | None = st.session_state["rec_audio_bytes"]
+            if stored_rec is not None:
+                st.audio(stored_rec, format="audio/wav")
+                st.caption(f"Aufnahme bereit · {len(stored_rec) / 1024:.0f} KB")
+            elif wav_bytes is None:
+                st.info("Noch keine Aufnahme. Drücke **Start** oben.")
+
+    # ── Resolve active audio source (upload takes priority over recording) ─
+    if _upload_bytes is not None:
+        audio_bytes: bytes | None = _upload_bytes
+        audio_name: str = _upload_name or "audio"
+    elif st.session_state["rec_audio_bytes"] is not None:
+        audio_bytes = st.session_state["rec_audio_bytes"]
+        audio_name = "browser-aufnahme.wav"
+    else:
+        audio_bytes = None
+        audio_name = ""
+
+    # ── Pipeline trigger ───────────────────────────────────────────────────
+    if audio_bytes is not None:
         info_col, btn_col = st.columns([4, 1])
-        info_col.markdown(f"**Datei:** `{uploaded.name}` &nbsp;·&nbsp; {uploaded.size / 1024:.0f} KB")
+        size_kb = len(audio_bytes) / 1024
+        info_col.markdown(f"**Audio:** `{audio_name}` &nbsp;·&nbsp; {size_kb:.0f} KB")
         run_pipeline = btn_col.button(
             "▶ Transkribieren", type="primary", use_container_width=True
         )
 
         if run_pipeline:
-            suffix = Path(uploaded.name).suffix
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                tmp.write(uploaded.getvalue())
-                tmp_path = Path(tmp.name)
+            suffix = Path(audio_name).suffix or ".wav"
+            # mkstemp: atomic creation, caller owns the fd and must close it.
+            fd, tmp_str = tempfile.mkstemp(suffix=suffix)
+            tmp_path = Path(tmp_str)
             try:
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(audio_bytes)
                 _run_pipeline(tmp_path, settings)
             finally:
                 tmp_path.unlink(missing_ok=True)
     else:
-        st.info("Lade eine Audiodatei hoch, um zu beginnen.")
+        st.info("Lade eine Audiodatei hoch oder nimm Audio auf, um zu beginnen.")
 
-    # --- Show results ---
+    # ── Results ────────────────────────────────────────────────────────────
     segments: list[dict] | None = st.session_state["segments"]
     meta: dict | None = st.session_state["transcription_meta"]
     llm_output: str = st.session_state["llm_output"] or ""
@@ -516,7 +583,6 @@ def main() -> None:
     if segments is not None and meta is not None:
         st.divider()
 
-        # Metadata summary bar
         duration_str = TranscriptionEngine.format_timestamp(meta.get("duration", 0))
         lang = (meta.get("language") or "?").upper()
         n_segs = len(segments)
