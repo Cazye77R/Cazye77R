@@ -66,7 +66,7 @@ class TranscriptionEngine:
     def transcribe(
         self,
         audio_path: str | os.PathLike,
-        language: str = "auto",
+        language: str = "de",
         progress_callback: Callable[[float, str], None] | None = None,
     ) -> dict:
         """
@@ -74,7 +74,10 @@ class TranscriptionEngine:
 
         Args:
             audio_path: Path to the audio file.
-            language: BCP-47 language code or "auto" for automatic detection.
+            language: BCP-47 language code (e.g. "de", "en").  Always passed
+                      explicitly to faster-whisper; never left as None, which
+                      would trigger slower auto-detection and can hurt accuracy.
+                      Defaults to "de".
             progress_callback: Optional callable(fraction: float, message: str)
                                invoked after each segment; used to update a
                                Streamlit progress bar.
@@ -92,7 +95,9 @@ class TranscriptionEngine:
         if not audio_path.is_file():
             raise TranscriptionError(f"Audio file not found: {audio_path}")
 
-        lang_arg = None if language == "auto" else language
+        # Always use an explicit language code; fall back to "de" if caller
+        # passes an empty string or a legacy "auto" value.
+        lang_arg = language if language and language != "auto" else "de"
 
         vad_parameters = {
             "min_silence_duration_ms": 500,

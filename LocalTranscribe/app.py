@@ -20,6 +20,8 @@ from dotenv import load_dotenv
 import torch
 
 from config import (
+    DEFAULT_LANGUAGE,
+    LANGUAGES,
     OLLAMA_BASE_URL,
     SUPPORTED_FORMATS,
     WHISPER_COMPUTE_TYPE,
@@ -47,20 +49,6 @@ logging.basicConfig(level=logging.WARNING)
 
 _WHISPER_MODELS = ["tiny", "base", "small", "medium", "large-v2", "large-v3"]
 
-_LANGUAGES: dict[str, str] = {
-    "Automatisch": "auto",
-    "Deutsch": "de",
-    "Englisch": "en",
-    "Französisch": "fr",
-    "Spanisch": "es",
-    "Italienisch": "it",
-    "Portugiesisch": "pt",
-    "Niederländisch": "nl",
-    "Polnisch": "pl",
-    "Russisch": "ru",
-    "Japanisch": "ja",
-    "Chinesisch": "zh",
-}
 
 _TASK_LABELS: dict[str, str] = {
     "Zusammenfassung":      "zusammenfassung",
@@ -141,13 +129,17 @@ def _render_sidebar() -> dict:
         help="Größere Modelle sind genauer, benötigen aber mehr VRAM und Zeit.",
     )  # type: ignore[assignment]
 
-    lang_label: str = st.sidebar.selectbox(
+    _default_idx = list(LANGUAGES.keys()).index(
+        next(k for k, v in LANGUAGES.items() if v == DEFAULT_LANGUAGE)
+    )
+    lang_label: str = st.sidebar.radio(
         "Sprache",
-        options=list(_LANGUAGES.keys()),
-        index=0,
-        help="'Automatisch' erkennt die Sprache selbst.",
+        options=list(LANGUAGES.keys()),
+        index=_default_idx,
+        horizontal=True,
+        help="Explizite Sprachvorgabe verbessert die Erkennungsqualität gegenüber Auto-Detection.",
     )  # type: ignore[assignment]
-    language = _LANGUAGES[lang_label]
+    language = LANGUAGES[lang_label]
 
     st.sidebar.divider()
 

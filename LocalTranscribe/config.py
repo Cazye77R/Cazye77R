@@ -33,6 +33,16 @@ WHISPER_COMPUTE_TYPE = "int8"
 WHISPER_COMPUTE_TYPE_FALLBACK = "int8"
 
 # ---------------------------------------------------------------------------
+# Language settings
+# ---------------------------------------------------------------------------
+
+# Supported transcription languages shown in the UI.
+LANGUAGES = {"Deutsch": "de", "English": "en"}
+
+# BCP-47 code used when no language is explicitly selected.
+DEFAULT_LANGUAGE = "de"
+
+# ---------------------------------------------------------------------------
 # Ollama settings
 # ---------------------------------------------------------------------------
 
