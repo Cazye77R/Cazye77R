@@ -5,38 +5,216 @@ Handles loading the Whisper model and transcribing audio files
 into timestamped segments with word-level confidence scores.
 """
 
-# TODO: import faster_whisper
-# TODO: import config constants (WHISPER_MODEL, WHISPER_DEVICE, WHISPER_COMPUTE_TYPE)
+from __future__ import annotations
+
+import logging
+import os
+from pathlib import Path
+from typing import Callable
+
+import torch
+from faster_whisper import WhisperModel
+from faster_whisper.transcribe import Segment
+
+from config import WHISPER_COMPUTE_TYPE, WHISPER_DEVICE, WHISPER_MODEL
+
+logger = logging.getLogger(__name__)
 
 
-class Transcriber:
+class TranscriptionError(Exception):
+    """Raised when transcription fails due to an unreadable file or model error."""
+
+
+class TranscriptionEngine:
     """Transcribes audio files using a local Whisper model via faster-whisper."""
 
-    def __init__(self, model_name: str = None, device: str = None, compute_type: str = None):
+    def __init__(
+        self,
+        model_size: str = WHISPER_MODEL,
+        device: str = WHISPER_DEVICE,
+        compute_type: str = WHISPER_COMPUTE_TYPE,
+    ) -> None:
         """
-        Initialize the Whisper transcription model.
+        Load the Whisper model onto the target device.
 
         Args:
-            model_name: Whisper model variant (e.g. "large-v3").
+            model_size: Whisper model variant (e.g. "large-v3").
             device: Compute device ("cuda" or "cpu").
             compute_type: Precision type ("float16", "int8", etc.).
-        """
-        # TODO: fall back to config defaults when args are None
-        # TODO: load WhisperModel from faster_whisper
-        pass
 
-    def transcribe(self, audio_path: str, language: str = "de") -> list[dict]:
+        Raises:
+            TranscriptionError: If the model cannot be loaded.
         """
-        Transcribe an audio file and return timestamped segments.
+        self.device = device
+        self.model_size = model_size
+
+        # Fall back to CPU when CUDA is requested but not available so the
+        # application stays usable on machines without a GPU.
+        if device == "cuda" and not torch.cuda.is_available():
+            logger.warning("CUDA requested but not available – falling back to CPU.")
+            self.device = "cpu"
+            compute_type = "int8"
+
+        try:
+            logger.info("Loading Whisper model '%s' on %s (%s)…", model_size, self.device, compute_type)
+            self.model = WhisperModel(model_size, device=self.device, compute_type=compute_type)
+            logger.info("Model loaded successfully.")
+        except Exception as exc:
+            raise TranscriptionError(f"Failed to load Whisper model '{model_size}': {exc}") from exc
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def transcribe(
+        self,
+        audio_path: str | os.PathLike,
+        language: str = "auto",
+        progress_callback: Callable[[float, str], None] | None = None,
+    ) -> dict:
+        """
+        Transcribe an audio file.
 
         Args:
             audio_path: Path to the audio file.
-            language: BCP-47 language code; defaults to German ("de").
+            language: BCP-47 language code or "auto" for automatic detection.
+            progress_callback: Optional callable(fraction: float, message: str)
+                               invoked after each segment; used to update a
+                               Streamlit progress bar.
 
         Returns:
-            List of segment dicts with keys: start, end, text, words.
+            Dict with keys:
+              - "segments": list of {start, end, text, words}
+              - "language": detected/requested language code
+              - "duration": total audio duration in seconds
+
+        Raises:
+            TranscriptionError: If the file is unreadable or transcription fails.
         """
-        # TODO: call model.transcribe() with beam_size and language
-        # TODO: iterate segments and collect {start, end, text, words}
-        # TODO: return list of segment dicts
-        pass
+        audio_path = Path(audio_path)
+        if not audio_path.is_file():
+            raise TranscriptionError(f"Audio file not found: {audio_path}")
+
+        lang_arg = None if language == "auto" else language
+
+        vad_parameters = {
+            "min_silence_duration_ms": 500,
+        }
+
+        try:
+            segments_iter, info = self.model.transcribe(
+                str(audio_path),
+                language=lang_arg,
+                beam_size=5,
+                word_timestamps=True,
+                vad_filter=True,
+                vad_parameters=vad_parameters,
+            )
+        except Exception as exc:
+            raise TranscriptionError(f"Transcription failed for '{audio_path.name}': {exc}") from exc
+
+        segments: list[dict] = []
+        total_duration = info.duration or 1.0  # guard against zero
+
+        try:
+            for segment in segments_iter:
+                seg_dict = self._segment_to_dict(segment)
+                segments.append(seg_dict)
+
+                if progress_callback is not None:
+                    fraction = min(segment.end / total_duration, 1.0)
+                    progress_callback(fraction, f"Segment {len(segments)}: {segment.start:.1f}s – {segment.end:.1f}s")
+        except Exception as exc:
+            raise TranscriptionError(f"Error while reading segments: {exc}") from exc
+        finally:
+            # Always free GPU memory, even if an exception occurred mid-stream.
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
+                logger.debug("GPU cache cleared.")
+
+        if progress_callback is not None:
+            progress_callback(1.0, "Transcription complete.")
+
+        return {
+            "segments": segments,
+            "language": info.language,
+            "duration": info.duration,
+        }
+
+    @staticmethod
+    def format_timestamp(seconds: float) -> str:
+        """
+        Convert a duration in seconds to "HH:MM:SS".
+
+        Args:
+            seconds: Non-negative duration in seconds.
+
+        Returns:
+            Zero-padded timestamp string, e.g. "01:23:45".
+        """
+        seconds = max(0.0, seconds)
+        total_s = int(seconds)
+        hours, remainder = divmod(total_s, 3600)
+        minutes, secs = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _segment_to_dict(segment: Segment) -> dict:
+        """Convert a faster-whisper Segment namedtuple to a plain dict."""
+        words = []
+        if segment.words:
+            for w in segment.words:
+                words.append({
+                    "start": round(w.start, 3),
+                    "end": round(w.end, 3),
+                    "word": w.word,
+                    "probability": round(w.probability, 4),
+                })
+        return {
+            "start": round(segment.start, 3),
+            "end": round(segment.end, 3),
+            "text": segment.text.strip(),
+            "words": words,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Quick smoke-test
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import sys
+    import json
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
+
+    wav_path = sys.argv[1] if len(sys.argv) > 1 else "test.wav"
+
+    def on_progress(fraction: float, message: str) -> None:
+        bar_len = 40
+        filled = int(bar_len * fraction)
+        bar = "#" * filled + "-" * (bar_len - filled)
+        print(f"\r[{bar}] {fraction * 100:5.1f}%  {message}", end="", flush=True)
+
+    engine = TranscriptionEngine(model_size="large-v3", device="cuda", compute_type="float16")
+
+    print(f"Transcribing: {wav_path}\n")
+    result = engine.transcribe(wav_path, language="auto", progress_callback=on_progress)
+    print()  # newline after progress bar
+
+    print(f"\nDetected language : {result['language']}")
+    print(f"Duration          : {TranscriptionEngine.format_timestamp(result['duration'])}")
+    print(f"Segments          : {len(result['segments'])}\n")
+
+    for seg in result["segments"]:
+        ts = TranscriptionEngine.format_timestamp(seg["start"])
+        print(f"[{ts}]  {seg['text']}")
+
+    out_path = Path(wav_path).stem + "_transcript.json"
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(result, fh, ensure_ascii=False, indent=2)
+    print(f"\nFull result saved to: {out_path}")
