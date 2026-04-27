@@ -62,23 +62,12 @@ class SpeakerDiarizer:
                 "pyannote/speaker-diarization-3.1 (gated model)."
             )
 
+        self._token = token
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        try:
-            logger.info("Loading pyannote/speaker-diarization-3.1 on %s…", self.device)
-            self._pipeline = Pipeline.from_pretrained(
-                "pyannote/speaker-diarization-3.1",
-                use_auth_token=token,
-            )
-            self._pipeline.to(self.device)
-            logger.info("Diarization pipeline ready.")
-        except Exception as exc:
-            # Catch auth errors, network errors, and model-file errors alike.
-            raise DiarizationError(
-                f"Failed to load diarization pipeline: {exc}\n"
-                "Check that your HF_TOKEN is valid and that you have accepted "
-                "the model conditions at huggingface.co/pyannote/speaker-diarization-3.1"
-            ) from exc
+        # Pipeline is intentionally NOT loaded here.  It is loaded lazily in
+        # diarize() so that VRAM is only occupied when the pipeline runs.
+        # On a 6 GB GPU the Whisper model must be fully unloaded first.
+        self._pipeline: Pipeline | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -108,13 +97,15 @@ class SpeakerDiarizer:
         if not audio_path.is_file():
             raise DiarizationError(f"Audio file not found: {audio_path}")
 
+        self._ensure_pipeline_loaded()
+
         pipeline_kwargs: dict = {}
         if num_speakers is not None:
             pipeline_kwargs["num_speakers"] = num_speakers
 
         try:
             logger.info("Running diarization on '%s'…", audio_path.name)
-            annotation = self._pipeline(str(audio_path), **pipeline_kwargs)
+            annotation = self._pipeline(str(audio_path), **pipeline_kwargs)  # type: ignore[misc]
         except Exception as exc:
             raise DiarizationError(f"Diarization failed: {exc}") from exc
         finally:
@@ -142,11 +133,31 @@ class SpeakerDiarizer:
         Call this after diarization is done so the GPU is available for other
         tasks (e.g. reloading the Whisper model for a second file).
         """
-        del self._pipeline
-        self._pipeline = None  # type: ignore[assignment]
+        if self._pipeline is not None:
+            del self._pipeline
+            self._pipeline = None
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         logger.info("Diarization pipeline unloaded.")
+
+    def _ensure_pipeline_loaded(self) -> None:
+        """Load the pyannote pipeline into VRAM if not already loaded."""
+        if self._pipeline is not None:
+            return
+        try:
+            logger.info("Loading pyannote/speaker-diarization-3.1 on %s…", self.device)
+            self._pipeline = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-3.1",
+                use_auth_token=self._token,
+            )
+            self._pipeline.to(self.device)
+            logger.info("Diarization pipeline ready.")
+        except Exception as exc:
+            raise DiarizationError(
+                f"Failed to load diarization pipeline: {exc}\n"
+                "Check that your HF_TOKEN is valid and that you have accepted "
+                "the model conditions at huggingface.co/pyannote/speaker-diarization-3.1"
+            ) from exc
 
     # ------------------------------------------------------------------
     # Static helpers

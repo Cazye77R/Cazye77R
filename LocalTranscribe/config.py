@@ -1,14 +1,46 @@
 """
 Configuration and constants for LocalTranscribe.
+
+VRAM budget note (RTX 3060, 6 GB):
+  Whisper large-v3 + float16  ≈ 5.0 GB  → leaves almost nothing for diarization
+  Whisper large-v3 + int8     ≈ 2.5 GB  → comfortable headroom
+  pyannote diarization-3.1    ≈ 2.0 GB  → loaded only while Whisper is unloaded
+
+  Recommended flow: load Whisper (int8) → transcribe → unload →
+                    load diarizer → diarize → unload → query Ollama (CPU)
 """
 
+# ---------------------------------------------------------------------------
 # Whisper model settings
-WHISPER_MODEL = "large-v3"
-WHISPER_DEVICE = "cuda"
-WHISPER_COMPUTE_TYPE = "float16"
+# ---------------------------------------------------------------------------
 
+WHISPER_MODEL = "large-v3"
+
+# Prefer CUDA; fall back to CPU automatically when the GPU is absent or torch
+# is not yet installed (e.g. during a bare import of this module in tests).
+try:
+    import torch as _torch
+    WHISPER_DEVICE = "cuda" if _torch.cuda.is_available() else "cpu"
+    del _torch
+except ImportError:
+    WHISPER_DEVICE = "cpu"
+
+# int8 saves ~50 % VRAM compared to float16 with negligible quality loss
+# on large-v3.  On CPU, int8 is also the fastest compute type.
+WHISPER_COMPUTE_TYPE = "int8"
+
+# Fallback compute type used when the primary type causes a CUDA OOM.
+WHISPER_COMPUTE_TYPE_FALLBACK = "int8"
+
+# ---------------------------------------------------------------------------
 # Ollama settings
+# ---------------------------------------------------------------------------
+
 OLLAMA_BASE_URL = "http://localhost:11434"
+
+# ---------------------------------------------------------------------------
+# File handling
+# ---------------------------------------------------------------------------
 
 # Supported audio/video formats
 SUPPORTED_FORMATS = [".mp3", ".wav", ".m4a", ".ogg", ".flac", ".wma"]

@@ -16,7 +16,15 @@ from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
 
-from config import OLLAMA_BASE_URL, SUPPORTED_FORMATS, WHISPER_MODEL
+import torch
+
+from config import (
+    OLLAMA_BASE_URL,
+    SUPPORTED_FORMATS,
+    WHISPER_COMPUTE_TYPE,
+    WHISPER_DEVICE,
+    WHISPER_MODEL,
+)
 from diarizer import DiarizationError, SpeakerDiarizer
 from llm_processor import LLMError, LLMProcessor
 from transcriber import TranscriptionEngine, TranscriptionError
@@ -182,6 +190,9 @@ def _render_sidebar() -> dict:
             height=120,
         )
 
+    st.sidebar.divider()
+    _render_vram_info()
+
     return {
         "model_size": model_size,
         "language": language,
@@ -192,6 +203,42 @@ def _render_sidebar() -> dict:
         "task": task,
         "custom_prompt": custom_prompt,
     }
+
+
+# ---------------------------------------------------------------------------
+# VRAM info widget
+# ---------------------------------------------------------------------------
+
+def _render_vram_info() -> None:
+    """Show GPU name and live VRAM usage as a progress bar in the sidebar."""
+    if not torch.cuda.is_available():
+        st.sidebar.info(
+            f"GPU: nicht verfügbar – läuft auf **CPU**\n\n"
+            f"compute_type: `{WHISPER_COMPUTE_TYPE}` (int8 empfohlen für CPU)"
+        )
+        return
+
+    props = torch.cuda.get_device_properties(0)
+    total_gb = props.total_memory / 1024**3
+    reserved_gb = torch.cuda.memory_reserved(0) / 1024**3
+    allocated_gb = torch.cuda.memory_allocated(0) / 1024**3
+    free_gb = total_gb - reserved_gb
+    used_pct = reserved_gb / total_gb if total_gb > 0 else 0.0
+
+    color = "normal"
+    if used_pct > 0.85:
+        color = "inverse"   # red bar
+    elif used_pct > 0.65:
+        color = "off"       # yellow-ish
+
+    st.sidebar.markdown(f"**GPU:** {props.name}")
+    st.sidebar.progress(
+        used_pct,
+        text=f"VRAM: {reserved_gb:.1f} GB reserviert / {total_gb:.1f} GB  ({free_gb:.1f} GB frei)",
+    )
+    st.sidebar.caption(
+        f"Allokiert: {allocated_gb:.2f} GB  ·  compute_type: `{WHISPER_COMPUTE_TYPE}`"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -213,8 +260,8 @@ def _run_pipeline(audio_path: Path, settings: dict) -> None:
         try:
             engine = TranscriptionEngine(
                 model_size=settings["model_size"],
-                device="cuda",
-                compute_type="float16",
+                device=WHISPER_DEVICE,
+                compute_type=WHISPER_COMPUTE_TYPE,
             )
             result = engine.transcribe(
                 audio_path,

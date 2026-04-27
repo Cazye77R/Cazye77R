@@ -16,7 +16,7 @@ import torch
 from faster_whisper import WhisperModel
 from faster_whisper.transcribe import Segment
 
-from config import WHISPER_COMPUTE_TYPE, WHISPER_DEVICE, WHISPER_MODEL
+from config import WHISPER_COMPUTE_TYPE, WHISPER_COMPUTE_TYPE_FALLBACK, WHISPER_DEVICE, WHISPER_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -45,22 +45,19 @@ class TranscriptionEngine:
         Raises:
             TranscriptionError: If the model cannot be loaded.
         """
-        self.device = device
         self.model_size = model_size
 
-        # Fall back to CPU when CUDA is requested but not available so the
-        # application stays usable on machines without a GPU.
+        # Resolve device: honour the caller's preference but silently fall
+        # back to CPU when CUDA is requested but the runtime has no GPU.
         if device == "cuda" and not torch.cuda.is_available():
             logger.warning("CUDA requested but not available – falling back to CPU.")
-            self.device = "cpu"
-            compute_type = "int8"
+            device = "cpu"
+            compute_type = WHISPER_COMPUTE_TYPE_FALLBACK
 
-        try:
-            logger.info("Loading Whisper model '%s' on %s (%s)…", model_size, self.device, compute_type)
-            self.model = WhisperModel(model_size, device=self.device, compute_type=compute_type)
-            logger.info("Model loaded successfully.")
-        except Exception as exc:
-            raise TranscriptionError(f"Failed to load Whisper model '{model_size}': {exc}") from exc
+        self.device = device
+        self.compute_type = compute_type
+
+        self.model = self._load_model(model_size, device, compute_type)
 
     # ------------------------------------------------------------------
     # Public API
@@ -148,11 +145,57 @@ class TranscriptionEngine:
         Call this before constructing SpeakerDiarizer on a 6 GB GPU – both
         models cannot coexist in VRAM at the same time.
         """
-        del self.model
-        self.model = None  # type: ignore[assignment]
+        if self.model is not None:
+            del self.model
+            self.model = None  # type: ignore[assignment]
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         logger.info("Whisper model unloaded.")
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _load_model(
+        model_size: str, device: str, compute_type: str
+    ) -> WhisperModel:
+        """
+        Load WhisperModel with automatic int8 retry on CUDA out-of-memory.
+
+        If the requested compute_type triggers a CUDA OOM (common with
+        float16 on 6 GB GPUs for large-v3), the cache is cleared and the
+        model is reloaded with int8 quantisation.
+        """
+        try:
+            logger.info("Loading Whisper '%s' on %s (%s)…", model_size, device, compute_type)
+            model = WhisperModel(model_size, device=device, compute_type=compute_type)
+            logger.info("Whisper model ready.")
+            return model
+        except RuntimeError as exc:
+            oom = "out of memory" in str(exc).lower()
+            if oom and device == "cuda" and compute_type != WHISPER_COMPUTE_TYPE_FALLBACK:
+                logger.warning(
+                    "CUDA OOM with compute_type='%s' – retrying with '%s'.",
+                    compute_type,
+                    WHISPER_COMPUTE_TYPE_FALLBACK,
+                )
+                torch.cuda.empty_cache()
+                try:
+                    model = WhisperModel(
+                        model_size,
+                        device=device,
+                        compute_type=WHISPER_COMPUTE_TYPE_FALLBACK,
+                    )
+                    logger.info("Whisper model ready (fallback compute_type).")
+                    return model
+                except Exception as inner:
+                    raise TranscriptionError(
+                        f"Whisper OOM even with '{WHISPER_COMPUTE_TYPE_FALLBACK}': {inner}"
+                    ) from inner
+            raise TranscriptionError(f"Failed to load Whisper model '{model_size}': {exc}") from exc
+        except Exception as exc:
+            raise TranscriptionError(f"Failed to load Whisper model '{model_size}': {exc}") from exc
 
     @staticmethod
     def format_timestamp(seconds: float) -> str:
