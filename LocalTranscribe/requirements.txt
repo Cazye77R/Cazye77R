@@ -1,0 +1,7 @@
+faster-whisper
+pyannote.audio
+streamlit
+python-dotenv
+requests
+torch
+torchaudio
