@@ -141,6 +141,19 @@ class TranscriptionEngine:
             "duration": info.duration,
         }
 
+    def unload(self) -> None:
+        """
+        Delete the model reference and free GPU memory.
+
+        Call this before constructing SpeakerDiarizer on a 6 GB GPU – both
+        models cannot coexist in VRAM at the same time.
+        """
+        del self.model
+        self.model = None  # type: ignore[assignment]
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("Whisper model unloaded.")
+
     @staticmethod
     def format_timestamp(seconds: float) -> str:
         """
