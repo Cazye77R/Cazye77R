@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import tempfile
+from datetime import date
 from pathlib import Path
 
 import streamlit as st
@@ -62,10 +63,38 @@ _LANGUAGES: dict[str, str] = {
 }
 
 _TASK_LABELS: dict[str, str] = {
-    "Zusammenfassung": "zusammenfassung",
-    "Themen-Sortierung": "themen",
-    "Meeting-Protokoll": "protokoll",
-    "Eigener Prompt": "custom",
+    "Zusammenfassung":      "zusammenfassung",
+    "Stichpunkte":          "stichpunkte",
+    "Themen-Sortierung":    "themen",
+    "Meeting-Protokoll":    "protokoll",
+    "Formeller Bericht":    "bericht",
+    "Maßnahmen & Aufgaben": "massnahmen",
+    "Q&A extrahieren":      "faq",
+    "Eigener Prompt":       "custom",
+}
+
+# One-liner shown as st.caption below the dropdown.
+_TASK_DESCRIPTIONS: dict[str, str] = {
+    "zusammenfassung": "Kurze Zusammenfassung der wichtigsten Punkte und Ergebnisse.",
+    "stichpunkte":     "Maximal 15 Kernaussagen als kompakte Stichpunktliste.",
+    "themen":          "Inhalte nach Themenbereichen sortiert und strukturiert.",
+    "protokoll":       "Formelles Meeting-Protokoll mit Teilnehmern, Themen und Entscheidungen.",
+    "bericht":         "Professioneller Bericht mit Zusammenfassung, Inhalten und Empfehlungen.",
+    "massnahmen":      "Alle Aufgaben, Verantwortlichkeiten und Fristen als Liste.",
+    "faq":             "Fragen und Antworten aus dem Gespräch als Q&A-Liste.",
+    "custom":          "Eigener Prompt – du bestimmst das Ausgabeformat.",
+}
+
+# Used in download filenames: <stem>_<suffix>_<date>.txt
+_TASK_FILE_SUFFIX: dict[str, str] = {
+    "zusammenfassung": "zusammenfassung",
+    "stichpunkte":     "stichpunkte",
+    "themen":          "themen",
+    "protokoll":       "protokoll",
+    "bericht":         "bericht",
+    "massnahmen":      "massnahmen",
+    "faq":             "faq",
+    "custom":          "analyse",
 }
 
 # Readable on both Streamlit light and dark themes.
@@ -179,10 +208,12 @@ def _render_sidebar() -> dict:
         )
 
     task_label: str = st.sidebar.selectbox(
-        "LLM-Aufgabe",
+        "Ausgabeformat",
         options=list(_TASK_LABELS.keys()),
+        help="Bestimmt, wie das Transkript vom LLM aufbereitet wird.",
     )  # type: ignore[assignment]
     task = _TASK_LABELS[task_label]
+    st.sidebar.caption(_TASK_DESCRIPTIONS[task])
 
     custom_prompt = ""
     if task == "custom":
@@ -422,8 +453,17 @@ def _render_llm_tab(llm_output: str, segments: list[dict], settings: dict) -> No
                 st.error(f"Fehler: {exc}")
 
 
-def _render_export_tab(segments: list[dict], meta: dict, llm_output: str) -> None:
+def task_label_for(task: str) -> str:
+    """Return the human-readable label for a task key."""
+    return next((lbl for lbl, key in _TASK_LABELS.items() if key == task), task)
+
+
+def _render_export_tab(
+    segments: list[dict], meta: dict, llm_output: str, task: str
+) -> None:
     stem = Path(meta.get("filename", "transkript")).stem
+    today = date.today().isoformat()              # "2024-01-15"
+    task_slug = _TASK_FILE_SUFFIX.get(task, "analyse")
 
     st.subheader("Transkript exportieren")
     col1, col2 = st.columns(2)
@@ -431,7 +471,7 @@ def _render_export_tab(segments: list[dict], meta: dict, llm_output: str) -> Non
     col1.download_button(
         label="📄 Transkript als .txt",
         data=LLMProcessor.format_transcript_for_llm(segments).encode("utf-8"),
-        file_name=f"{stem}_transkript.txt",
+        file_name=f"{stem}_transkript_{today}.txt",
         mime="text/plain",
         use_container_width=True,
     )
@@ -445,7 +485,7 @@ def _render_export_tab(segments: list[dict], meta: dict, llm_output: str) -> Non
     col2.download_button(
         label="📦 Transkript als .json",
         data=json.dumps(json_payload, ensure_ascii=False, indent=2).encode("utf-8"),
-        file_name=f"{stem}_transkript.json",
+        file_name=f"{stem}_transkript_{today}.json",
         mime="application/json",
         use_container_width=True,
     )
@@ -453,9 +493,9 @@ def _render_export_tab(segments: list[dict], meta: dict, llm_output: str) -> Non
     st.subheader("KI-Analyse exportieren")
     if llm_output:
         st.download_button(
-            label="📝 KI-Analyse als .txt",
+            label=f"📝 {task_label_for(task)} als .txt",
             data=llm_output.encode("utf-8"),
-            file_name=f"{stem}_analyse.txt",
+            file_name=f"{stem}_{task_slug}_{today}.txt",
             mime="text/plain",
         )
     else:
@@ -605,7 +645,7 @@ def main() -> None:
             _render_llm_tab(llm_output, segments, settings)
 
         with tab_export:
-            _render_export_tab(segments, meta, llm_output)
+            _render_export_tab(segments, meta, llm_output, settings["task"])
 
 
 if __name__ == "__main__":

@@ -17,7 +17,16 @@ from config import OLLAMA_BASE_URL
 
 logger = logging.getLogger(__name__)
 
-Task = Literal["zusammenfassung", "themen", "protokoll", "custom"]
+Task = Literal[
+    "zusammenfassung",
+    "themen",
+    "protokoll",
+    "bericht",
+    "massnahmen",
+    "faq",
+    "stichpunkte",
+    "custom",
+]
 
 _PROMPTS: dict[str, dict[str, str]] = {
     "zusammenfassung": {
@@ -40,6 +49,37 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "Erstelle ein Meeting-Protokoll aus dem folgenden Transkript. "
             "Gliedere es in: Teilnehmer, besprochene Themen, Entscheidungen, "
             "offene Punkte und nächste Schritte:\n\n{text}"
+        ),
+    },
+    "bericht": {
+        "system": "Du bist ein professioneller technischer Redakteur. Antworte auf Deutsch.",
+        "user": (
+            "Erstelle einen strukturierten Bericht aus dem folgenden Transkript. "
+            "Gliedere ihn in: 1. Zusammenfassung, 2. Detaillierte Inhalte, "
+            "3. Ergebnisse/Erkenntnisse, 4. Empfehlungen (falls ableitbar). "
+            "Schreibe in sachlichem, professionellem Stil:\n\n{text}"
+        ),
+    },
+    "massnahmen": {
+        "system": "Du bist ein Projektmanagement-Assistent. Antworte auf Deutsch.",
+        "user": (
+            "Extrahiere alle Aufgaben, Maßnahmen, Entscheidungen und Verantwortlichkeiten "
+            "aus dem folgenden Transkript. Formatiere als Liste mit: "
+            "Aufgabe, Verantwortlich (Sprecher), Frist (falls genannt):\n\n{text}"
+        ),
+    },
+    "faq": {
+        "system": "Du bist ein Analyst. Antworte auf Deutsch.",
+        "user": (
+            "Extrahiere alle Fragen und die dazugehörigen Antworten aus dem folgenden "
+            "Transkript. Formatiere als Q&A-Liste:\n\n{text}"
+        ),
+    },
+    "stichpunkte": {
+        "system": "Du bist ein präziser Assistent. Antworte auf Deutsch.",
+        "user": (
+            "Fasse das folgende Transkript als kompakte Stichpunktliste zusammen. "
+            "Maximal 15 Stichpunkte, nur die Kernaussagen:\n\n{text}"
         ),
     },
 }

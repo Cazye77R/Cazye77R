@@ -232,10 +232,11 @@ try:
     check("format without speaker: starts with [HH:MM:SS]", txt2.startswith("[00:00:00]"))
     check("format without speaker: no badge",               "Sprecher" not in txt2)
 
-    # _build_prompts – built-in tasks
+    # _build_prompts – all built-in tasks
     proc = LLMProcessor.__new__(LLMProcessor)
     proc.base_url = "http://localhost:11434"
-    for task in ("zusammenfassung", "themen", "protokoll"):
+    all_tasks = ("zusammenfassung", "themen", "protokoll", "bericht", "massnahmen", "faq", "stichpunkte")
+    for task in all_tasks:
         sp, up = proc._build_prompts("TRANSCRIPT", task, None)  # type: ignore[arg-type]
         check(f"task '{task}': non-empty system prompt",    bool(sp))
         check(f"task '{task}': transcript in user prompt",  "TRANSCRIPT" in up)
