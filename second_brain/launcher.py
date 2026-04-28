@@ -57,10 +57,15 @@ def main():
     watcher.start_watching(VAULT_DIR, callback=_on_vault_event)
     print("   ✔ Vault-Watcher läuft im Hintergrund.")
 
-    # --- Ollama ---
+    # --- Ollama + auto-indexing ---
     print("\n🤖 Prüfe Ollama-Verbindung...")
     if check_ollama():
         print("   ✔ Ollama läuft auf http://localhost:11434")
+        try:
+            from ai.embedder import ensure_indexed_from_vault
+            ensure_indexed_from_vault(VAULT_DIR)
+        except Exception as exc:
+            print(f"   ⚠ Auto-Indexierung fehlgeschlagen: {exc}")
     else:
         print("   ⚠ Ollama nicht erreichbar – KI-Funktionen sind eingeschränkt.")
         print("     Starte Ollama und führe 'ollama pull llama3' aus, um KI zu aktivieren.")

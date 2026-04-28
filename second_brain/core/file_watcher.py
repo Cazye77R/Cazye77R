@@ -20,14 +20,14 @@ from core.markdown_parser import parse_note
 _DEBOUNCE_SECONDS = 1.0
 
 
-def _try_embed(filename: str, content: str) -> None:
+def _try_embed(note_dict: dict) -> None:
     try:
         from ai.embedder import embed_note  # type: ignore[import]
-        embed_note(filename, content)
+        embed_note(note_dict)
     except ImportError:
         pass
     except Exception as exc:
-        print(f"  ⚠ Embedding fehlgeschlagen ({filename}): {exc}")
+        print(f"  ⚠ Embedding fehlgeschlagen ({note_dict.get('filename', '?')}): {exc}")
 
 
 def _try_remove_embedding(filename: str) -> None:
@@ -107,7 +107,7 @@ class _Handler(FileSystemEventHandler):
         try:
             note_dict = parse_note(path)
             upsert_note(note_dict)
-            _try_embed(note_dict["filename"], note_dict["content"])
+            _try_embed(note_dict)
             if self._callback:
                 self._callback("upsert", note_dict["filename"])
         except Exception as exc:
