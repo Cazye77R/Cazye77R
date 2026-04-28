@@ -124,6 +124,18 @@ with st.sidebar:
     )
     st.divider()
 
+    # Navigation
+    st.markdown("**🗺️ Navigation**")
+    st.page_link("streamlit_app.py",    label="🏠 Startseite")
+    st.page_link("pages/01_Dashboard.py", label="📊 Dashboard")
+    st.page_link("pages/02_Notes.py",    label="📝 Notizen")
+    st.page_link("pages/03_Search.py",   label="🔍 Suche")
+    st.page_link("pages/04_Chat.py",     label="💬 Chat")
+    st.page_link("pages/05_Graph.py",    label="🕸️ Graph")
+    st.page_link("pages/06_Settings.py", label="⚙️ Einstellungen")
+
+    st.divider()
+
     try:
         stats = get_vault_stats()
         st.markdown("**📊 Vault**")
@@ -143,6 +155,18 @@ with st.sidebar:
         ok = OllamaClient().is_available()
         icon, label = ("🟢", "Ollama verbunden") if ok else ("🔴", "Ollama offline")
         st.markdown(f"{icon} <small style='color:#a6adc8;'>{label}</small>", unsafe_allow_html=True)
+    except Exception:
+        pass
+
+    # Vault path footer
+    try:
+        from core.config import VAULT_DIR
+        st.markdown(
+            f"<div style='margin-top:16px;padding-top:12px;border-top:1px solid #313244;'>"
+            f"<p style='color:#45475a;font-size:10px;word-break:break-all;margin:0;'>"
+            f"📁 {VAULT_DIR}</p></div>",
+            unsafe_allow_html=True,
+        )
     except Exception:
         pass
 
@@ -169,17 +193,42 @@ with col_b:
     st.page_link("pages/02_Notes.py", label="Notizen öffnen →", icon="📝")
 
 with col_c:
-    st.markdown("### 🤖 KI-Status")
-    try:
-        from ai.ollama_client import OllamaClient
-        client = OllamaClient()
-        if client.is_available():
-            models = client.list_models()
-            st.success(f"Ollama aktiv · {len(models)} Modell(e)")
-            for m in models[:4]:
-                st.markdown(f"- `{m}`")
-        else:
-            st.warning("Ollama nicht erreichbar.")
-            st.markdown("Starte Ollama mit:\n```\nollama serve\n```")
-    except Exception as exc:
-        st.error(f"Verbindungsfehler: {exc}")
+    st.markdown("### 🔍 Suche")
+    st.markdown("Semantisch, Volltext oder hybrid über alle Notizen suchen.")
+    st.page_link("pages/03_Search.py", label="Suche öffnen →", icon="🔍")
+
+st.divider()
+
+col_d, col_e, col_f = st.columns(3)
+
+with col_d:
+    st.markdown("### 💬 Chat")
+    st.markdown("Stelle Fragen zu deinem Vault – der Assistent antwortet kontextbezogen.")
+    st.page_link("pages/04_Chat.py", label="Chat öffnen →", icon="💬")
+
+with col_e:
+    st.markdown("### 🕸️ Wissensgraph")
+    st.markdown("Visualisiere Verbindungen zwischen deinen Notizen interaktiv.")
+    st.page_link("pages/05_Graph.py", label="Graph öffnen →", icon="🕸️")
+
+with col_f:
+    st.markdown("### ⚙️ Einstellungen")
+    st.markdown("Vault-Pfad, Ollama-Verbindung, Reindexierung und Backup.")
+    st.page_link("pages/06_Settings.py", label="Einstellungen öffnen →", icon="⚙️")
+
+st.divider()
+st.markdown("### 🤖 KI-Status")
+try:
+    from ai.ollama_client import OllamaClient
+    client = OllamaClient()
+    if client.is_available():
+        models = client.list_models()
+        st.success(f"Ollama aktiv · {len(models)} Modell(e)")
+        mcols = st.columns(min(len(models), 4))
+        for i, m in enumerate(models[:4]):
+            mcols[i].markdown(f"`{m}`")
+    else:
+        st.warning("Ollama nicht erreichbar.")
+        st.markdown("Starte Ollama mit:\n```\nollama serve\n```")
+except Exception as exc:
+    st.error(f"Verbindungsfehler: {exc}")
