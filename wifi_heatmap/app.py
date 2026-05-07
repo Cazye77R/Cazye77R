@@ -152,6 +152,9 @@ class MainWindow(QMainWindow):
         self._setup_menubar()
         self._setup_central_widget()
         self._setup_statusbar()
+        self._canvas_widget.zoom_changed.connect(self._on_zoom_changed)
+        self._floor_tab_bar.tab_bar.currentChanged.connect(self._canvas_widget.load_floor)
+        self._canvas_widget.load_floor(0)
 
     # ------------------------------------------------------------------
     # Menu bar
@@ -251,9 +254,16 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _setup_statusbar(self) -> None:
+        self._zoom_label = QLabel("Zoom: 100%")
+        self._zoom_label.setStyleSheet("padding: 0 8px; color: #9090a0;")
+        self.statusBar().addWidget(self._zoom_label)
+
         self._status_label = QLabel("SSID: — | Signal: — | Band: —")
         self._status_label.setStyleSheet("padding: 0 8px;")
         self.statusBar().addPermanentWidget(self._status_label)
+
+    def _on_zoom_changed(self, percent: float) -> None:
+        self._zoom_label.setText(f"Zoom: {percent:.0f}%")
 
     def update_status(
         self,
