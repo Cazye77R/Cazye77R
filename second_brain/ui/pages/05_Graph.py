@@ -11,7 +11,7 @@ if str(_ROOT) not in sys.path:
 import streamlit as st
 import streamlit.components.v1 as components
 
-from ui.app_state import get_vault_manager, init_session_state
+from ui.app_state import get_all_tags_cached, get_vault_manager, init_session_state
 
 init_session_state()
 
@@ -96,20 +96,33 @@ with ctrl3:
 
 st.divider()
 
-# ── Build graph + render HTML ─────────────────────────────────────────────────
-with st.spinner("Baue Graphen…"):
-    graph = _build_graph(notes)
+# ── Build graph with session-state cache ──────────────────────────────────────
+# Cache key encodes all settings that affect the graph rendering.
+# The key includes note count + last-modified proxy so stale HTML is
+# never shown after vault changes.
+from ui.components.graph_view import build_pyvis_html, legend_html, build_tag_color_map
 
-    from ui.components.graph_view import build_pyvis_html, legend_html, build_tag_color_map
+_cache_key = f"{len(notes)}|{min_connections}|{highlight_tag}|{show_orphans}"
 
-    tag_color_map = build_tag_color_map(notes)
-    html = build_pyvis_html(
-        notes=notes,
-        graph=graph,
-        min_connections=min_connections,
-        highlight_tag=hl,
-        show_orphans=show_orphans,
-    )
+if st.session_state.get("_graph_cache_key") != _cache_key:
+    with st.spinner("Baue Graphen…"):
+        graph = _build_graph(notes)
+        tag_color_map = build_tag_color_map(notes)
+        html = build_pyvis_html(
+            notes=notes,
+            graph=graph,
+            min_connections=min_connections,
+            highlight_tag=hl,
+            show_orphans=show_orphans,
+        )
+        st.session_state["_graph_cache_key"] = _cache_key
+        st.session_state["_graph_html"] = html
+        st.session_state["_graph_obj"] = graph
+        st.session_state["_graph_tag_color_map"] = tag_color_map
+else:
+    html = st.session_state["_graph_html"]
+    graph = st.session_state["_graph_obj"]
+    tag_color_map = st.session_state.get("_graph_tag_color_map", {})
 
 # Tag color legend
 if tag_color_map:
@@ -130,7 +143,6 @@ st.sidebar.metric("Isolierte Knoten", orphan_count)
 
 st.sidebar.divider()
 
-# Most connected
 from core.graph_engine import NoteGraph as _NG
 _ng_tmp = _NG()
 _ng_tmp.graph = graph
@@ -147,7 +159,6 @@ if top:
 
 st.sidebar.divider()
 
-# Node search / click emulation
 st.sidebar.markdown("**🔎 Knoten suchen**")
 node_stems = sorted(graph.nodes())
 selected_node = st.sidebar.selectbox(

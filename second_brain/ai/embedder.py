@@ -9,8 +9,9 @@ import chromadb
 from core.config import CHROMA_DIR
 
 COLLECTION_NAME = "second_brain_notes"
-_CHUNK_WORDS = 500      # words per chunk for large notes
+_CHUNK_WORDS = 500       # words per chunk for large notes
 _CHUNK_THRESHOLD = 2000  # notes with more words than this get chunked
+_BATCH_SIZE = 50         # max notes embedded in one batch call
 
 
 class NoteEmbedder:
@@ -72,14 +73,31 @@ class NoteEmbedder:
 
         self._col.add(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
 
-    def embed_all_notes(self, notes_list: list[dict[str, Any]]) -> None:
+    def embed_all_notes(
+        self,
+        notes_list: list[dict[str, Any]],
+        progress_callback: Any = None,
+    ) -> None:
+        """Embed notes in batches of _BATCH_SIZE.
+
+        progress_callback(done: int, total: int) is called after each note
+        so callers can update a UI progress bar.
+        """
         total = len(notes_list)
-        for i, note in enumerate(notes_list, 1):
-            print(f"Embedding {i}/{total}: {note.get('title', note['filename'])}")
-            try:
-                self.embed_note(note)
-            except Exception as exc:
-                print(f"  ⚠ Embedding fehlgeschlagen ({note['filename']}): {exc}")
+        for batch_start in range(0, total, _BATCH_SIZE):
+            batch = notes_list[batch_start : batch_start + _BATCH_SIZE]
+            for j, note in enumerate(batch):
+                done = batch_start + j + 1
+                print(f"Embedding {done}/{total}: {note.get('title', note['filename'])}")
+                try:
+                    self.embed_note(note)
+                except Exception as exc:
+                    print(f"  ⚠ Embedding fehlgeschlagen ({note['filename']}): {exc}")
+                if progress_callback:
+                    try:
+                        progress_callback(done, total)
+                    except Exception:
+                        pass
 
     def delete_embedding(self, filename: str) -> None:
         try:
@@ -135,7 +153,10 @@ def delete_embedding(filename: str) -> None:
     _get_embedder().delete_embedding(filename)
 
 
-def ensure_indexed_from_vault(vault_path: str | Path) -> None:
+def ensure_indexed_from_vault(
+    vault_path: str | Path,
+    progress_callback: Any = None,
+) -> None:
     """Auto-index all vault notes if ChromaDB collection is empty."""
     embedder = _get_embedder()
     if embedder.collection_count() > 0:
@@ -144,5 +165,5 @@ def ensure_indexed_from_vault(vault_path: str | Path) -> None:
     notes = VaultManager(vault_path).get_all_notes()
     if not notes:
         return
-    print(f"   🔍 ChromaDB leer – indexiere {len(notes)} Notizen...")
-    embedder.embed_all_notes(notes)
+    print(f"   🔍 ChromaDB leer – indexiere {len(notes)} Notizen (Batch-Größe {_BATCH_SIZE})…")
+    embedder.embed_all_notes(notes, progress_callback=progress_callback)

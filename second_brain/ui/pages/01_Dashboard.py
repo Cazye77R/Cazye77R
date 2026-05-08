@@ -15,10 +15,12 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from ui.app_state import (
+    get_all_tags_cached,
     get_link_suggester,
     get_vault_manager,
     get_vault_stats,
     init_session_state,
+    render_ollama_warning,
 )
 from ui.components.note_card import note_card_html
 
@@ -163,6 +165,9 @@ st.markdown(
     f"<p style='color:#6c7086;'>{datetime.now().strftime('%A, %d. %B %Y')}</p>",
     unsafe_allow_html=True,
 )
+
+render_ollama_warning()
+
 st.divider()
 
 # Metric row
@@ -170,6 +175,52 @@ try:
     stats = get_vault_stats()
 except Exception:
     stats = {"total_notes": 0, "total_words": 0, "total_tags": 0, "total_links": 0}
+
+# ── Empty-vault onboarding ────────────────────────────────────────────────────
+if stats.get("total_notes", 0) == 0:
+    st.markdown(
+        '<div style="background:#2a2a3e;border:2px dashed #45475a;border-radius:12px;'
+        'padding:40px;text-align:center;margin:20px 0;">'
+        '<div style="font-size:56px;margin-bottom:12px;">🧠</div>'
+        '<h2 style="color:#cdd6f4;margin-bottom:8px;">Willkommen bei SecondBrain!</h2>'
+        '<p style="color:#a6adc8;max-width:480px;margin:0 auto 20px;">Dein Vault ist noch leer. '
+        'Erstelle deine erste Notiz oder importiere bestehende Markdown-Dateien.</p>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    ob1, ob2, ob3 = st.columns(3)
+    with ob1:
+        st.markdown(
+            '<div style="background:#313244;border-radius:8px;padding:16px;text-align:center;">'
+            '<div style="font-size:28px;">📝</div>'
+            '<p style="color:#cdd6f4;font-weight:600;margin:8px 0 4px;">1. Notiz erstellen</p>'
+            '<p style="color:#a6adc8;font-size:12px;">Gehe zu Notizen → Neue Notiz</p>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    with ob2:
+        st.markdown(
+            '<div style="background:#313244;border-radius:8px;padding:16px;text-align:center;">'
+            '<div style="font-size:28px;">🤖</div>'
+            '<p style="color:#cdd6f4;font-weight:600;margin:8px 0 4px;">2. Ollama starten</p>'
+            '<p style="color:#a6adc8;font-size:12px;"><code>ollama serve</code><br>'
+            '<code>ollama pull llama3</code></p>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    with ob3:
+        st.markdown(
+            '<div style="background:#313244;border-radius:8px;padding:16px;text-align:center;">'
+            '<div style="font-size:28px;">⚙️</div>'
+            '<p style="color:#cdd6f4;font-weight:600;margin:8px 0 4px;">3. Vault indexieren</p>'
+            '<p style="color:#a6adc8;font-size:12px;">Einstellungen → Neu indexieren</p>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("📝 Erste Notiz erstellen", type="primary"):
+        st.switch_page("pages/02_Notes.py")
+    st.stop()
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("📝 Notizen", stats.get("total_notes", 0))
@@ -200,11 +251,7 @@ with col_main:
 
 with col_right:
     st.markdown("### 🏷️ Tag-Cloud")
-    try:
-        from core.database import get_all_tags
-        tags = get_all_tags()
-    except Exception:
-        tags = []
+    tags = get_all_tags_cached()
     _render_tag_cloud(tags)
 
     st.divider()

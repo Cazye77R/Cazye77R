@@ -15,7 +15,9 @@ from ui.app_state import (
     get_note_assistant,
     get_vault_manager,
     init_session_state,
+    invalidate_data_caches,
     refresh_vault_stats,
+    render_ollama_warning,
 )
 from ui.components.note_card import tag_badge
 
@@ -43,6 +45,7 @@ def _new_note_dialog() -> None:
                     note = vm.create_note(title.strip(), content, tags)
                     st.session_state["current_note"] = note["filename"]
                     refresh_vault_stats()
+                    st.toast(f"Notiz \"{title.strip()}\" erstellt!", icon="✅")
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Fehler: {exc}")
@@ -147,13 +150,29 @@ def _render_note_editor(note: dict) -> None:
     filename = note["filename"]
     content = note.get("content", "")
 
+    # Keyboard shortcut hint
+    st.markdown(
+        "<p style='color:#6c7086;font-size:11px;margin-bottom:4px;'>"
+        "💾 Tipp: Klicke <b>Speichern</b> oder drücke <b>Ctrl+Enter</b> im Textfeld</p>",
+        unsafe_allow_html=True,
+    )
+
     new_content = st.text_area(
         "Inhalt bearbeiten",
         value=content,
-        height=500,
+        height=480,
         key=f"editor_{filename}",
         label_visibility="collapsed",
     )
+
+    # Dirty tracking – detect unsaved changes
+    saved_content = st.session_state.get("_editor_saved_content", content)
+    is_dirty = new_content != saved_content
+    if is_dirty:
+        st.markdown(
+            "<p style='color:#f9e2af;font-size:11px;margin:0;'>⚠️ Ungespeicherte Änderungen</p>",
+            unsafe_allow_html=True,
+        )
 
     save_col, cancel_col, _ = st.columns([1, 1, 4])
     with save_col:
@@ -161,19 +180,23 @@ def _render_note_editor(note: dict) -> None:
             try:
                 vm = get_vault_manager()
                 vm.update_note(filename, new_content)
-                from core.database import upsert_note, init_db
+                from core.database import upsert_note
                 updated = vm.get_note(filename)
                 if updated:
                     upsert_note(updated)
+                invalidate_data_caches()
                 refresh_vault_stats()
                 st.session_state["note_edit_mode"] = False
-                st.success("Gespeichert!")
+                st.session_state["_editor_saved_content"] = new_content
+                st.session_state["_editor_dirty"] = False
+                st.toast("Gespeichert!", icon="💾")
                 st.rerun()
             except Exception as exc:
                 st.error(f"Speicherfehler: {exc}")
     with cancel_col:
         if st.button("✖ Abbrechen", use_container_width=True):
             st.session_state["note_edit_mode"] = False
+            st.session_state["_editor_dirty"] = False
             st.rerun()
 
 
@@ -254,6 +277,7 @@ def _render_ai_panel(note: dict) -> None:
 # ---------------------------------------------------------------------------
 
 st.markdown("<h1>📝 Notizen</h1>", unsafe_allow_html=True)
+render_ollama_warning()
 
 vm = get_vault_manager()
 
@@ -300,6 +324,8 @@ with col_list:
                 st.session_state["ai_tags"] = []
                 st.session_state["ai_links"] = []
                 st.session_state["ai_structure"] = ""
+                st.session_state["_editor_saved_content"] = note.get("content", "")
+                st.session_state["_editor_dirty"] = False
                 st.rerun()
 
 # ── Note content (center) ─────────────────────────────────────────────────────
@@ -338,15 +364,18 @@ with col_content:
                 yes_col, no_col, _ = st.columns([1, 1, 4])
                 with yes_col:
                     if st.button("✅ Ja, löschen", type="primary"):
+                        deleted_title = note.get("title", current_filename)
                         vm.delete_note(current_filename)
                         try:
                             from core.database import delete_note_from_db
                             delete_note_from_db(current_filename)
                         except Exception:
                             pass
+                        invalidate_data_caches()
                         refresh_vault_stats()
                         st.session_state["current_note"] = None
                         st.session_state["_confirm_delete"] = False
+                        st.toast(f'"{deleted_title}" gelöscht', icon="🗑️")
                         st.rerun()
                 with no_col:
                     if st.button("❌ Abbrechen"):

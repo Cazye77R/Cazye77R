@@ -106,7 +106,7 @@ hr { border-color:#313244 !important; }
 # ---------------------------------------------------------------------------
 # Session state + resources
 # ---------------------------------------------------------------------------
-from ui.app_state import init_session_state, get_vault_stats
+from ui.app_state import init_session_state, get_vault_stats, get_ollama_status
 
 init_session_state()
 
@@ -150,13 +150,21 @@ with st.sidebar:
 
     st.divider()
 
-    try:
-        from ai.ollama_client import OllamaClient
-        ok = OllamaClient().is_available()
-        icon, label = ("🟢", "Ollama verbunden") if ok else ("🔴", "Ollama offline")
-        st.markdown(f"{icon} <small style='color:#a6adc8;'>{label}</small>", unsafe_allow_html=True)
-    except Exception:
-        pass
+    ollama_ok = get_ollama_status()
+    if ollama_ok:
+        st.markdown(
+            "🟢 <small style='color:#a6e3a1;'>Ollama verbunden</small>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div style="background:#3d1a1a;border:1px solid #f38ba8;border-radius:8px;'
+            'padding:8px 12px;margin-top:4px;">'
+            '<span style="color:#f38ba8;font-size:12px;">⚠️ <b>Ollama offline</b></span><br>'
+            '<span style="color:#a6adc8;font-size:11px;">KI-Funktionen deaktiviert.<br>'
+            'Starte: <code>ollama serve</code></span></div>',
+            unsafe_allow_html=True,
+        )
 
     # Vault path footer
     try:

@@ -10,7 +10,13 @@ if str(_ROOT) not in sys.path:
 
 import streamlit as st
 
-from ui.app_state import get_vault_manager, get_vault_stats, init_session_state, refresh_vault_stats
+from ui.app_state import (
+    get_vault_manager,
+    get_vault_stats,
+    init_session_state,
+    invalidate_data_caches,
+    refresh_vault_stats,
+)
 
 init_session_state()
 
@@ -44,14 +50,32 @@ def _reindex_vault(vault_path: Path) -> None:
         full_sync(vault_path)
         progress.progress(40, text="Datenbank synchronisiert…")
 
-        status.info("Indiziere Embeddings…")
-        from ai.embedder import ensure_indexed_from_vault
-        ensure_indexed_from_vault(vault_path)
-        progress.progress(90, text="Embeddings erstellt…")
+        status.info("Indiziere Embeddings (max 50 pro Batch)…")
+        from ai.embedder import NoteEmbedder
+        from core.vault_manager import VaultManager
 
+        vm_local = VaultManager(vault_path)
+        notes_local = vm_local.get_all_notes()
+        total = max(len(notes_local), 1)
+
+        emb = NoteEmbedder()
+        emb.reindex_all.__func__  # ensure method exists
+        emb._chroma.delete_collection(emb._collection_name)
+        emb._col = emb._chroma.get_or_create_collection(
+            name=emb._collection_name, metadata={"hnsw:space": "cosine"}
+        )
+
+        def _prog(done: int, tot: int) -> None:
+            pct = 40 + int(50 * done / tot)
+            progress.progress(pct, text=f"Embedding {done}/{tot}…")
+
+        emb.embed_all_notes(notes_local, progress_callback=_prog)
+
+        invalidate_data_caches()
         refresh_vault_stats()
         progress.progress(100, text="Fertig!")
-        status.success("Vault wurde erfolgreich neu indiziert.")
+        status.success(f"Vault neu indiziert – {len(notes_local)} Notizen.")
+        st.toast("Vault neu indiziert!", icon="✅")
     except Exception as exc:
         progress.empty()
         status.error(f"Fehler beim Reindexieren: {exc}")
@@ -104,13 +128,16 @@ st.divider()
 _section("📁 Vault-Pfad")
 
 from core.config import VAULT_DIR
+from core.config_store import get as cfg_get, set as cfg_set
+
+_saved_vault = cfg_get("vault_dir", str(VAULT_DIR))
 vault_input = st.text_input(
     "Vault-Verzeichnis",
-    value=str(VAULT_DIR),
+    value=_saved_vault,
     label_visibility="collapsed",
     key="settings_vault_path",
 )
-vcol1, vcol2, _ = st.columns([1, 1, 4])
+vcol1, vcol2, vcol3, _ = st.columns([1, 1, 1, 2])
 with vcol1:
     if st.button("✅ Prüfen", use_container_width=True):
         vp = Path(vault_input)
@@ -120,7 +147,15 @@ with vcol1:
         else:
             st.error("Verzeichnis nicht gefunden.")
 with vcol2:
-    if st.button("📂 Im Explorer öffnen", use_container_width=True):
+    if st.button("💾 Speichern", use_container_width=True):
+        vp = Path(vault_input)
+        if vp.exists() and vp.is_dir():
+            cfg_set("vault_dir", str(vp))
+            st.toast("Vault-Pfad gespeichert! Neustart erforderlich.", icon="💾")
+        else:
+            st.error("Verzeichnis nicht gefunden – Pfad nicht gespeichert.")
+with vcol3:
+    if st.button("📂 Öffnen", use_container_width=True):
         import subprocess, platform
         p = Path(vault_input)
         if platform.system() == "Darwin":
