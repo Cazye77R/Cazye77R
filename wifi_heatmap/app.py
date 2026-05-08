@@ -156,6 +156,13 @@ class MainWindow(QMainWindow):
         self._floor_tab_bar.tab_bar.currentChanged.connect(self._canvas_widget.load_floor)
         self._canvas_widget.load_floor(0)
 
+        tb = self._toolbar_widget
+        cv = self._canvas_widget
+        tb.mode_changed.connect(cv.set_mode)
+        tb.snap_points_changed.connect(cv.set_snap_points)
+        tb.grid_snap_changed.connect(cv.set_snap_grid)
+        tb.grid_size_changed.connect(cv.set_grid_size)
+
     # ------------------------------------------------------------------
     # Menu bar
     # ------------------------------------------------------------------
