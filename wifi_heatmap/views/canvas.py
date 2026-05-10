@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from models.floor import Floor
+from utils.snap import SnapType, snap_point
 
 
 class CanvasMode(enum.Enum):
@@ -55,29 +56,33 @@ _ZOOM_MIN:  float = 0.10
 _ZOOM_MAX:  float = 5.00
 _ZOOM_STEP: float = 1.15
 
-# Z-layer ordering
-_Z_BACKGROUND:   int = 0
-_Z_GRID:         int = 1
-_Z_ELEMENTS:     int = 10
-_Z_PREVIEW:      int = 20
-_Z_MEASUREMENTS: int = 100
+# Z-layer ordering — background < grid < elements < preview < snap < measurements
+_Z_BACKGROUND:    int = 0
+_Z_GRID:          int = 1
+_Z_ELEMENTS:      int = 10
+_Z_PREVIEW:       int = 20
+_Z_SNAP_INDICATOR: int = 30
+_Z_MEASUREMENTS:  int = 100
 
 _ElementItem = Union["_RectElement", "_LineElement"]
 
+# Modes where snap indicator is shown on hover
+_DRAW_MODES = {CanvasMode.RECT, CanvasMode.LINE}
+
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Scene items
+# Persistent scene items
 # ──────────────────────────────────────────────────────────────────────────────
 
 class _GridItem(QGraphicsItem):
-    """Infinite cosmetic grid — Z=1, above bg image, below elements."""
+    """Infinite cosmetic grid — always 1 px wide regardless of zoom."""
 
     def __init__(self, grid_size: int = 20) -> None:
         super().__init__()
         self._grid_size = grid_size
-        self._pen = QPen(QColor(55, 55, 75), 0)   # cosmetic: 1 px at all zooms
+        self._pen = QPen(QColor(55, 55, 75), 0)
         self.setZValue(_Z_GRID)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable,   False)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable,    False)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
 
     def set_grid_size(self, size: int) -> None:
@@ -88,18 +93,14 @@ class _GridItem(QGraphicsItem):
         return QRectF(-100_000.0, -100_000.0, 200_000.0, 200_000.0)
 
     def paint(
-        self,
-        painter: QPainter,
-        option: QStyleOptionGraphicsItem,
+        self, painter: QPainter, option: QStyleOptionGraphicsItem,
         widget: QWidget | None = None,
     ) -> None:
         rect = option.exposedRect
         gs   = float(self._grid_size)
         painter.setPen(self._pen)
-
         left = int(rect.left()  / gs) * gs
         top  = int(rect.top()   / gs) * gs
-
         x = left
         while x <= rect.right():
             painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
@@ -109,6 +110,83 @@ class _GridItem(QGraphicsItem):
             painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
             y += gs
 
+
+class _SnapIndicator(QGraphicsItem):
+    """
+    Small icon rendered at the current snap target during drawing.
+
+    Uses ItemIgnoresTransformations so the indicator is always the same
+    screen size regardless of zoom level.  Its position is set in scene
+    coordinates; rendering is in device (screen) pixels.
+
+    Appearance by snap type
+    -----------------------
+    "point"  — cyan filled circle + crosshair  (specific point locked)
+    "edge"   — green filled circle             (sliding along an edge)
+    "grid"   — yellow small dot                (nearest grid crossing)
+    """
+
+    _TYPE_COLORS: dict[str, QColor] = {
+        "point": QColor("#4fc3f7"),
+        "edge":  QColor(100, 220, 120),
+        "grid":  QColor(220, 200, 60),
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setZValue(_Z_SNAP_INDICATOR)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable,    False)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
+        self.setVisible(False)
+        self._snap_type: SnapType = None
+
+    def update_snap(self, scene_pos: QPointF, snap_type: SnapType) -> None:
+        if snap_type is None:
+            self.setVisible(False)
+            return
+        self._snap_type = snap_type
+        self.setPos(scene_pos)
+        self.setVisible(True)
+        self.update()
+
+    def boundingRect(self) -> QRectF:
+        # Screen-pixel bounding rect (ItemIgnoresTransformations)
+        return QRectF(-9.0, -9.0, 18.0, 18.0)
+
+    def paint(
+        self, painter: QPainter, option: QStyleOptionGraphicsItem,
+        widget: QWidget | None = None,
+    ) -> None:
+        color = self._TYPE_COLORS.get(self._snap_type or "", QColor("#4fc3f7"))
+        fill  = QColor(color)
+        fill.setAlpha(160)
+
+        if self._snap_type == "point":
+            # Filled circle (r=4) + crosshair lines (±7 px)
+            painter.setPen(QPen(color, 1.5))
+            painter.setBrush(QBrush(fill))
+            painter.drawEllipse(QRectF(-4.0, -4.0, 8.0, 8.0))
+            painter.setPen(QPen(color, 1.0))
+            painter.drawLine(QPointF(-8.0,  0.0), QPointF(8.0, 0.0))
+            painter.drawLine(QPointF( 0.0, -8.0), QPointF(0.0, 8.0))
+
+        elif self._snap_type == "edge":
+            # Hollow circle (r=5) — shows the cursor can slide along the edge
+            painter.setPen(QPen(color, 1.5))
+            painter.setBrush(QBrush(fill))
+            painter.drawEllipse(QRectF(-5.0, -5.0, 10.0, 10.0))
+
+        else:  # "grid"
+            # Small filled square
+            painter.setPen(QPen(color, 1.0))
+            painter.setBrush(QBrush(fill))
+            painter.drawRect(QRectF(-3.0, -3.0, 6.0, 6.0))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Element items
+# ──────────────────────────────────────────────────────────────────────────────
 
 class _RectElement(QGraphicsRectItem):
     """Drawn rectangle — white 2 px outline, semi-transparent fill."""
@@ -129,9 +207,7 @@ class _RectElement(QGraphicsRectItem):
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable,    on)
 
     def paint(
-        self,
-        painter: QPainter,
-        option: QStyleOptionGraphicsItem,
+        self, painter: QPainter, option: QStyleOptionGraphicsItem,
         widget: QWidget | None = None,
     ) -> None:
         r = self.rect()
@@ -139,10 +215,9 @@ class _RectElement(QGraphicsRectItem):
             painter.setPen(QPen(QColor("#4fc3f7"), 2, Qt.PenStyle.DashLine))
             painter.setBrush(QBrush(QColor(79, 195, 247, 30)))
             painter.drawRect(r)
-            # Corner handles
-            handle_pen = QPen(QColor("#4fc3f7"), 6, Qt.PenStyle.SolidLine,
-                              Qt.PenCapStyle.RoundCap)
-            painter.setPen(handle_pen)
+            hdl = QPen(QColor("#4fc3f7"), 6, Qt.PenStyle.SolidLine,
+                       Qt.PenCapStyle.RoundCap)
+            painter.setPen(hdl)
             for pt in (r.topLeft(), r.topRight(), r.bottomLeft(), r.bottomRight()):
                 painter.drawPoint(pt)
         else:
@@ -152,7 +227,7 @@ class _RectElement(QGraphicsRectItem):
 
 
 class _LineElement(QGraphicsLineItem):
-    """Drawn line — white 3 px."""
+    """Drawn line — white 3 px; 12 px hit area via custom shape()."""
 
     def __init__(self, dx: float, dy: float, elem_id: str) -> None:
         super().__init__(0.0, 0.0, dx, dy)
@@ -180,7 +255,6 @@ class _LineElement(QGraphicsLineItem):
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable,    on)
 
     def shape(self) -> QPainterPath:
-        """Widen the hit area to 12 px so thin lines are easy to click."""
         path = QPainterPath()
         path.moveTo(0.0, 0.0)
         path.lineTo(self._dx, self._dy)
@@ -189,18 +263,15 @@ class _LineElement(QGraphicsLineItem):
         return stroker.createStroke(path)
 
     def paint(
-        self,
-        painter: QPainter,
-        option: QStyleOptionGraphicsItem,
+        self, painter: QPainter, option: QStyleOptionGraphicsItem,
         widget: QWidget | None = None,
     ) -> None:
         if self.isSelected():
             painter.setPen(QPen(QColor("#4fc3f7"), 2, Qt.PenStyle.DashLine))
             painter.drawLine(QLineF(0.0, 0.0, self._dx, self._dy))
-            # Endpoint dots
-            dot_pen = QPen(QColor("#4fc3f7"), 8, Qt.PenStyle.SolidLine,
-                           Qt.PenCapStyle.RoundCap)
-            painter.setPen(dot_pen)
+            dot = QPen(QColor("#4fc3f7"), 8, Qt.PenStyle.SolidLine,
+                       Qt.PenCapStyle.RoundCap)
+            painter.setPen(dot)
             painter.drawPoint(QPointF(0.0, 0.0))
             painter.drawPoint(QPointF(self._dx, self._dy))
         else:
@@ -209,7 +280,7 @@ class _LineElement(QGraphicsLineItem):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Scale dialog (unchanged from previous version)
+# Scale dialog
 # ──────────────────────────────────────────────────────────────────────────────
 
 class _ImageScaleDialog(QDialog):
@@ -278,17 +349,19 @@ class _ImageScaleDialog(QDialog):
 
 class CanvasWidget(QGraphicsView):
     """
-    QGraphicsView-based canvas.
+    QGraphicsView-based drawing canvas.
 
-    Z-layers:
-        0   background image
-        1   grid overlay
-        10  drawing elements (rect / line)
-        20  draw-in-progress preview
-        100 wifi measurements
+    Z-layers (bottom → top)
+    ────────────────────────
+    0   background image
+    1   grid overlay
+    10  drawing elements (rect / line)
+    20  draw-in-progress preview
+    30  snap indicator          ← _SnapIndicator (ItemIgnoresTransformations)
+    100 wifi measurements
     """
 
-    zoom_changed = Signal(float)   # % value (10.0 – 500.0)
+    zoom_changed = Signal(float)   # current zoom as % (10.0 – 500.0)
 
     _MENU_STYLE = (
         "QMenu { background-color:#2a2a3a; color:#e0e0e0; border:1px solid #3a3a4a; }"
@@ -307,9 +380,13 @@ class CanvasWidget(QGraphicsView):
         self._scene.setItemIndexMethod(QGraphicsScene.ItemIndexMethod.NoIndex)
         self.setScene(self._scene)
 
+        # Persistent items (survive floor switches)
         self._grid_item = _GridItem()
         self._grid_item.setVisible(False)
         self._scene.addItem(self._grid_item)
+
+        self._snap_indicator = _SnapIndicator()
+        self._scene.addItem(self._snap_indicator)
 
         self._scene.selectionChanged.connect(self._on_selection_changed)
 
@@ -326,11 +403,11 @@ class CanvasWidget(QGraphicsView):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setStyleSheet("QGraphicsView { background-color:#1e1e2e; border:none; }")
 
-        # ── Interaction state ──────────────────────────────────
-        self._zoom_factor: float = 1.0
-        self._pan_active:  bool  = False
-        self._pan_origin:  QPointF = QPointF()
-        self._space_pressed: bool  = False
+        # ── Zoom / pan ─────────────────────────────────────────
+        self._zoom_factor:   float  = 1.0
+        self._pan_active:    bool   = False
+        self._pan_origin:    QPointF = QPointF()
+        self._space_pressed: bool   = False
 
         # ── Tool mode ──────────────────────────────────────────
         self._mode: CanvasMode = CanvasMode.SELECT
@@ -340,23 +417,23 @@ class CanvasWidget(QGraphicsView):
         self._floors: dict[int, Floor] = {}
 
         # ── Background image ───────────────────────────────────
-        self._bg_item:     Optional[QGraphicsPixmapItem] = None
+        self._bg_item:      Optional[QGraphicsPixmapItem] = None
         self._bg_move_mode: bool = False
 
-        # ── Drawing state ──────────────────────────────────────
-        self._draw_start:   Optional[QPointF]      = None
+        # ── Drawing ────────────────────────────────────────────
+        self._draw_start:   Optional[QPointF]       = None
         self._preview_item: Optional[QGraphicsItem] = None
 
         # ── Selection ──────────────────────────────────────────
         self._selected_item: Optional[_ElementItem] = None
 
         # ── Snap settings ──────────────────────────────────────
-        self._snap_grid:   bool = False
-        self._snap_points: bool = True
-        self._grid_snap_size: int = 20
+        self._snap_grid:      bool = False
+        self._snap_points:    bool = True
+        self._grid_snap_size: int  = 20
 
-        # ── Element registry ───────────────────────────────────
-        self._element_items: dict[str, _ElementItem] = {}  # elem_id → item
+        # ── Element registry  elem_id → scene item ─────────────
+        self._element_items: dict[str, _ElementItem] = {}
 
     # ──────────────────────────────────────────────────────────
     # Public API
@@ -364,12 +441,14 @@ class CanvasWidget(QGraphicsView):
 
     def set_mode(self, mode: CanvasMode) -> None:
         self._mode = mode
-        # Only SELECT mode allows interactive element manipulation
         interactive = (mode == CanvasMode.SELECT)
         for item in self._element_items.values():
             item.enable_interaction(interactive)
         if not interactive:
             self._deselect()
+        self._snap_indicator.setVisible(False)
+        # Cancel any in-progress drawing when switching modes
+        self._cancel_draw()
         self._update_cursor()
 
     def set_show_grid(self, show: bool) -> None:
@@ -418,21 +497,18 @@ class CanvasWidget(QGraphicsView):
     # ──────────────────────────────────────────────────────────
 
     def _rebuild_scene(self) -> None:
-        # Cancel in-progress drawing
-        if self._preview_item is not None:
-            self._scene.removeItem(self._preview_item)
-        self._preview_item = None
-        self._draw_start = None
+        self._cancel_draw()
         self._selected_item = None
 
-        # Remove everything except the persistent grid
+        _persistent = {self._grid_item, self._snap_indicator}
         for item in list(self._scene.items()):
-            if item is not self._grid_item:
+            if item not in _persistent:
                 self._scene.removeItem(item)
 
         self._bg_item = None
         self._bg_move_mode = False
         self._element_items.clear()
+        self._snap_indicator.setVisible(False)
 
         if self._floor is None:
             return
@@ -463,7 +539,7 @@ class CanvasWidget(QGraphicsView):
         for d in self._floor.elements:
             t = d.get("type")
             if t == "rect":
-                item = self._make_rect_item(d)
+                item: _ElementItem = self._make_rect_item(d)
             elif t == "line":
                 item = self._make_line_item(d)
             else:
@@ -483,46 +559,26 @@ class CanvasWidget(QGraphicsView):
         return item
 
     # ──────────────────────────────────────────────────────────
-    # Snap helpers
+    # Snap
     # ──────────────────────────────────────────────────────────
 
-    def _snap_point(self, pt: QPointF) -> QPointF:
-        """Apply point-snap first, then grid-snap."""
-        if self._snap_points and self._element_items:
-            threshold2 = (12.0 / self._zoom_factor) ** 2
-            best: Optional[QPointF] = None
-            best_d2 = threshold2
-            for item in self._element_items.values():
-                for sp in self._snap_endpoints(item):
-                    dx = sp.x() - pt.x()
-                    dy = sp.y() - pt.y()
-                    d2 = dx * dx + dy * dy
-                    if d2 < best_d2:
-                        best_d2, best = d2, sp
-            if best is not None:
-                return best
-
-        if self._snap_grid:
-            gs = float(self._grid_snap_size)
-            return QPointF(round(pt.x() / gs) * gs, round(pt.y() / gs) * gs)
-
-        return pt
-
-    def _snap_endpoints(self, item: _ElementItem) -> list[QPointF]:
-        pos = item.pos()
-        if isinstance(item, _RectElement):
-            r = item.rect()
-            return [
-                pos + r.topLeft(), pos + r.topRight(),
-                pos + r.bottomLeft(), pos + r.bottomRight(),
-            ]
-        if isinstance(item, _LineElement):
-            return [pos, pos + QPointF(item.dx, item.dy)]
-        return []
+    def _do_snap(self, raw_scene_pt: QPointF) -> tuple[QPointF, SnapType]:
+        """Call utils.snap.snap_point() with current floor elements and settings."""
+        elements = self._floor.elements if self._floor else []
+        return snap_point(
+            raw_scene_pt, elements, self._grid_snap_size,
+            self._snap_points, self._snap_grid, self._zoom_factor,
+        )
 
     # ──────────────────────────────────────────────────────────
-    # Drawing
+    # Drawing helpers
     # ──────────────────────────────────────────────────────────
+
+    def _cancel_draw(self) -> None:
+        if self._preview_item is not None:
+            self._scene.removeItem(self._preview_item)
+            self._preview_item = None
+        self._draw_start = None
 
     def _start_rect(self, start: QPointF) -> None:
         self._draw_start = start
@@ -546,11 +602,10 @@ class CanvasWidget(QGraphicsView):
             return
         s = self._draw_start
         if isinstance(self._preview_item, QGraphicsRectItem):
-            x = min(s.x(), end.x())
-            y = min(s.y(), end.y())
-            w = abs(end.x() - s.x())
-            h = abs(end.y() - s.y())
-            self._preview_item.setRect(x, y, w, h)
+            self._preview_item.setRect(
+                min(s.x(), end.x()), min(s.y(), end.y()),
+                abs(end.x() - s.x()), abs(end.y() - s.y()),
+            )
         elif isinstance(self._preview_item, QGraphicsLineItem):
             ln = self._preview_item.line()
             self._preview_item.setLine(ln.x1(), ln.y1(), end.x(), end.y())
@@ -562,6 +617,7 @@ class CanvasWidget(QGraphicsView):
 
         start = self._draw_start
         self._draw_start = None
+        self._snap_indicator.setVisible(False)
 
         if start is None or self._floor is None:
             return
@@ -575,10 +631,8 @@ class CanvasWidget(QGraphicsView):
                 return
             d: dict = {
                 "type": "rect",
-                "x": min(start.x(), end.x()),
-                "y": min(start.y(), end.y()),
-                "w": w, "h": h,
-                "id": elem_id,
+                "x": min(start.x(), end.x()), "y": min(start.y(), end.y()),
+                "w": w, "h": h, "id": elem_id,
             }
             item: _ElementItem = self._make_rect_item(d)
 
@@ -598,8 +652,7 @@ class CanvasWidget(QGraphicsView):
         else:
             return
 
-        in_select = (self._mode == CanvasMode.SELECT)
-        item.enable_interaction(in_select)
+        item.enable_interaction(self._mode == CanvasMode.SELECT)
         self._floor.elements.append(d)
         self._scene.addItem(item)
         self._element_items[elem_id] = item
@@ -618,8 +671,7 @@ class CanvasWidget(QGraphicsView):
         self._selected_item = None
 
     def _element_item_at(self, vp_pos: QPointF) -> Optional[_ElementItem]:
-        pt = vp_pos.toPoint()
-        for item in self.items(pt):
+        for item in self.items(vp_pos.toPoint()):
             if isinstance(item, (_RectElement, _LineElement)):
                 return item
         return None
@@ -627,7 +679,8 @@ class CanvasWidget(QGraphicsView):
     def _delete_element_item(self, item: _ElementItem) -> None:
         eid = item.elem_id
         if self._floor is not None:
-            self._floor.elements = [e for e in self._floor.elements if e.get("id") != eid]
+            self._floor.elements = [e for e in self._floor.elements
+                                    if e.get("id") != eid]
         self._element_items.pop(eid, None)
         if item is self._selected_item:
             self._selected_item = None
@@ -658,19 +711,17 @@ class CanvasWidget(QGraphicsView):
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
         menu = QMenu(self)
         menu.setStyleSheet(self._MENU_STYLE)
-
-        load_act = menu.addAction("Hintergrundbild laden …")
-        load_act.triggered.connect(self._load_background_image)
-
+        menu.addAction("Hintergrundbild laden …").triggered.connect(
+            self._load_background_image)
         if self._bg_item is not None:
             menu.addSeparator()
             menu.addAction("Bild skalieren …").triggered.connect(self._scale_bg)
-            move_lbl = ("Bild verschieben beenden" if self._bg_move_mode
-                        else "Bild verschieben")
-            menu.addAction(move_lbl).triggered.connect(self._toggle_bg_move)
+            menu.addAction(
+                "Bild verschieben beenden" if self._bg_move_mode
+                else "Bild verschieben"
+            ).triggered.connect(self._toggle_bg_move)
             menu.addSeparator()
             menu.addAction("Hintergrundbild entfernen").triggered.connect(self._remove_bg)
-
         menu.exec(event.globalPosition().toPoint())
 
     def _load_background_image(self) -> None:
@@ -733,11 +784,16 @@ class CanvasWidget(QGraphicsView):
             super().wheelEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Delete and not event.isAutoRepeat():
+        k = event.key()
+        if k == Qt.Key.Key_Escape and not event.isAutoRepeat():
+            self._cancel_draw()
+            self._snap_indicator.setVisible(False)
+            event.accept()
+        elif k == Qt.Key.Key_Delete and not event.isAutoRepeat():
             if self._mode == CanvasMode.SELECT and self._selected_item is not None:
                 self._delete_element_item(self._selected_item)
             event.accept()
-        elif event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
+        elif k == Qt.Key.Key_Space and not event.isAutoRepeat():
             self._space_pressed = True
             self._update_cursor()
             event.accept()
@@ -754,7 +810,7 @@ class CanvasWidget(QGraphicsView):
             super().keyReleaseEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        # ── Pan activation ─────────────────────────────────────
+        # ── Pan ────────────────────────────────────────────────
         if (event.button() == Qt.MouseButton.MiddleButton
                 or (self._space_pressed
                     and event.button() == Qt.MouseButton.LeftButton)):
@@ -768,19 +824,22 @@ class CanvasWidget(QGraphicsView):
             super().mousePressEvent(event)
             return
 
-        scene_pt = self._snap_point(self.mapToScene(event.position().toPoint()))
+        raw_pt            = self.mapToScene(event.position().toPoint())
+        snapped, snap_type = self._do_snap(raw_pt)
 
         if self._mode == CanvasMode.RECT:
-            self._start_rect(scene_pt)
+            # Keep indicator visible at start point while drawing
+            self._snap_indicator.update_snap(snapped, snap_type)
+            self._start_rect(snapped)
             event.accept()
 
         elif self._mode == CanvasMode.LINE:
-            self._start_line(scene_pt)
+            self._snap_indicator.update_snap(snapped, snap_type)
+            self._start_line(snapped)
             event.accept()
 
         elif self._mode == CanvasMode.SELECT:
-            # Let Qt handle selection + item dragging natively
-            super().mousePressEvent(event)
+            super().mousePressEvent(event)   # Qt handles selection + item drag
 
         elif self._mode == CanvasMode.DELETE:
             hit = self._element_item_at(event.position())
@@ -805,14 +864,18 @@ class CanvasWidget(QGraphicsView):
             event.accept()
             return
 
-        # ── Draw preview ───────────────────────────────────────
-        if self._draw_start is not None and self._preview_item is not None:
-            self._update_preview(
-                self._snap_point(self.mapToScene(event.position().toPoint()))
-            )
+        # ── Draw modes — compute snap, update indicator + preview ──
+        if self._mode in _DRAW_MODES:
+            raw_pt             = self.mapToScene(event.position().toPoint())
+            snapped, snap_type = self._do_snap(raw_pt)
+            self._snap_indicator.update_snap(snapped, snap_type)
+            if self._draw_start is not None:
+                self._update_preview(snapped)
             event.accept()
             return
 
+        # ── Other modes ────────────────────────────────────────
+        self._snap_indicator.setVisible(False)
         super().mouseMoveEvent(event)
 
         # Keep bg_offset in sync while dragging the background image
@@ -833,21 +896,20 @@ class CanvasWidget(QGraphicsView):
             return
 
         if event.button() == Qt.MouseButton.LeftButton:
-            # ── Finalize drawing ───────────────────────────────
             if self._draw_start is not None:
-                self._finalize_draw(
-                    self._snap_point(self.mapToScene(event.position().toPoint()))
-                )
+                raw_pt             = self.mapToScene(event.position().toPoint())
+                snapped, snap_type = self._do_snap(raw_pt)
+                self._finalize_draw(snapped)
+                # Restore hover indicator at the cursor position after finalizing
+                self._snap_indicator.update_snap(snapped, snap_type)
                 event.accept()
                 return
 
         super().mouseReleaseEvent(event)
 
         if event.button() == Qt.MouseButton.LeftButton:
-            # Sync element position after a drag-move in SELECT mode
             if self._mode == CanvasMode.SELECT and self._selected_item is not None:
                 self._sync_item_to_model(self._selected_item)
-            # Sync bg image offset
             if (self._bg_move_mode and self._bg_item is not None
                     and self._floor is not None):
                 p = self._bg_item.pos()
