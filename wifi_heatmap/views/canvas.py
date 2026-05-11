@@ -54,6 +54,7 @@ from views.commands import (
     RemoveElementCommand,
     RemoveMeasurementCommand,
     SetBackgroundCommand,
+    SetRouterCommand,
 )
 
 
@@ -76,6 +77,8 @@ _Z_GRID:           int = 1
 _Z_ELEMENTS:       int = 10
 _Z_PREVIEW:        int = 20
 _Z_SNAP_INDICATOR: int = 30
+_Z_ROUTER_LINE:    int = 49
+_Z_ROUTER:         int = 50
 _Z_MEASUREMENTS:   int = 100
 _Z_PENDING:        int = 110
 
@@ -376,6 +379,91 @@ class _MeasurementItem(QGraphicsEllipseItem):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Router item
+# ──────────────────────────────────────────────────────────────────────────────
+
+class _RouterItem(QGraphicsObject):
+    """Router icon: drawn antenna with WiFi arcs and soft pulse glow."""
+
+    moved = Signal(QPointF)   # emitted on every position change during drag
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._phase: float = 0.0
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(60)
+        self.setZValue(_Z_ROUTER)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable,         False)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable,      False)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
+        self.setAcceptHoverEvents(True)
+        self.setToolTip("Router — Rechtsklick: Optionen")
+
+    def stop(self) -> None:
+        self._timer.stop()
+
+    def enable_drag(self, on: bool) -> None:
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable,    on)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, on)
+
+    def _tick(self) -> None:
+        self._phase = (self._phase + 0.10) % (2 * math.pi)
+        self.update()
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            self.moved.emit(self.pos())
+        return super().itemChange(change, value)
+
+    def boundingRect(self) -> QRectF:
+        # covers glow ring (≤17 px radius) + body below + label
+        return QRectF(-18.0, -36.0, 36.0, 52.0)
+
+    def paint(
+        self, painter: QPainter, option: QStyleOptionGraphicsItem,
+        widget: QWidget | None = None,
+    ) -> None:
+        # ── Pulse glow ───────────────────────────────────────────
+        glow_r     = 13.0 + 4.0 * math.sin(self._phase)
+        glow_alpha = int(45 + 25 * math.sin(self._phase))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(79, 195, 247, glow_alpha)))
+        painter.drawEllipse(QRectF(-glow_r, -glow_r, 2.0 * glow_r, 2.0 * glow_r))
+
+        # ── Router body ──────────────────────────────────────────
+        painter.setPen(QPen(QColor(160, 190, 220), 1.5))
+        painter.setBrush(QBrush(QColor(35, 55, 75)))
+        painter.drawRoundedRect(QRectF(-10.0, -4.0, 20.0, 10.0), 2.0, 2.0)
+
+        # ── Antenna mast ─────────────────────────────────────────
+        painter.setPen(QPen(QColor(190, 210, 230), 2.0))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawLine(QPointF(0.0, -4.0), QPointF(0.0, -18.0))
+
+        # ── WiFi arcs (centered on mast top, opening upward) ─────
+        # Qt angles: 0° = 3 o'clock, CCW. 210°→330° = upward cap.
+        for i, r in enumerate([5.0, 9.0, 13.0]):
+            alpha = 230 - i * 50
+            painter.setPen(QPen(QColor(79, 195, 247, alpha), 1.5))
+            painter.drawArc(
+                QRectF(-r, -18.0 - r, 2.0 * r, 2.0 * r),
+                210 * 16, 120 * 16,
+            )
+
+        # ── "Router" label ───────────────────────────────────────
+        painter.setPen(QPen(QColor(210, 220, 240, 200)))
+        fnt = painter.font()
+        fnt.setPointSizeF(7.5)
+        painter.setFont(fnt)
+        painter.drawText(
+            QRectF(-18.0, 8.0, 36.0, 12.0),
+            Qt.AlignmentFlag.AlignHCenter,
+            "Router",
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Scale dialog
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -458,9 +546,10 @@ class CanvasWidget(QGraphicsView):
     110 pending measure marker
     """
 
-    zoom_changed        = Signal(float)   # zoom as % (10–500)
-    pending_changed     = Signal(bool)    # True = pending marker placed
-    measurement_selected = Signal(object) # Measurement | None
+    zoom_changed         = Signal(float)   # zoom as % (10–500)
+    pending_changed      = Signal(bool)    # True = pending marker placed
+    measurement_selected = Signal(object)  # Measurement | None
+    router_changed       = Signal(object)  # QPointF | None
 
     _MENU_STYLE = (
         "QMenu { background-color:#2a2a3a; color:#e0e0e0; border:1px solid #3a3a4a; }"
@@ -543,6 +632,11 @@ class CanvasWidget(QGraphicsView):
         self._min_dbm:           float = -90.0
         self._max_dbm:           float = -30.0
 
+        # ── Router state ───────────────────────────────────────
+        self._router_item:          Optional[_RouterItem]          = None
+        self._router_line:          Optional[QGraphicsLineItem]    = None
+        self._pre_drag_router_pos:  Optional[tuple[float, float]]  = None
+
         # ── Undo / redo ────────────────────────────────────────
         self._undo_stack: Optional[QUndoStack] = None
 
@@ -566,6 +660,8 @@ class CanvasWidget(QGraphicsView):
             item.enable_interaction(interactive)
         for item in self._measurement_items.values():
             item.enable_selection(interactive)
+        if self._router_item is not None:
+            self._router_item.enable_drag(interactive)
 
         if not interactive:
             self._deselect()
@@ -660,6 +756,31 @@ class CanvasWidget(QGraphicsView):
         self._clear_pending_marker()
         self.pending_changed.emit(False)
 
+    def place_router(self, pos: QPointF) -> None:
+        """Place (or move) the router icon to *pos* and save to the floor model."""
+        if self._floor is None:
+            return
+        old_pos = self._floor.router_position
+        new_pos = (pos.x(), pos.y())
+        self._floor.router_position = new_pos
+        self._push_cmd(SetRouterCommand(self._floor, old_pos, new_pos, self._rebuild_scene))
+        self._restore_router()
+        self.router_changed.emit(pos)
+
+    def remove_router(self) -> None:
+        """Remove the router from the current floor."""
+        if self._floor is None:
+            return
+        old_pos = self._floor.router_position
+        self._floor.router_position = None
+        self._push_cmd(SetRouterCommand(self._floor, old_pos, None, self._rebuild_scene))
+        if self._router_item is not None:
+            self._router_item.stop()
+            self._scene.removeItem(self._router_item)
+            self._router_item = None
+        self._update_router_line()
+        self.router_changed.emit(None)
+
     def remove_measurement_item(self, m: Measurement) -> None:
         """Remove measurement *m* from scene and floor model."""
         item = self._measurement_items.pop(id(m), None)
@@ -695,6 +816,8 @@ class CanvasWidget(QGraphicsView):
     def _rebuild_scene(self) -> None:
         self._cancel_draw()
         self._clear_pending_marker()
+        if self._router_item is not None:
+            self._router_item.stop()
         self._selected_item        = None
         self._selected_measurement = None
 
@@ -707,6 +830,8 @@ class CanvasWidget(QGraphicsView):
         self._bg_move_mode = False
         self._element_items.clear()
         self._measurement_items.clear()
+        self._router_item = None
+        self._router_line = None
         self._snap_indicator.setVisible(False)
 
         if self._floor is None:
@@ -715,6 +840,7 @@ class CanvasWidget(QGraphicsView):
             self._load_bg_pixmap(self._floor.background_image)
         self._restore_elements()
         self._restore_measurements()
+        self._restore_router()
         self._update_cursor()
 
     def _load_bg_pixmap(self, path: str) -> None:
@@ -759,6 +885,18 @@ class CanvasWidget(QGraphicsView):
             item.enable_selection(in_select)
             self._scene.addItem(item)
             self._measurement_items[id(m)] = item
+
+    def _restore_router(self) -> None:
+        if self._floor is None or self._floor.router_position is None:
+            return
+        rx, ry = self._floor.router_position
+        item = _RouterItem()
+        item.setPos(rx, ry)
+        item.enable_drag(self._mode == CanvasMode.SELECT)
+        item.moved.connect(self._update_router_line)
+        self._scene.addItem(item)
+        self._router_item = item
+        self._update_router_line()
 
     def _make_rect_item(self, d: dict) -> _RectElement:
         item = _RectElement(QRectF(0.0, 0.0, d["w"], d["h"]), d["id"])
@@ -908,6 +1046,25 @@ class CanvasWidget(QGraphicsView):
             self._pending_marker = None
         self._pending_pos = None
 
+    def _update_router_line(self, _: object = None) -> None:
+        """Draw or update the dashed line from the selected measurement to the router."""
+        if self._router_item is None or self._selected_measurement is None:
+            if self._router_line is not None:
+                self._scene.removeItem(self._router_line)
+                self._router_line = None
+            return
+        m  = self._selected_measurement
+        rp = self._router_item.pos()
+        if self._router_line is None:
+            pen = QPen(QColor(79, 195, 247, 140), 1.5, Qt.PenStyle.DashLine)
+            pen.setDashPattern([6.0, 4.0])
+            self._router_line = QGraphicsLineItem(m.x, m.y, rp.x(), rp.y())
+            self._router_line.setPen(pen)
+            self._router_line.setZValue(_Z_ROUTER_LINE)
+            self._scene.addItem(self._router_line)
+        else:
+            self._router_line.setLine(m.x, m.y, rp.x(), rp.y())
+
     def _measurement_item_at(self, vp_pos: QPointF) -> Optional[_MeasurementItem]:
         for item in self.items(vp_pos.toPoint()):
             if isinstance(item, _MeasurementItem):
@@ -929,6 +1086,7 @@ class CanvasWidget(QGraphicsView):
 
         if self._selected_measurement is not prev_m:
             self.measurement_selected.emit(self._selected_measurement)
+        self._update_router_line()
 
     def _deselect(self) -> None:
         self._scene.clearSelection()
@@ -982,6 +1140,16 @@ class CanvasWidget(QGraphicsView):
     # ──────────────────────────────────────────────────────────
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        # Router context menu takes priority over background menu
+        if self._router_item is not None:
+            for _it in self.items(event.pos()):
+                if _it is self._router_item:
+                    menu = QMenu(self)
+                    menu.setStyleSheet(self._MENU_STYLE)
+                    menu.addAction("Router entfernen").triggered.connect(self.remove_router)
+                    menu.exec(event.globalPosition().toPoint())
+                    return
+
         menu = QMenu(self)
         menu.setStyleSheet(self._MENU_STYLE)
         menu.addAction("Hintergrundbild laden …").triggered.connect(
@@ -1138,7 +1306,19 @@ class CanvasWidget(QGraphicsView):
             self._place_pending_marker(raw_pt)
             event.accept()
 
+        elif self._mode == CanvasMode.ROUTER:
+            self.place_router(raw_pt)
+            event.accept()
+
         elif self._mode == CanvasMode.SELECT:
+            # Pre-record router position in case this starts a drag
+            self._pre_drag_router_pos = None
+            if self._router_item is not None:
+                for _it in self.items(event.position().toPoint()):
+                    if _it is self._router_item:
+                        _p = self._router_item.pos()
+                        self._pre_drag_router_pos = (_p.x(), _p.y())
+                        break
             hit = self._element_item_at(event.position())
             if hit is not None:
                 self._pre_drag_elem_id = hit.elem_id
@@ -1229,6 +1409,22 @@ class CanvasWidget(QGraphicsView):
                         ))
                 self._pre_drag_elem_id = None
                 self._pre_drag_pos     = None
+            # Sync router drag → floor model + undo command
+            if (self._mode == CanvasMode.SELECT
+                    and self._pre_drag_router_pos is not None
+                    and self._router_item is not None
+                    and self._floor is not None):
+                new_p   = self._router_item.pos()
+                new_tup = (new_p.x(), new_p.y())
+                if new_tup != self._pre_drag_router_pos:
+                    self._floor.router_position = new_tup
+                    self._push_cmd(SetRouterCommand(
+                        self._floor, self._pre_drag_router_pos, new_tup,
+                        self._rebuild_scene,
+                    ))
+                    self.router_changed.emit(new_p)
+                    self._update_router_line()
+            self._pre_drag_router_pos = None
             if (self._bg_move_mode and self._bg_item is not None
                     and self._floor is not None):
                 p = self._bg_item.pos()

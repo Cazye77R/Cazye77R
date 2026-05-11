@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import math
 import shutil
 import uuid
 from pathlib import Path
@@ -237,6 +238,9 @@ class MainWindow(QMainWindow):
         self._net_worker:     Optional[NetworkListWorker] = None
         self._remeasure_target: Optional[Measurement]     = None
 
+        # ── Selection state ────────────────────────────────────
+        self._selected_measurement: Optional[Measurement] = None
+
         self._setup_menubar()
         self._setup_central_widget()
         self._setup_statusbar()
@@ -247,6 +251,7 @@ class MainWindow(QMainWindow):
         cv.zoom_changed.connect(self._on_zoom_changed)
         cv.pending_changed.connect(self._on_pending_changed)
         cv.measurement_selected.connect(self._on_measurement_selected)
+        cv.router_changed.connect(self._on_router_changed)
 
         # ── Wire toolbar ───────────────────────────────────────
         tb = self._toolbar_widget
@@ -366,10 +371,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _setup_statusbar(self) -> None:
-        # Left: zoom info
+        # Left: zoom + router distance
         self._zoom_label = QLabel("Zoom: 100%")
         self._zoom_label.setStyleSheet("padding: 0 8px; color: #9090a0;")
         self.statusBar().addWidget(self._zoom_label)
+
+        self._router_dist_label = QLabel("")
+        self._router_dist_label.setStyleSheet("padding: 0 8px; color: #4fc3f7;")
+        self.statusBar().addWidget(self._router_dist_label)
 
         # Right: SSID filter + signal info
         ssid_widget = QWidget()
@@ -495,10 +504,12 @@ class MainWindow(QMainWindow):
         self._toolbar_widget.set_measure_enabled(has_pending)
 
     def _on_measurement_selected(self, m) -> None:
+        self._selected_measurement = m
         if m is not None:
             self._properties_panel.show_measurement(m)
         else:
             self._properties_panel.show_floor(self._canvas_widget.current_floor())
+        self._update_router_distance()
 
     def _on_remeasure_requested(self, m: Measurement) -> None:
         self._remeasure_target = m
@@ -510,6 +521,19 @@ class MainWindow(QMainWindow):
     def _on_delete_measurement(self, m: Measurement) -> None:
         self._canvas_widget.remove_measurement_item(m)
         self._properties_panel.show_floor(self._canvas_widget.current_floor())
+
+    def _on_router_changed(self, _pos) -> None:
+        self._update_router_distance()
+
+    def _update_router_distance(self) -> None:
+        m     = self._selected_measurement
+        floor = self._canvas_widget.current_floor()
+        if m is None or floor is None or floor.router_position is None:
+            self._router_dist_label.setText("")
+            return
+        rx, ry   = floor.router_position
+        dist_px  = math.sqrt((m.x - rx) ** 2 + (m.y - ry) ** 2)
+        self._router_dist_label.setText(f"📡 {dist_px:.0f} px")
 
     def _on_opacity_changed(self, opacity: int) -> None:
         pass  # heatmap overlay opacity — wired when overlay is implemented
@@ -544,8 +568,10 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, idx: int) -> None:
         if self._project and 0 <= idx < len(self._project.floors):
             floor = self._project.floors[idx]
+            self._selected_measurement = None
             self._canvas_widget.set_active_floor(floor)
             self._properties_panel.show_floor(floor)
+            self._update_router_distance()
 
     # ------------------------------------------------------------------
     # Floor operations
