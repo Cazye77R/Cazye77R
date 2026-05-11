@@ -53,6 +53,8 @@ class SideView(QWidget):
         self._max_dbm: float = -30.0
         self._x_min:   float = 0.0
         self._x_max:   float = 1000.0
+        # Temporarily overridden during render_to_image() for off-screen painting
+        self._render_w: Optional[int] = None
 
     # ── Public API ───────────────────────────────────────────────────
 
@@ -79,6 +81,42 @@ class SideView(QWidget):
         self._recalc_x_range()
         self._update_height()
         self.update()
+
+    def render_to_image(self) -> QImage:
+        """Render all floors at full height to a QImage (for PDF/export).
+
+        Works independently of the widget's current on-screen size; uses the
+        widget width as the render width (minimum 400 px).
+        """
+        from PySide6.QtGui import QImage, QPainter
+        from PySide6.QtCore import QPoint
+
+        n       = max(len(self._floors), 1)
+        rw      = max(self.width(), 400)
+        rh      = n * _STRIP_HEIGHT
+        img     = QImage(rw, rh, QImage.Format.Format_RGB32)
+        img.fill(QColor(0x2a, 0x2a, 0x3a))
+
+        self._render_w = rw
+        try:
+            p = QPainter(img)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            floors = self._sorted_floors()
+            n_f    = len(floors)
+            global_rx: Optional[float] = next(
+                (f.router_position[0] for f in floors if f.router_position), None
+            )
+            for i, floor in enumerate(floors):
+                self._draw_strip(p, self._strip_rect(i, n_f), floor, i)
+            if global_rx is not None:
+                wx = self._to_wx(global_rx)
+                p.setPen(QPen(_COLOR_ROUTER_LINE, 1.5, Qt.PenStyle.DashLine))
+                p.drawLine(wx, 0, wx, n_f * _STRIP_HEIGHT)
+            p.end()
+        finally:
+            self._render_w = None
+
+        return img
 
     # ── Layout helpers ───────────────────────────────────────────────
 
@@ -109,15 +147,17 @@ class SideView(QWidget):
         self.setMinimumHeight(n * _STRIP_HEIGHT)
 
     def _cw(self) -> int:
-        return max(self.width() - _LEFT_MARGIN - _RIGHT_MARGIN, 1)
+        w = self._render_w if self._render_w is not None else self.width()
+        return max(w - _LEFT_MARGIN - _RIGHT_MARGIN, 1)
 
     def _to_wx(self, scene_x: float) -> int:
         span = max(self._x_max - self._x_min, 1.0)
         return int(_LEFT_MARGIN + (scene_x - self._x_min) / span * self._cw())
 
     def _strip_rect(self, strip_idx: int, n_floors: int) -> QRect:
+        w = self._render_w if self._render_w is not None else self.width()
         y = (n_floors - 1 - strip_idx) * _STRIP_HEIGHT
-        return QRect(0, y, self.width(), _STRIP_HEIGHT)
+        return QRect(0, y, w, _STRIP_HEIGHT)
 
     # ── Paint ────────────────────────────────────────────────────────
 

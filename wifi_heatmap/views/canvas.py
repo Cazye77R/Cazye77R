@@ -841,6 +841,30 @@ class CanvasWidget(QGraphicsView):
         self._scene.clearSelection()
         item.setSelected(True)
 
+    def get_render_rect(self) -> QRectF:
+        """Scene bounding rect of all data items (excludes grid/snap/pending).
+
+        Used by the exporter to determine the area to rasterise.  Returns a
+        fallback rect when the scene is empty.
+        """
+        skip = {self._grid_item, self._snap_indicator}
+        if self._pending_marker is not None:
+            skip.add(self._pending_marker)
+
+        r = QRectF()
+        for item in self._scene.items():
+            if item in skip or not item.isVisible():
+                continue
+            r = r.united(item.mapToScene(item.boundingRect()).boundingRect())
+
+        if not r.isValid():
+            return QRectF(0, 0, 800, 600)
+
+        # 5 % padding on each side
+        mx = r.width()  * 0.05 + 20
+        my = r.height() * 0.05 + 20
+        return r.adjusted(-mx, -my, mx, my)
+
     # ──────────────────────────────────────────────────────────
     # Zoom
     # ──────────────────────────────────────────────────────────

@@ -8,14 +8,17 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QPointF, QSize, Signal
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QUndoStack
+from PySide6.QtGui import QAction, QCloseEvent, QCursor, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QDockWidget,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -24,6 +27,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSpinBox,
     QSplitter,
@@ -37,6 +41,7 @@ from models.measurement import Measurement
 from models.project import Project
 from services.scanner_worker import NetworkListWorker, ScanWorker
 from services.wifi_scanner import WifiScanner
+from services.exporter import ProjectExporter
 from views.canvas import CanvasMode, CanvasWidget
 from views.properties import PropertiesPanel
 from views.side_view import SideView
@@ -329,9 +334,12 @@ class MainWindow(QMainWindow):
                                           QKeySequence("Ctrl+S")))
         datei.addSeparator()
         export_menu = datei.addMenu("Exportieren")
-        export_menu.addAction(self._make_action("PNG",  lambda: self._export("png")))
-        export_menu.addAction(self._make_action("PDF",  lambda: self._export("pdf")))
-        export_menu.addAction(self._make_action("JSON", lambda: self._export("json")))
+        export_menu.addAction(self._make_action(
+            "PNG (aktuelle Etage) …",  self._export_png))
+        export_menu.addAction(self._make_action(
+            "PDF (ganzes Projekt) …",  self._export_pdf))
+        export_menu.addAction(self._make_action(
+            "JSON …",                  self._export_json))
 
         bearbeiten = menubar.addMenu("Bearbeiten")
         undo_action = self._undo_stack.createUndoAction(self, "Rückgängig")
@@ -908,5 +916,159 @@ class MainWindow(QMainWindow):
     def _toggle_grid(self, checked: bool) -> None:
         self._canvas_widget.set_show_grid(checked)
 
-    def _export(self, fmt: str) -> None:
-        pass
+    # ------------------------------------------------------------------
+    # Export
+    # ------------------------------------------------------------------
+
+    def _export_json(self) -> None:
+        if self._project is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "JSON exportieren",
+            self._project.name + ".wifiheat",
+            "WiFi Heatmap JSON (*.wifiheat);;Alle Dateien (*)",
+        )
+        if not path:
+            return
+        try:
+            ProjectExporter.export_json(self._project, path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Export fehlgeschlagen", str(exc))
+
+    def _export_png(self) -> None:
+        if self._project is None:
+            return
+        floor = self._canvas_widget.current_floor()
+        if floor is None:
+            QMessageBox.information(self, "Export", "Keine aktive Etage.")
+            return
+
+        # ── Scale dialog ──────────────────────────────────────────
+        dlg = QDialog(self)
+        dlg.setWindowTitle("PNG-Auflösung")
+        dlg.setFixedWidth(260)
+        lay = QVBoxLayout(dlg)
+        lay.setSpacing(8)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.addWidget(QLabel("Ausgabe-Auflösung:"))
+
+        grp = QGroupBox()
+        grp.setFlat(True)
+        glayout = QVBoxLayout(grp)
+        glayout.setSpacing(4)
+
+        bg   = QButtonGroup(dlg)
+        opts = [("1× (Originalgröße)", 1),
+                ("2× (doppelte Auflösung)", 2),
+                ("4× (vierfache Auflösung)", 4)]
+        radios: list[tuple[QRadioButton, int]] = []
+        for label, scale in opts:
+            rb = QRadioButton(label)
+            if scale == 1:
+                rb.setChecked(True)
+            bg.addButton(rb)
+            glayout.addWidget(rb)
+            radios.append((rb, scale))
+
+        lay.addWidget(grp)
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        lay.addWidget(btns)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        scale = next((s for rb, s in radios if rb.isChecked()), 1)
+
+        # ── File dialog ───────────────────────────────────────────
+        path, _ = QFileDialog.getSaveFileName(
+            self, "PNG exportieren",
+            f"{self._project.name}_{floor.name}.png",
+            "PNG-Bild (*.png);;Alle Dateien (*)",
+        )
+        if not path:
+            return
+
+        # ── Render ────────────────────────────────────────────────
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
+        try:
+            self._canvas_widget._scene.clearSelection()
+            source_rect = self._canvas_widget.get_render_rect()
+            ProjectExporter.export_png(
+                self._canvas_widget._scene,
+                source_rect,
+                floor,
+                path,
+                self._min_dbm,
+                self._max_dbm,
+                scale=scale,
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "PNG-Export fehlgeschlagen", str(exc))
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def _export_pdf(self) -> None:
+        if self._project is None:
+            return
+        if not self._project.floors:
+            QMessageBox.information(self, "Export", "Projekt hat keine Etagen.")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "PDF exportieren",
+            self._project.name + ".pdf",
+            "PDF-Dokument (*.pdf);;Alle Dateien (*)",
+        )
+        if not path:
+            return
+
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
+        try:
+            # Remember which floor is active so we can restore it
+            active_floor = self._canvas_widget.current_floor()
+
+            # Render each floor to a QImage
+            floor_images: list[tuple] = []
+            for floor in self._project.floors:
+                self._canvas_widget.set_active_floor(floor)
+                QApplication.processEvents()   # allow scene to settle
+                self._canvas_widget._scene.clearSelection()
+                source_rect = self._canvas_widget.get_render_rect()
+                img = ProjectExporter.render_floor_image(
+                    self._canvas_widget._scene,
+                    source_rect,
+                    floor,
+                    self._min_dbm,
+                    self._max_dbm,
+                    scale=1,
+                )
+                floor_images.append((floor, img))
+
+            # Restore original floor
+            if active_floor is not None:
+                self._canvas_widget.set_active_floor(active_floor)
+                idx = (self._project.floors.index(active_floor)
+                       if active_floor in self._project.floors else 0)
+                self._floor_tab_bar.set_current_index(idx)
+
+            # Render side view (full height)
+            sv_img = self._side_view.render_to_image()
+
+            ProjectExporter.export_pdf(
+                self._project,
+                floor_images,
+                path,
+                self._min_dbm,
+                self._max_dbm,
+                critical_threshold=-75.0,
+                side_view_image=sv_img,
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "PDF-Export fehlgeschlagen", str(exc))
+        finally:
+            QApplication.restoreOverrideCursor()
