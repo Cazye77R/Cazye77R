@@ -17,6 +17,7 @@ from PySide6.QtGui import (
     QPainterPathStroker,
     QPen,
     QPixmap,
+    QUndoStack,
     QWheelEvent,
 )
 from PySide6.QtWidgets import (
@@ -41,6 +42,12 @@ from PySide6.QtWidgets import (
 
 from models.floor import Floor
 from utils.snap import SnapType, snap_point
+from views.commands import (
+    AddElementCommand,
+    MoveElementCommand,
+    RemoveElementCommand,
+    SetBackgroundCommand,
+)
 
 
 class CanvasMode(enum.Enum):
@@ -435,6 +442,13 @@ class CanvasWidget(QGraphicsView):
         # ── Element registry  elem_id → scene item ─────────────
         self._element_items: dict[str, _ElementItem] = {}
 
+        # ── Undo / redo ────────────────────────────────────────
+        self._undo_stack: Optional[QUndoStack] = None
+
+        # ── Move-drag tracking (for MoveElementCommand) ────────
+        self._pre_drag_elem_id: Optional[str]  = None
+        self._pre_drag_pos:     Optional[dict] = None
+
     # ──────────────────────────────────────────────────────────
     # Public API
     # ──────────────────────────────────────────────────────────
@@ -478,6 +492,13 @@ class CanvasWidget(QGraphicsView):
 
     def current_floor(self) -> Optional[Floor]:
         return self._floor
+
+    def set_undo_stack(self, stack: QUndoStack) -> None:
+        self._undo_stack = stack
+
+    def set_active_floor(self, floor: Floor) -> None:
+        self._floor = floor
+        self._rebuild_scene()
 
     # ──────────────────────────────────────────────────────────
     # Zoom
@@ -557,6 +578,25 @@ class CanvasWidget(QGraphicsView):
         item = _LineElement(d["x2"] - d["x1"], d["y2"] - d["y1"], d["id"])
         item.setPos(d["x1"], d["y1"])
         return item
+
+    # ──────────────────────────────────────────────────────────
+    # Undo helpers
+    # ──────────────────────────────────────────────────────────
+
+    def _push_cmd(self, cmd) -> None:
+        if self._undo_stack is not None:
+            self._undo_stack.push(cmd)
+
+    def _get_elem_model_pos(self, elem_id: str) -> Optional[dict]:
+        if self._floor is None:
+            return None
+        for e in self._floor.elements:
+            if e.get("id") == elem_id:
+                if e.get("type") == "rect":
+                    return {"x": e["x"], "y": e["y"]}
+                return {"x1": e["x1"], "y1": e["y1"],
+                        "x2": e["x2"], "y2": e["y2"]}
+        return None
 
     # ──────────────────────────────────────────────────────────
     # Snap
@@ -656,6 +696,7 @@ class CanvasWidget(QGraphicsView):
         self._floor.elements.append(d)
         self._scene.addItem(item)
         self._element_items[elem_id] = item
+        self._push_cmd(AddElementCommand(self._floor, d, self._rebuild_scene))
 
     # ──────────────────────────────────────────────────────────
     # Selection & deletion
@@ -678,13 +719,20 @@ class CanvasWidget(QGraphicsView):
 
     def _delete_element_item(self, item: _ElementItem) -> None:
         eid = item.elem_id
+        elem_dict: Optional[dict] = None
         if self._floor is not None:
+            for e in self._floor.elements:
+                if e.get("id") == eid:
+                    elem_dict = e
+                    break
             self._floor.elements = [e for e in self._floor.elements
                                     if e.get("id") != eid]
         self._element_items.pop(eid, None)
         if item is self._selected_item:
             self._selected_item = None
         self._scene.removeItem(item)
+        if elem_dict is not None and self._floor is not None:
+            self._push_cmd(RemoveElementCommand(self._floor, elem_dict, self._rebuild_scene))
 
     def _sync_item_to_model(self, item: _ElementItem) -> None:
         if self._floor is None:
@@ -733,14 +781,22 @@ class CanvasWidget(QGraphicsView):
             return
         if self._floor is None:
             self.load_floor(0)
+        assert self._floor is not None
+        old_state = (
+            self._floor.background_image,
+            self._floor.bg_offset,
+            self._floor.bg_scale,
+        )
         if self._bg_item is not None:
             self._scene.removeItem(self._bg_item)
             self._bg_item = None
-        assert self._floor is not None
         self._floor.background_image = path
         self._floor.bg_offset = (0.0, 0.0)
         self._floor.bg_scale  = 1.0
         self._load_bg_pixmap(path)
+        self._push_cmd(SetBackgroundCommand(
+            self._floor, old_state, (path, (0.0, 0.0), 1.0), self._rebuild_scene,
+        ))
 
     def _scale_bg(self) -> None:
         if self._floor is None or self._bg_item is None:
@@ -748,8 +804,18 @@ class CanvasWidget(QGraphicsView):
         dlg = _ImageScaleDialog(self._floor.bg_scale, self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
+        old_state = (
+            self._floor.background_image,
+            self._floor.bg_offset,
+            self._floor.bg_scale,
+        )
         self._floor.bg_scale = dlg.scale
         self._bg_item.setScale(dlg.scale)
+        self._push_cmd(SetBackgroundCommand(
+            self._floor, old_state,
+            (self._floor.background_image, self._floor.bg_offset, dlg.scale),
+            self._rebuild_scene,
+        ))
 
     def _toggle_bg_move(self) -> None:
         self._bg_move_mode = not self._bg_move_mode
@@ -761,15 +827,24 @@ class CanvasWidget(QGraphicsView):
         self._update_cursor()
 
     def _remove_bg(self) -> None:
+        if self._floor is None:
+            return
+        old_state = (
+            self._floor.background_image,
+            self._floor.bg_offset,
+            self._floor.bg_scale,
+        )
         if self._bg_item is not None:
             self._scene.removeItem(self._bg_item)
             self._bg_item = None
-        if self._floor is not None:
-            self._floor.background_image = None
-            self._floor.bg_offset = (0.0, 0.0)
-            self._floor.bg_scale  = 1.0
+        self._floor.background_image = None
+        self._floor.bg_offset = (0.0, 0.0)
+        self._floor.bg_scale  = 1.0
         self._bg_move_mode = False
         self._update_cursor()
+        self._push_cmd(SetBackgroundCommand(
+            self._floor, old_state, (None, (0.0, 0.0), 1.0), self._rebuild_scene,
+        ))
 
     # ──────────────────────────────────────────────────────────
     # Event overrides
@@ -839,6 +914,14 @@ class CanvasWidget(QGraphicsView):
             event.accept()
 
         elif self._mode == CanvasMode.SELECT:
+            # Capture pre-drag position before Qt moves the item
+            hit = self._element_item_at(event.position())
+            if hit is not None:
+                self._pre_drag_elem_id = hit.elem_id
+                self._pre_drag_pos     = self._get_elem_model_pos(hit.elem_id)
+            else:
+                self._pre_drag_elem_id = None
+                self._pre_drag_pos     = None
             super().mousePressEvent(event)   # Qt handles selection + item drag
 
         elif self._mode == CanvasMode.DELETE:
@@ -910,6 +993,18 @@ class CanvasWidget(QGraphicsView):
         if event.button() == Qt.MouseButton.LeftButton:
             if self._mode == CanvasMode.SELECT and self._selected_item is not None:
                 self._sync_item_to_model(self._selected_item)
+                # Push move command if the element actually moved
+                if (self._pre_drag_elem_id is not None
+                        and self._pre_drag_pos is not None
+                        and self._floor is not None):
+                    new_pos = self._get_elem_model_pos(self._pre_drag_elem_id)
+                    if new_pos is not None and new_pos != self._pre_drag_pos:
+                        self._push_cmd(MoveElementCommand(
+                            self._floor, self._pre_drag_elem_id,
+                            self._pre_drag_pos, new_pos, self._rebuild_scene,
+                        ))
+                self._pre_drag_elem_id = None
+                self._pre_drag_pos     = None
             if (self._bg_move_mode and self._bg_item is not None
                     and self._floor is not None):
                 p = self._bg_item.pos()
