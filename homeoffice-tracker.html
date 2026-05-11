@@ -689,7 +689,7 @@
     editingDate = null;
     document.querySelector('input[name="entryType"][value="ho"]').checked = true;
     toggleEntryType('ho');
-    document.getElementById('f-date').value = new Date().toISOString().slice(0,10);
+    document.getElementById('f-date').value = localToday();
     document.getElementById('f-ho').value   = 0;
     document.getElementById('f-priv').value = 0;
     document.getElementById('f-note').value = '';
@@ -733,7 +733,7 @@
     document.getElementById('f-ho').value   = 0;
     document.getElementById('f-priv').value = 0;
     document.getElementById('f-note').value = '';
-    loadLastValues();
+    if (type === 'ho') loadLastValues();
     toast(`Eintrag für ${fmt(date)} gespeichert.`);
   }
 
@@ -834,7 +834,7 @@
     const { month, year } = calState;
     document.getElementById('calTitle').textContent = MONTH_NAMES_LONG[month] + ' ' + year;
     const selectedDate = document.getElementById('f-date').value;
-    const today = new Date().toISOString().slice(0,10);
+    const today = localToday();
     const entryMap = {};
     for (const e of entries) entryMap[e.date] = { type: e.type || 'ho', ho: e.ho || 0 };
     const firstDow  = new Date(year, month, 1).getDay();
@@ -870,10 +870,14 @@
     renderCalendar();
   }
   function selectDay(dateStr) {
-    document.getElementById('f-date').value = dateStr;
     const existing = entries.find(e => e.date === dateStr);
-    if (existing) { startEdit(dateStr); }
-    else { if (editingDate) cancelEdit(); renderCalendar(); }
+    if (existing) {
+      startEdit(dateStr);
+    } else {
+      if (editingDate) cancelEdit();
+      document.getElementById('f-date').value = dateStr;
+      renderCalendar();
+    }
   }
 
   // ---- Entry type (HO / Bürotag) ----
@@ -895,8 +899,13 @@
   }
 
   // ---- Quick entry ----
+  function localToday() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+
   function setToday() {
-    document.getElementById('f-date').value = new Date().toISOString().slice(0,10);
+    document.getElementById('f-date').value = localToday();
   }
 
   const LAST_KEY = 'ho_tracker_last';
@@ -916,7 +925,7 @@
     const sec = document.getElementById('recurringSection');
     sec.classList.toggle('open');
     if (sec.classList.contains('open')) {
-      const today = new Date().toISOString().slice(0,10);
+      const today = localToday();
       if (!document.getElementById('r-from').value) document.getElementById('r-from').value = today;
       if (!document.getElementById('r-to').value)   document.getElementById('r-to').value   = today;
       updateRecurringCount();
@@ -1073,8 +1082,8 @@
       : entries;
 
     let tableEntries = filterMonth
-      ? entries.filter(e => e.date.startsWith(filterMonth))
-      : entries;
+      ? yearEntries.filter(e => e.date.startsWith(filterMonth))
+      : yearEntries;
     tableEntries = [...tableEntries].sort((a,b) =>
       sortDir === 'asc' ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date)
     );
@@ -1106,7 +1115,9 @@
     const pctPrivate  = totalAll > 0 ? (totalPriv / totalAll * 100) : 0;
     const hoDays     = data.filter(e => (e.type || 'ho') === 'ho' && (e.ho || 0) > 0).length;
     const officeDays = data.filter(e => e.type === 'office').length;
-    const avgHO = hoDays > 0 ? totalHO / hoDays : 0;
+    const hoOnlyHours = data.filter(e => (e.type || 'ho') === 'ho' && (e.ho || 0) > 0)
+                            .reduce((s, e) => s + (e.ho || 0), 0);
+    const avgHO = hoDays > 0 ? hoOnlyHours / hoDays : 0;
 
     document.getElementById('s-hoDays').textContent     = hoDays;
     document.getElementById('s-officeDays').textContent = officeDays;
@@ -1132,7 +1143,6 @@
       return;
     }
     empty.style.display = 'none';
-    const totalPerEntry = (e) => e.ho + e.priv;
     tbody.innerHTML = data.map(e => {
       const type  = e.type || 'ho';
       const total = (e.ho || 0) + (e.priv || 0);
@@ -1142,14 +1152,14 @@
         : `<span class="badge badge-orange" style="font-size:0.7rem">B&uuml;ro</span>`;
       const mainVal = type === 'ho'
         ? `<span style="color:var(--accent);font-weight:600">${e.ho || 0}h</span>`
-        : `<span style="color:var(--orange);font-weight:600">${e.km || 0}&thinsp;km</span><span style="color:var(--accent2);font-size:0.78rem;margin-left:4px">(${fahrtkosten(e.km).toFixed(2)}€)</span>`;
+        : `<span style="color:var(--orange);font-weight:600">${e.km || 0}&thinsp;km</span><span style="color:var(--accent2);font-size:0.78rem;margin-left:4px">(${fahrtkosten(e.km).toFixed(2)}€)</span>${(e.ho||0)>0?`<span style="color:var(--accent);font-size:0.78rem;margin-left:6px">+${e.ho}h&thinsp;HO</span>`:''}`;
       return `<tr>
         <td><strong>${fmt(e.date)}</strong></td>
         <td style="color:var(--muted)">${weekday(e.date)}</td>
         <td>${typBadge}</td>
         <td>${mainVal}</td>
         <td><span style="color:var(--muted)">${e.priv || 0}h</span></td>
-        <td>${type === 'ho' ? pctBadge(pct) : '—'}</td>
+        <td>${total > 0 ? pctBadge(pct) : '—'}</td>
         <td style="color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.note ? esc(e.note) : '—'}</td>
         <td style="white-space:nowrap">
           <button class="edit-btn" onclick="startEdit('${e.date}')" title="Bearbeiten">&#9998;</button>
@@ -1168,8 +1178,8 @@
     for (const e of data) {
       const mo = e.date.slice(0,7);
       if (!byMonth[mo]) byMonth[mo] = { ho: 0, priv: 0 };
-      byMonth[mo].ho   += e.ho;
-      byMonth[mo].priv += e.priv;
+      byMonth[mo].ho   += e.ho   || 0;
+      byMonth[mo].priv += e.priv || 0;
     }
     const keys = Object.keys(byMonth).sort();
     const maxVal = Math.max(...keys.map(k => byMonth[k].ho + byMonth[k].priv), 1);
