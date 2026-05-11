@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDockWidget,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QTabBar,
@@ -37,6 +39,7 @@ from services.scanner_worker import NetworkListWorker, ScanWorker
 from services.wifi_scanner import WifiScanner
 from views.canvas import CanvasMode, CanvasWidget
 from views.properties import PropertiesPanel
+from views.side_view import SideView
 from views.toolbar import ToolbarWidget
 
 
@@ -72,6 +75,12 @@ QPushButton:hover { background-color: #4fc3f7; color: #1e1e2e; }
 QPushButton:pressed { background-color: #0288d1; color: #ffffff; }
 QSplitter::handle { background-color: #3a3a4a; }
 QSplitter::handle:horizontal { width: 2px; }
+QDockWidget { background-color: #2a2a3a; color: #e0e0e0; }
+QDockWidget::title {
+    background-color: #2a2a3a; color: #4fc3f7;
+    padding: 4px 8px; font-weight: bold;
+    border-bottom: 1px solid #3a3a4a;
+}
 QLineEdit {
     background-color: #2a2a3a; color: #e0e0e0;
     border: 1px solid #3a3a4a; padding: 3px 6px; border-radius: 3px;
@@ -255,8 +264,13 @@ class MainWindow(QMainWindow):
         # ── Selection state ────────────────────────────────────
         self._selected_measurement: Optional[Measurement] = None
 
+        # ── dBm range (mirrored from canvas/properties for side view) ─
+        self._min_dbm: float = -90.0
+        self._max_dbm: float = -30.0
+
         self._setup_menubar()
         self._setup_central_widget()
+        self._setup_side_view()      # creates _side_view + _side_dock
         self._setup_statusbar()
 
         # ── Wire canvas ────────────────────────────────────────
@@ -292,6 +306,7 @@ class MainWindow(QMainWindow):
         pp.delete_measurement_requested.connect(self._on_delete_measurement)
         pp.heatmap_opacity_changed.connect(self._on_opacity_changed)
         pp.thresholds_changed.connect(cv.set_dbm_range)
+        pp.thresholds_changed.connect(self._on_thresholds_changed)
 
         # ── Dirty title ────────────────────────────────────────
         self._undo_stack.indexChanged.connect(lambda _: self._update_title())
@@ -326,18 +341,18 @@ class MainWindow(QMainWindow):
         redo_action.setShortcut(QKeySequence("Ctrl+Y"))
         bearbeiten.addAction(redo_action)
 
-        ansicht = menubar.addMenu("Ansicht")
+        self._ansicht_menu = menubar.addMenu("Ansicht")
         self._heatmap_action = QAction("Heatmap ein/aus", self)
         self._heatmap_action.setCheckable(True)
         self._heatmap_action.setChecked(True)
         self._heatmap_action.triggered.connect(self._toggle_heatmap)
-        ansicht.addAction(self._heatmap_action)
+        self._ansicht_menu.addAction(self._heatmap_action)
 
         self._grid_action = QAction("Raster ein/aus", self)
         self._grid_action.setCheckable(True)
         self._grid_action.setChecked(False)
         self._grid_action.triggered.connect(self._toggle_grid)
-        ansicht.addAction(self._grid_action)
+        self._ansicht_menu.addAction(self._grid_action)
 
     def _make_action(
         self, label: str, slot, shortcut: QKeySequence | None = None
@@ -382,6 +397,37 @@ class MainWindow(QMainWindow):
 
         self._floor_tab_bar = FloorTabBar()
         root_layout.addWidget(self._floor_tab_bar)
+
+    # ------------------------------------------------------------------
+    # Side view dock
+    # ------------------------------------------------------------------
+
+    def _setup_side_view(self) -> None:
+        self._side_view = SideView()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self._side_view)
+        scroll.setStyleSheet(
+            "QScrollArea { border: none; background-color: #2a2a3a; }"
+        )
+
+        self._side_dock = QDockWidget("Seitenansicht", self)
+        self._side_dock.setWidget(scroll)
+        self._side_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea
+            | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self._side_dock.setMinimumWidth(180)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._side_dock)
+
+        # Add toggle action to Ansicht menu
+        side_action = self._side_dock.toggleViewAction()
+        side_action.setText("Seitenansicht ein/aus")
+        self._ansicht_menu.addSeparator()
+        self._ansicht_menu.addAction(side_action)
+
+        self._side_view.measurement_clicked.connect(self._on_side_view_clicked)
 
     # ------------------------------------------------------------------
     # Status bar
@@ -506,6 +552,7 @@ class MainWindow(QMainWindow):
         )
         self._canvas_widget.place_measurement(m)
         self._properties_panel.show_measurement(m)
+        self._refresh_side_view()
         self.update_status(
             ssid=result.ssid,
             signal=f"{result.dbm:.1f} dBm  ({result.signal_percent} %)",
@@ -542,9 +589,11 @@ class MainWindow(QMainWindow):
     def _on_delete_measurement(self, m: Measurement) -> None:
         self._canvas_widget.remove_measurement_item(m)
         self._properties_panel.show_floor(self._canvas_widget.current_floor())
+        self._refresh_side_view()
 
     def _on_router_changed(self, _pos) -> None:
         self._update_router_distance()
+        self._refresh_side_view()
 
     def _update_router_distance(self) -> None:
         m     = self._selected_measurement
@@ -558,6 +607,34 @@ class MainWindow(QMainWindow):
 
     def _on_opacity_changed(self, opacity: int) -> None:
         self._canvas_widget.set_heatmap_opacity(opacity)
+
+    def _on_thresholds_changed(self, min_dbm: float, max_dbm: float) -> None:
+        self._min_dbm = min_dbm
+        self._max_dbm = max_dbm
+        self._side_view.set_dbm_range(min_dbm, max_dbm)
+
+    def _refresh_side_view(self) -> None:
+        if self._project is None:
+            return
+        self._side_view.set_project(
+            self._project.floors, self._min_dbm, self._max_dbm
+        )
+
+    def _on_side_view_clicked(self, floor: Floor, m: Measurement) -> None:
+        if self._project is None:
+            return
+        try:
+            idx = self._project.floors.index(floor)
+        except ValueError:
+            return
+        current_idx = self._floor_tab_bar.current_index()
+        if idx != current_idx:
+            self._floor_tab_bar.set_current_index(idx)
+            self._on_tab_changed(idx)
+        self._canvas_widget.scroll_to_measurement(m)
+        self._selected_measurement = m
+        self._properties_panel.show_measurement(m)
+        self._update_router_distance()
 
     def _on_heatmap_computing(self, computing: bool) -> None:
         if computing:
@@ -588,6 +665,7 @@ class MainWindow(QMainWindow):
         self._floor_tab_bar.set_current_index(0)
         self._update_floor_label()
         self._update_title()
+        self._refresh_side_view()
 
     def _sync_tabs(self) -> None:
         floors = self._project.floors if self._project else []
@@ -629,6 +707,7 @@ class MainWindow(QMainWindow):
         self._floor_tab_bar.set_current_index(idx)
         self._canvas_widget.set_active_floor(floor)
         self._properties_panel.show_floor(floor)
+        self._refresh_side_view()
 
     def _on_floor_rename(self, idx: int) -> None:
         if not self._project or idx >= len(self._project.floors):
@@ -642,6 +721,7 @@ class MainWindow(QMainWindow):
             self._sync_tabs()
             self._floor_tab_bar.set_current_index(idx)
             self._update_floor_label()
+            self._refresh_side_view()
 
     def _on_floor_duplicate(self, idx: int) -> None:
         if not self._project or idx >= len(self._project.floors):
@@ -665,6 +745,7 @@ class MainWindow(QMainWindow):
         self._floor_tab_bar.set_current_index(new_idx)
         self._canvas_widget.set_active_floor(new_floor)
         self._properties_panel.show_floor(new_floor)
+        self._refresh_side_view()
 
     def _on_floor_move_up(self, idx: int) -> None:
         """Move the floor at *idx* one position to the left (lower tab index)."""
@@ -692,6 +773,7 @@ class MainWindow(QMainWindow):
         new_idx = floors.index(active) if active in floors else min(a, b)
         self._floor_tab_bar.set_current_index(new_idx)
         self._update_floor_label()
+        self._refresh_side_view()
 
     def _on_floor_remove(self, idx: int) -> None:
         if not self._project or len(self._project.floors) <= 1:
@@ -712,6 +794,7 @@ class MainWindow(QMainWindow):
         new_floor = self._project.floors[new_idx]
         self._canvas_widget.set_active_floor(new_floor)
         self._properties_panel.show_floor(new_floor)
+        self._refresh_side_view()
 
     # ------------------------------------------------------------------
     # File operations

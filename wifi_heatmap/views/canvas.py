@@ -830,6 +830,17 @@ class CanvasWidget(QGraphicsView):
         if self._heatmap_overlay is not None:
             self._heatmap_overlay.update_heatmap()
 
+    def scroll_to_measurement(self, m: Measurement) -> None:
+        """Center the view on *m* and select it (switches to SELECT mode)."""
+        item = self._measurement_items.get(id(m))
+        if item is None:
+            return
+        if self._mode != CanvasMode.SELECT:
+            self.set_mode(CanvasMode.SELECT)
+        self.centerOn(item)
+        self._scene.clearSelection()
+        item.setSelected(True)
+
     # ──────────────────────────────────────────────────────────
     # Zoom
     # ──────────────────────────────────────────────────────────
