@@ -252,6 +252,7 @@ class MainWindow(QMainWindow):
         cv.pending_changed.connect(self._on_pending_changed)
         cv.measurement_selected.connect(self._on_measurement_selected)
         cv.router_changed.connect(self._on_router_changed)
+        cv.heatmap_computing.connect(self._on_heatmap_computing)
 
         # ── Wire toolbar ───────────────────────────────────────
         tb = self._toolbar_widget
@@ -536,7 +537,13 @@ class MainWindow(QMainWindow):
         self._router_dist_label.setText(f"📡 {dist_px:.0f} px")
 
     def _on_opacity_changed(self, opacity: int) -> None:
-        pass  # heatmap overlay opacity — wired when overlay is implemented
+        self._canvas_widget.set_heatmap_opacity(opacity)
+
+    def _on_heatmap_computing(self, computing: bool) -> None:
+        if computing:
+            self._signal_label.setText("  Heatmap wird berechnet…")
+        else:
+            self._signal_label.setText("Signal: —")
 
     # ------------------------------------------------------------------
     # Project management
@@ -756,7 +763,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _toggle_heatmap(self, checked: bool) -> None:
-        pass
+        self._canvas_widget.set_heatmap_visible(checked)
 
     def _toggle_grid(self, checked: bool) -> None:
         self._canvas_widget.set_show_grid(checked)

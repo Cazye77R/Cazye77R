@@ -45,7 +45,7 @@ from PySide6.QtWidgets import (
 
 from models.floor import Floor
 from models.measurement import Measurement
-from utils.colors import dbm_to_color
+from utils.colors import create_legend_gradient, dbm_to_color
 from utils.snap import SnapType, snap_point
 from views.commands import (
     AddElementCommand,
@@ -56,6 +56,11 @@ from views.commands import (
     SetBackgroundCommand,
     SetRouterCommand,
 )
+
+try:
+    from views.heatmap_overlay import HeatmapOverlay as _HeatmapOverlay
+except ImportError:
+    _HeatmapOverlay = None  # type: ignore[assignment,misc]
 
 
 class CanvasMode(enum.Enum):
@@ -77,6 +82,7 @@ _Z_GRID:           int = 1
 _Z_ELEMENTS:       int = 10
 _Z_PREVIEW:        int = 20
 _Z_SNAP_INDICATOR: int = 30
+_Z_HEATMAP:        int = 5
 _Z_ROUTER_LINE:    int = 49
 _Z_ROUTER:         int = 50
 _Z_MEASUREMENTS:   int = 100
@@ -550,6 +556,7 @@ class CanvasWidget(QGraphicsView):
     pending_changed      = Signal(bool)    # True = pending marker placed
     measurement_selected = Signal(object)  # Measurement | None
     router_changed       = Signal(object)  # QPointF | None
+    heatmap_computing    = Signal(bool)    # True while heatmap worker runs
 
     _MENU_STYLE = (
         "QMenu { background-color:#2a2a3a; color:#e0e0e0; border:1px solid #3a3a4a; }"
@@ -637,6 +644,12 @@ class CanvasWidget(QGraphicsView):
         self._router_line:          Optional[QGraphicsLineItem]    = None
         self._pre_drag_router_pos:  Optional[tuple[float, float]]  = None
 
+        # ── Heatmap state ──────────────────────────────────────
+        self._heatmap_overlay:  object           = None   # Optional[_HeatmapOverlay]
+        self._heatmap_visible:  bool             = True
+        self._heatmap_opacity:  int              = 50     # 0–100
+        self._legend_pixmap:    Optional[QPixmap] = None   # cached
+
         # ── Undo / redo ────────────────────────────────────────
         self._undo_stack: Optional[QUndoStack] = None
 
@@ -686,13 +699,30 @@ class CanvasWidget(QGraphicsView):
     def set_dbm_range(self, min_dbm: float, max_dbm: float) -> None:
         self._min_dbm = min_dbm
         self._max_dbm = max_dbm
+        self._legend_pixmap = None   # invalidate legend cache
         for item in self._measurement_items.values():
             item.update_color(min_dbm, max_dbm)
+        if self._heatmap_overlay is not None:
+            self._heatmap_overlay.set_dbm_range(min_dbm, max_dbm)
+            self._heatmap_overlay.update_heatmap()
         self._scene.update()
+        self.viewport().update()   # repaint legend
 
     def set_ssid_filter(self, ssid: Optional[str]) -> None:
         self._ssid_filter = ssid
         self._rebuild_scene()
+
+    def set_heatmap_visible(self, visible: bool) -> None:
+        self._heatmap_visible = visible
+        if self._heatmap_overlay is not None:
+            self._heatmap_overlay.setVisible(visible)
+        self.viewport().update()   # repaint legend
+
+    def set_heatmap_opacity(self, pct: int) -> None:
+        self._heatmap_opacity = pct
+        if self._heatmap_overlay is not None:
+            self._heatmap_overlay.set_opacity_percent(pct)
+            self._heatmap_overlay.update_heatmap()
 
     # ──────────────────────────────────────────────────────────
     # Public API — floor management
@@ -751,6 +781,8 @@ class CanvasWidget(QGraphicsView):
             self._measurement_items[id(m)] = item
         self._push_cmd(AddMeasurementCommand(self._floor, m, self._rebuild_scene))
         self.pending_changed.emit(False)
+        if self._heatmap_overlay is not None:
+            self._heatmap_overlay.update_heatmap()
 
     def cancel_pending_measurement(self) -> None:
         self._clear_pending_marker()
@@ -795,6 +827,8 @@ class CanvasWidget(QGraphicsView):
             self.measurement_selected.emit(None)
         if self._floor is not None:
             self._push_cmd(RemoveMeasurementCommand(self._floor, m, self._rebuild_scene))
+        if self._heatmap_overlay is not None:
+            self._heatmap_overlay.update_heatmap()
 
     # ──────────────────────────────────────────────────────────
     # Zoom
@@ -830,8 +864,9 @@ class CanvasWidget(QGraphicsView):
         self._bg_move_mode = False
         self._element_items.clear()
         self._measurement_items.clear()
-        self._router_item = None
-        self._router_line = None
+        self._router_item     = None
+        self._router_line     = None
+        self._heatmap_overlay = None   # removed with scene; will be recreated below
         self._snap_indicator.setVisible(False)
 
         if self._floor is None:
@@ -841,6 +876,7 @@ class CanvasWidget(QGraphicsView):
         self._restore_elements()
         self._restore_measurements()
         self._restore_router()
+        self._restore_heatmap()
         self._update_cursor()
 
     def _load_bg_pixmap(self, path: str) -> None:
@@ -897,6 +933,20 @@ class CanvasWidget(QGraphicsView):
         self._scene.addItem(item)
         self._router_item = item
         self._update_router_line()
+
+    def _restore_heatmap(self) -> None:
+        if _HeatmapOverlay is None or self._floor is None:
+            return
+        overlay = _HeatmapOverlay()
+        overlay.setZValue(_Z_HEATMAP)
+        overlay.setVisible(self._heatmap_visible)
+        overlay.set_floor(self._floor)
+        overlay.set_dbm_range(self._min_dbm, self._max_dbm)
+        overlay.set_opacity_percent(self._heatmap_opacity)
+        overlay.computing_changed.connect(self.heatmap_computing)
+        self._scene.addItem(overlay)
+        self._heatmap_overlay = overlay
+        overlay.update_heatmap()
 
     def _make_rect_item(self, d: dict) -> _RectElement:
         item = _RectElement(QRectF(0.0, 0.0, d["w"], d["h"]), d["id"])
@@ -1450,3 +1500,21 @@ class CanvasWidget(QGraphicsView):
             CanvasMode.DELETE:  Qt.CursorShape.ForbiddenCursor,
         }
         self.setCursor(QCursor(cursor_map.get(self._mode, Qt.CursorShape.ArrowCursor)))
+
+    def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
+        """Paint the dBm legend in the top-right corner of the viewport."""
+        if not self._heatmap_visible:
+            return
+        if self._floor is None or not self._floor.measurements:
+            return
+
+        if self._legend_pixmap is None:
+            self._legend_pixmap = create_legend_gradient(
+                80, 160, self._min_dbm, self._max_dbm
+            )
+        px = self._legend_pixmap
+        painter.save()
+        painter.resetTransform()   # switch from scene → viewport coordinates
+        vp = self.viewport()
+        painter.drawPixmap(vp.width() - px.width() - 8, 8, px)
+        painter.restore()

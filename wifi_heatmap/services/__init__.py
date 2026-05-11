@@ -1,8 +1,9 @@
 from services.wifi_scanner import WifiScanner, WifiResult, WifiNetwork, WifiError
 
 try:
-    from services.interpolation import interpolate_measurements
+    from services.interpolation import HeatmapGenerator, interpolate_measurements
 except ImportError:
+    HeatmapGenerator        = None  # type: ignore[assignment,misc]
     interpolate_measurements = None  # type: ignore[assignment]
 
 try:
@@ -15,6 +16,7 @@ __all__ = [
     "WifiResult",
     "WifiNetwork",
     "WifiError",
+    "HeatmapGenerator",
     "interpolate_measurements",
     "Exporter",
 ]
