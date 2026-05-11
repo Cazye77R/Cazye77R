@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Home Office Tracker</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d2e;
+      --surface2: #252840;
+      --border: #2e3250;
+      --accent: #5b8dee;
+      --accent2: #a78bfa;
+      --green: #34d399;
+      --orange: #fb923c;
+      --red: #f87171;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --radius: 10px;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 28px; }
+
+    /* ---- Layout ---- */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .card h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+
+    /* ---- Stats ---- */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+    .stat-label { font-size: 0.75rem; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-value { font-size: 1.8rem; font-weight: 700; line-height: 1; }
+    .stat-sub { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
+    .c-blue  { color: var(--accent); }
+    .c-green { color: var(--green); }
+    .c-orange{ color: var(--orange); }
+    .c-purple{ color: var(--accent2); }
+
+    /* ---- Progress bar ---- */
+    .progress-wrap { margin-top: 8px; }
+    .progress-label { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--muted); margin-bottom: 4px; }
+    .progress { background: var(--surface2); border-radius: 999px; height: 8px; overflow: hidden; }
+    .progress-fill { height: 100%; border-radius: 999px; transition: width 0.4s ease; }
+    .fill-blue   { background: var(--accent); }
+    .fill-green  { background: var(--green); }
+    .fill-orange { background: var(--orange); }
+
+    /* ---- Form ---- */
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr auto;
+      gap: 10px;
+      align-items: end;
+    }
+    @media (max-width: 800px) { .form-row { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 500px) { .form-row { grid-template-columns: 1fr; } }
+
+    label { display: block; font-size: 0.78rem; color: var(--muted); margin-bottom: 5px; }
+
+    input[type="date"],
+    input[type="number"],
+    input[type="text"],
+    textarea {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 8px 10px;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus, textarea:focus { border-color: var(--accent); }
+    input[type="number"] { -moz-appearance: textfield; }
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+    .btn {
+      padding: 8px 18px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 600;
+      transition: opacity 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-ghost   { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-danger  { background: #3d1f1f; color: var(--red); border: 1px solid #5c2626; }
+    .btn-green   { background: #14432e; color: var(--green); border: 1px solid #1e6644; }
+    .btn:hover   { opacity: 0.85; }
+
+    .btn-group { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+
+    /* ---- Table ---- */
+    .table-wrap { overflow-x: auto; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    thead th {
+      text-align: left;
+      padding: 8px 10px;
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background 0.15s; }
+    tbody tr:hover { background: var(--surface2); }
+    tbody td { padding: 9px 10px; vertical-align: middle; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge-green  { background: #14432e; color: var(--green); }
+    .badge-orange { background: #3d2710; color: var(--orange); }
+    .badge-red    { background: #3d1f1f; color: var(--red); }
+
+    .del-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .del-btn:hover { color: var(--red); background: #3d1f1f; }
+
+    .edit-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: color 0.15s, background 0.15s;
+      margin-right: 2px;
+    }
+    .edit-btn:hover { color: var(--accent); background: rgba(91,141,238,0.12); }
+
+    .form-editing #addBtn { background: var(--green); }
+    .form-editing #addBtn:hover { opacity: 0.85; }
+
+    /* ---- Chart ---- */
+    .chart-container {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      height: 120px;
+      overflow-x: auto;
+      padding-bottom: 20px;
+      position: relative;
+    }
+    .chart-bar-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      flex-shrink: 0;
+      width: 28px;
+    }
+    .chart-bar {
+      width: 100%;
+      border-radius: 3px 3px 0 0;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .chart-bar:hover { opacity: 0.75; }
+    .chart-label { font-size: 0.6rem; color: var(--muted); writing-mode: vertical-rl; transform: rotate(180deg); height: 40px; line-height: 1; }
+    .chart-legend { display: flex; gap: 16px; margin-top: 8px; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--muted); }
+    .legend-dot  { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+    /* ---- Filter/Sort ---- */
+    .filter-row { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+    .filter-row input, .filter-row select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.85rem;
+      outline: none;
+    }
+    .filter-row select option { background: var(--surface2); }
+
+    /* ---- Toast ---- */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.25s, transform 0.25s;
+      pointer-events: none;
+      z-index: 9999;
+      max-width: 300px;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+
+    /* ---- Modal ---- */
+    .modal-backdrop {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      width: 90%;
+      max-width: 480px;
+    }
+    .modal h2 { margin-bottom: 12px; }
+    .modal textarea { min-height: 120px; font-family: monospace; font-size: 0.8rem; }
+    .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+    .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+    .empty { text-align: center; color: var(--muted); padding: 32px; font-size: 0.9rem; }
+
+    /* ---- Year summary ---- */
+    .year-select { background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 10px; font-size: 0.85rem; }
+
+    /* ---- Monthly table ---- */
+    tbody tr.year-row { background: var(--surface2); font-weight: 600; }
+    tbody tr.year-row td { border-top: 2px solid var(--border); }
+    tbody tr.year-spacer { height: 8px; border: none; }
+    tbody tr.year-spacer td { border: none; padding: 0; }
+    .pauschale-note { color: var(--green); font-size: 0.75rem; margin-left: 8px; }
+
+    /* ---- Calendar ---- */
+    .calendar { margin-bottom: 14px; }
+    .cal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+    .cal-title  { font-size:0.88rem; font-weight:600; color:var(--text); }
+    .cal-nav-btn { background:none; border:1px solid var(--border); color:var(--muted); border-radius:4px; cursor:pointer; padding:1px 8px; font-size:1rem; line-height:1.6; transition:color 0.15s,border-color 0.15s; }
+    .cal-nav-btn:hover { color:var(--text); border-color:var(--accent); }
+    .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+    .cal-weekday-hdr { text-align:center; font-size:0.6rem; color:var(--muted); font-weight:600; padding:3px 0; text-transform:uppercase; }
+    .cal-day { aspect-ratio:1; display:flex; flex-direction:column; align-items:center; justify-content:center; border-radius:4px; font-size:0.75rem; cursor:pointer; border:1px solid transparent; transition:background 0.12s,border-color 0.12s; }
+    .cal-day.empty { cursor:default; visibility:hidden; }
+    .cal-day:not(.empty):hover { background:var(--surface2); border-color:var(--border); }
+    .cal-day.today { border-color:var(--accent); color:var(--accent); font-weight:700; }
+    .cal-day.selected { background:var(--accent) !important; color:#fff !important; border-color:var(--accent) !important; }
+    .cal-day.has-ho     { background:rgba(52,211,153,0.22); }
+    .cal-day.has-office { background:rgba(251,146,60,0.22); }
+    .cal-day-hours { font-size:0.55rem; color:var(--muted); line-height:1; margin-top:1px; }
+    .cal-day.selected .cal-day-hours { color:rgba(255,255,255,0.8) !important; }
+
+    /* ---- Entry type toggle ---- */
+    .entry-type-toggle { display:flex; gap:20px; margin-bottom:12px; }
+    .entry-type-toggle label { display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.88rem; color:var(--text); }
+    .entry-type-toggle input[type="radio"] { accent-color:var(--accent); width:14px; height:14px; }
+
+    /* ---- Recurring ---- */
+    .recurring-section { display: none; border-top: 1px solid var(--border); margin-top: 16px; padding-top: 16px; }
+    .recurring-section.open { display: block; }
+    .weekday-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .pill-check { display: flex; align-items: center; cursor: pointer; }
+    .pill-check input[type="checkbox"] { display: none; }
+    .pill-check span {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      user-select: none;
+    }
+    .pill-check input:checked + span { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+    /* ---- Print ---- */
+    .print-only { display: none; }
+    @media print {
+      :root {
+        --bg: #fff; --surface: #fff; --surface2: #f5f5f7;
+        --border: #ccc; --text: #111; --muted: #555;
+        --accent: #1d4ed8; --accent2: #6d28d9;
+        --green: #047857; --orange: #b45309; --red: #b91c1c;
+      }
+      body { background: #fff; padding: 0; font-size: 11pt; }
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+      #toast, .modal-backdrop { display: none !important; }
+      .edit-btn, .del-btn { display: none !important; }
+      .filter-row { display: none !important; }
+      .chart-container, .chart-legend { display: none !important; }
+      .card { border: 1px solid #ccc; break-inside: avoid; box-shadow: none; margin-bottom: 10px; }
+      .stats-grid { break-inside: avoid; }
+      .badge { border: 1px solid currentColor; }
+      .progress { background: #e5e7eb; }
+      .progress-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .grid-2 { display: none !important; }
+      hr.divider { margin: 8px 0; }
+    }
+  </style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+  <h1>Home Office Tracker</h1>
+  <button class="btn btn-ghost no-print" onclick="window.print()" style="margin-top:2px">&#128424; Drucken</button>
+</div>
+<p class="subtitle">Erfasse deine Homeoffice-Tage und die private Hardwarenutzung zur steuerlichen Auswertung.</p>
+<p class="print-only" style="font-size:0.82rem;color:var(--muted);margin-bottom:16px">Erstellt am: <span id="printDate"></span></p>
+
+<!-- Stats -->
+<div class="stats-grid" id="statsGrid">
+  <div class="stat">
+    <div class="stat-label">HO-Tage</div>
+    <div class="stat-value c-blue" id="s-hoDays">0</div>
+    <div class="stat-sub">Homeoffice-Tage</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Bürotage</div>
+    <div class="stat-value c-orange" id="s-officeDays">0</div>
+    <div class="stat-sub">Tage im Büro</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">HO-Stunden gesamt</div>
+    <div class="stat-value c-green" id="s-hoHours">0h</div>
+    <div class="stat-sub">Homeoffice gearbeitet</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Privatnutzung gesamt</div>
+    <div class="stat-value c-orange" id="s-privHours">0h</div>
+    <div class="stat-sub">Private Hardwarenutzung</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Berufl. Nutzungsanteil</div>
+    <div class="stat-value c-purple" id="s-pct">0%</div>
+    <div class="stat-sub">für Steuer relevant</div>
+  </div>
+</div>
+
+<!-- Progress bars -->
+<div class="card" style="margin-bottom:16px">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+    <h2 style="margin:0">Auswertung</h2>
+    <select class="year-select" id="yearSelect" onchange="render()"></select>
+  </div>
+  <div class="progress-wrap" style="margin-bottom:14px">
+    <div class="progress-label"><span>Berufliche Nutzung</span><span id="pb-label1">0% von 100%</span></div>
+    <div class="progress"><div class="progress-fill fill-blue" id="pb1" style="width:0%"></div></div>
+  </div>
+  <div class="progress-wrap" style="margin-bottom:14px">
+    <div class="progress-label"><span>Private Nutzung</span><span id="pb-label2">0% von 100%</span></div>
+    <div class="progress"><div class="progress-fill fill-orange" id="pb2" style="width:0%"></div></div>
+  </div>
+  <div class="progress-wrap">
+    <div class="progress-label"><span>Ø HO-Stunden / Tag</span><span id="pb-label3">0h</span></div>
+    <div class="progress"><div class="progress-fill fill-green" id="pb3" style="width:0%"></div></div>
+  </div>
+  <div class="chart-legend" style="margin-top:16px">
+    <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div> Homeoffice-Stunden</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div> Privatnutzung-Stunden</div>
+  </div>
+  <div class="chart-container" id="chart" style="margin-top:10px"></div>
+</div>
+
+<!-- Monatstabelle -->
+<div class="card" style="margin-bottom:16px">
+  <h2>Monatsübersicht</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Monat</th>
+          <th>Arbeitstage</th>
+          <th>HO-Tage</th>
+          <th>Bürotage</th>
+          <th>HO-Stunden</th>
+          <th>Privatnutzung</th>
+          <th>Berufl. Anteil</th>
+          <th>Fahrtkosten / Pauschale</th>
+        </tr>
+      </thead>
+      <tbody id="monthlyBody"></tbody>
+    </table>
+    <div class="empty" id="monthlyEmpty" style="display:none">Keine Daten für den gewählten Zeitraum.</div>
+  </div>
+</div>
+
+<div class="grid-2 no-print">
+  <!-- Eingabe -->
+  <div class="card" id="entryFormCard">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h2 style="margin:0">Eintrag hinzufügen</h2>
+      <button class="btn btn-ghost" onclick="toggleRecurring()" style="font-size:0.8rem;padding:5px 12px">&#8635; Mehrere Tage</button>
+    </div>
+    <!-- Kalender -->
+    <div class="calendar no-print">
+      <div class="cal-header">
+        <button class="cal-nav-btn" onclick="prevMonth()">&#8249;</button>
+        <span class="cal-title" id="calTitle"></span>
+        <button class="cal-nav-btn" onclick="nextMonth()">&#8250;</button>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+    </div>
+
+    <!-- Typ-Auswahl -->
+    <div class="entry-type-toggle no-print">
+      <label><input type="radio" name="entryType" value="ho" checked onchange="toggleEntryType('ho')"> Homeoffice</label>
+      <label><input type="radio" name="entryType" value="office" onchange="toggleEntryType('office')"> Bürotag</label>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label>Datum</label>
+        <div style="display:flex;gap:6px">
+          <input type="date" id="f-date" style="flex:1" />
+          <button class="btn btn-ghost" onclick="setToday()" style="padding:8px 10px;flex-shrink:0" title="Heute">&#8634;</button>
+        </div>
+      </div>
+      <div id="fHoWrap">
+        <label id="fHoLabel">HO-Stunden</label>
+        <input type="number" id="f-ho" min="0" max="24" step="0.25" value="0" />
+      </div>
+      <div id="fKmWrap" style="display:none">
+        <label>Entfernung (km)</label>
+        <input type="number" id="f-km" min="1" max="999" step="1" value="21" />
+      </div>
+      <div>
+        <label>Privatnutzung (h)</label>
+        <input type="number" id="f-priv" min="0" max="24" step="0.25" value="0" />
+      </div>
+      <div>
+        <label>Notiz (opt.)</label>
+        <input type="text" id="f-note" placeholder="z.B. Meeting…" maxlength="80" />
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="addBtn" onclick="addEntry()">+ Hinzufügen</button>
+          <button class="btn btn-ghost" id="cancelEditBtn" onclick="cancelEdit()" style="display:none">&#x2715; Abbrechen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Wiederholen -->
+    <div id="recurringSection" class="recurring-section">
+      <div class="form-row" style="grid-template-columns:1fr 1fr 1fr 1fr">
+        <div>
+          <label>Von</label>
+          <input type="date" id="r-from" oninput="updateRecurringCount()" />
+        </div>
+        <div>
+          <label>Bis</label>
+          <input type="date" id="r-to" oninput="updateRecurringCount()" />
+        </div>
+        <div>
+          <label>HO-Stunden</label>
+          <input type="number" id="r-ho" min="0" max="24" step="0.25" placeholder="8" />
+        </div>
+        <div>
+          <label>Privatnutzung (h)</label>
+          <input type="number" id="r-priv" min="0" max="24" step="0.25" placeholder="1" />
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <label>Wochentage</label>
+        <div class="weekday-pills">
+          <label class="pill-check"><input type="checkbox" name="rwd" value="1" checked onchange="updateRecurringCount()" /><span>Mo</span></label>
+          <label class="pill-check"><input type="checkbox" name="rwd" value="2" checked onchange="updateRecurringCount()" /><span>Di</span></label>
+          <label class="pill-check"><input type="checkbox" name="rwd" value="3" checked onchange="updateRecurringCount()" /><span>Mi</span></label>
+          <label class="pill-check"><input type="checkbox" name="rwd" value="4" checked onchange="updateRecurringCount()" /><span>Do</span></label>
+          <label class="pill-check"><input type="checkbox" name="rwd" value="5" checked onchange="updateRecurringCount()" /><span>Fr</span></label>
+          <label class="pill-check"><input type="checkbox" name="rwd" value="6" onchange="updateRecurringCount()" /><span>Sa</span></label>
+          <label class="pill-check"><input type="checkbox" name="rwd" value="0" onchange="updateRecurringCount()" /><span>So</span></label>
+        </div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="addRecurring()"><span id="recurringCount">0</span> Einträge anlegen</button>
+        <span style="font-size:0.78rem;color:var(--muted)">Bestehende Tage werden übersprungen.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import / Export -->
+  <div class="card">
+    <h2>Import &amp; Export</h2>
+    <div class="btn-group">
+      <button class="btn btn-green" onclick="exportCSV()">&#8595; CSV exportieren</button>
+      <button class="btn btn-ghost" onclick="openImportModal()">&#8593; CSV importieren</button>
+      <button class="btn btn-danger" onclick="clearAll()">&#x2715; Alle löschen</button>
+    </div>
+    <p style="font-size:0.78rem; color:var(--muted); line-height:1.5;">
+      CSV-Format: <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:0.75rem">Datum,HO-h,Privat,Notiz,Typ,KM</code><br>
+      Datum im Format <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:0.75rem">YYYY-MM-DD</code>, Typ: <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:0.75rem">ho</code> oder <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:0.75rem">office</code>
+    </p>
+    <hr style="border:none;border-top:1px solid var(--border);margin:12px 0" />
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <label style="font-size:0.82rem;color:var(--muted)">Standard-Entfernung:</label>
+      <input type="number" id="defaultKm" min="1" max="999" step="1" value="21"
+        style="width:70px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:5px 8px;font-size:0.85rem;outline:none"
+        onchange="saveDefaultKm(this.value)" title="Einfache Strecke zur Arbeit" />
+      <span style="font-size:0.78rem;color:var(--muted)">km (einfache Strecke)</span>
+    </div>
+  </div>
+</div>
+
+<hr class="divider" />
+
+<!-- Table -->
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+    <h2 style="margin:0">Alle Einträge</h2>
+    <div class="filter-row" style="margin:0">
+      <input type="month" id="filterMonth" onchange="render()" title="Monat filtern" />
+      <select id="filterSort" onchange="render()">
+        <option value="desc">Neueste zuerst</option>
+        <option value="asc">Älteste zuerst</option>
+      </select>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table id="entriesTable">
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Wochentag</th>
+          <th>Typ</th>
+          <th>HO-Stunden / km</th>
+          <th>Privatnutzung</th>
+          <th>Berufl. Anteil</th>
+          <th>Notiz</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="entriesBody">
+      </tbody>
+    </table>
+    <div class="empty" id="emptyMsg" style="display:none">Noch keine Einträge. Füge deinen ersten Tag hinzu!</div>
+  </div>
+</div>
+
+<!-- Import Modal -->
+<div class="modal-backdrop" id="importModal">
+  <div class="modal">
+    <h2>CSV importieren</h2>
+    <p style="font-size:0.82rem;color:var(--muted);margin-bottom:10px;">
+      Füge den CSV-Inhalt ein. Bestehende Einträge bleiben erhalten (Duplikate werden übersprungen).
+    </p>
+    <label>CSV-Inhalt</label>
+    <textarea id="csvInput" placeholder="Datum,HO-Stunden,Privatnutzung,Notiz&#10;2025-01-15,8,1.5,Projekt X"></textarea>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeImportModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="importCSV()">Importieren</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const STORAGE_KEY = 'ho_tracker_v1';
+
+  // ---- Data ----
+  let entries = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+  }
+
+  // ---- Helpers ----
+  const DAYS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+  const MONTHS = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+
+  function esc(str) {
+    return String(str)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  function fmt(dateStr) {
+    const [y,m,d] = dateStr.split('-');
+    return `${d}.${m}.${y}`;
+  }
+  function weekday(dateStr) {
+    return DAYS[new Date(dateStr + 'T12:00:00').getDay()];
+  }
+  function pctBadge(pct) {
+    if (pct >= 70) return `<span class="badge badge-green">${pct.toFixed(0)}%</span>`;
+    if (pct >= 40) return `<span class="badge badge-orange">${pct.toFixed(0)}%</span>`;
+    return `<span class="badge badge-red">${pct.toFixed(0)}%</span>`;
+  }
+  function toast(msg, dur = 2500) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), dur);
+  }
+  function getYears() {
+    const years = [...new Set(entries.map(e => e.date.slice(0,4)))].sort().reverse();
+    if (years.length === 0) years.push(new Date().getFullYear().toString());
+    return years;
+  }
+
+  // ---- Edit State ----
+  let editingDate = null;
+  let yearSelectInitialized = false;
+
+  function startEdit(date) {
+    const e = entries.find(x => x.date === date);
+    if (!e) return;
+    editingDate = date;
+    const type = e.type || 'ho';
+    document.querySelector(`input[name="entryType"][value="${type}"]`).checked = true;
+    toggleEntryType(type);
+    document.getElementById('f-date').value = e.date;
+    document.getElementById('f-ho').value   = e.ho   || 0;
+    document.getElementById('f-km').value   = e.km   || loadDefaultKm();
+    document.getElementById('f-priv').value = e.priv || 0;
+    document.getElementById('f-note').value = e.note || '';
+    document.getElementById('addBtn').textContent = '✓ Speichern';
+    document.getElementById('cancelEditBtn').style.display = 'inline-block';
+    document.getElementById('entryFormCard').classList.add('form-editing');
+    document.getElementById('entryFormCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    renderCalendar();
+  }
+
+  function cancelEdit() {
+    editingDate = null;
+    document.querySelector('input[name="entryType"][value="ho"]').checked = true;
+    toggleEntryType('ho');
+    document.getElementById('f-date').value = localToday();
+    document.getElementById('f-ho').value   = 0;
+    document.getElementById('f-priv').value = 0;
+    document.getElementById('f-note').value = '';
+    document.getElementById('addBtn').textContent = '+ Hinzufügen';
+    document.getElementById('cancelEditBtn').style.display = 'none';
+    document.getElementById('entryFormCard').classList.remove('form-editing');
+    renderCalendar();
+  }
+
+  // ---- Add / Save Entry ----
+  function addEntry() {
+    const date  = document.getElementById('f-date').value;
+    const type  = document.querySelector('input[name="entryType"]:checked').value;
+    const ho    = parseFloat(document.getElementById('f-ho').value) || 0;
+    const km    = type === 'office' ? (parseFloat(document.getElementById('f-km').value) || 0) : 0;
+    const priv  = parseFloat(document.getElementById('f-priv').value) || 0;
+    const note  = document.getElementById('f-note').value.trim();
+
+    if (!date)                           { toast('Bitte ein Datum eingeben.'); return; }
+    if (type === 'office' && km <= 0)    { toast('Bitte Entfernung in km eingeben.'); return; }
+    if (ho + priv > 24)                  { toast('Summe darf 24h nicht überschreiten.'); return; }
+
+    if (editingDate) {
+      entries = entries.filter(e => e.date !== editingDate);
+      editingDate = null;
+      document.getElementById('addBtn').textContent = '+ Hinzufügen';
+      document.getElementById('cancelEditBtn').style.display = 'none';
+      document.getElementById('entryFormCard').classList.remove('form-editing');
+    }
+
+    if (entries.find(e => e.date === date)) {
+      if (!confirm(`Für ${fmt(date)} existiert bereits ein Eintrag. Überschreiben?`)) return;
+      entries = entries.filter(e => e.date !== date);
+    }
+
+    entries.push({ date, type, ho, km, priv, note });
+    entries.sort((a,b) => a.date.localeCompare(b.date));
+    if (type === 'ho') saveLastValues(ho, priv);
+    save();
+    render();
+    document.getElementById('f-ho').value   = 0;
+    document.getElementById('f-priv').value = 0;
+    document.getElementById('f-note').value = '';
+    if (type === 'ho') loadLastValues();
+    toast(`Eintrag für ${fmt(date)} gespeichert.`);
+  }
+
+  // ---- Delete ----
+  function deleteEntry(date) {
+    if (!confirm(`Eintrag vom ${fmt(date)} wirklich löschen?`)) return;
+    entries = entries.filter(e => e.date !== date);
+    save();
+    render();
+    toast('Eintrag gelöscht.');
+  }
+
+  // ---- Clear All ----
+  function clearAll() {
+    if (!confirm('Wirklich ALLE Einträge löschen? Diese Aktion kann nicht rückgängig gemacht werden!')) return;
+    entries = [];
+    save();
+    render();
+    toast('Alle Einträge gelöscht.');
+  }
+
+  // ---- Export CSV ----
+  function exportCSV() {
+    if (entries.length === 0) { toast('Keine Daten zum Exportieren.'); return; }
+    const header = 'Datum,HO-Stunden,Privatnutzung,Notiz,Typ,KM';
+    const rows = entries.map(e =>
+      `${e.date},${e.ho||0},${e.priv||0},"${(e.note||'').replace(/"/g,'""')}",${e.type||'ho'},${e.km||0}`
+    );
+    const csv = [header, ...rows].join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `homeoffice_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast(`${entries.length} Einträge exportiert.`);
+  }
+
+  // ---- Import CSV ----
+  function openImportModal() {
+    document.getElementById('importModal').classList.add('open');
+    document.getElementById('csvInput').value = '';
+  }
+  function closeImportModal() {
+    document.getElementById('importModal').classList.remove('open');
+  }
+  function importCSV() {
+    const raw = document.getElementById('csvInput').value.trim();
+    if (!raw) { toast('Kein Inhalt eingegeben.'); return; }
+    const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+    let imported = 0, skipped = 0;
+    for (const line of lines) {
+      if (line.toLowerCase().startsWith('datum')) continue; // header
+      // parse CSV respecting quoted fields
+      const cols = parseCSVLine(line);
+      if (cols.length < 2) { skipped++; continue; }
+      const date = cols[0].trim();
+      const ho   = parseFloat(cols[1]) || 0;
+      const priv = parseFloat(cols[2]) || 0;
+      const note = (cols[3] || '').trim();
+      const type = cols.length >= 5 ? (cols[4].trim() || 'ho') : 'ho';
+      const km   = cols.length >= 6 ? (parseFloat(cols[5]) || 0) : 0;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { skipped++; continue; }
+      if (entries.find(e => e.date === date)) { skipped++; continue; }
+      entries.push({ date, type, ho, km, priv, note });
+      imported++;
+    }
+    entries.sort((a,b) => a.date.localeCompare(b.date));
+    save();
+    yearSelectInitialized = false;
+    render();
+    closeImportModal();
+    toast(`${imported} importiert, ${skipped} übersprungen.`);
+  }
+  function parseCSVLine(line) {
+    const result = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"' && !inQ) { inQ = true; continue; }
+      if (c === '"' && inQ) {
+        if (line[i+1] === '"') { cur += '"'; i++; } else inQ = false;
+        continue;
+      }
+      if (c === ',' && !inQ) { result.push(cur); cur = ''; continue; }
+      cur += c;
+    }
+    result.push(cur);
+    return result;
+  }
+
+  // ---- Calendar ----
+  const MONTH_NAMES_LONG = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+  let calState = { month: new Date().getMonth(), year: new Date().getFullYear() };
+
+  function renderCalendar() {
+    const { month, year } = calState;
+    document.getElementById('calTitle').textContent = MONTH_NAMES_LONG[month] + ' ' + year;
+    const selectedDate = document.getElementById('f-date').value;
+    const today = localToday();
+    const entryMap = {};
+    for (const e of entries) entryMap[e.date] = { type: e.type || 'ho', ho: e.ho || 0 };
+    const firstDow  = new Date(year, month, 1).getDay();
+    const startOff  = (firstDow + 6) % 7; // Mon=0
+    const daysInMo  = new Date(year, month + 1, 0).getDate();
+    const hdrs = ['Mo','Di','Mi','Do','Fr','Sa','So'].map(d =>
+      `<div class="cal-weekday-hdr">${d}</div>`).join('');
+    let cells = '';
+    for (let i = 0; i < startOff; i++) cells += `<div class="cal-day empty"></div>`;
+    for (let d = 1; d <= daysInMo; d++) {
+      const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const entry = entryMap[ds];
+      let cls = 'cal-day';
+      if (ds === selectedDate)                   cls += ' selected';
+      else if (entry && entry.type === 'ho')     cls += ' has-ho';
+      else if (entry && entry.type === 'office') cls += ' has-office';
+      if (ds === today && ds !== selectedDate) cls += ' today';
+      const hoSpan = (entry && entry.ho > 0)
+        ? `<span class="cal-day-hours">${entry.ho % 1 === 0 ? entry.ho : entry.ho.toFixed(1)}h</span>`
+        : '';
+      cells += `<div class="${cls}" onclick="selectDay('${ds}')">${d}${hoSpan}</div>`;
+    }
+    document.getElementById('calGrid').innerHTML = hdrs + cells;
+  }
+  function prevMonth() {
+    if (calState.month === 0) { calState.month = 11; calState.year--; }
+    else calState.month--;
+    renderCalendar();
+  }
+  function nextMonth() {
+    if (calState.month === 11) { calState.month = 0; calState.year++; }
+    else calState.month++;
+    renderCalendar();
+  }
+  function selectDay(dateStr) {
+    const existing = entries.find(e => e.date === dateStr);
+    if (existing) {
+      startEdit(dateStr);
+    } else {
+      if (editingDate) cancelEdit();
+      document.getElementById('f-date').value = dateStr;
+      renderCalendar();
+    }
+  }
+
+  // ---- Entry type (HO / Bürotag) ----
+  const KM_KEY = 'ho_tracker_km';
+  function saveDefaultKm(val) { localStorage.setItem(KM_KEY, String(parseFloat(val) || 21)); }
+  function loadDefaultKm()    { return parseFloat(localStorage.getItem(KM_KEY) || '21'); }
+
+  function toggleEntryType(type) {
+    document.getElementById('fHoWrap').style.display = '';
+    document.getElementById('fKmWrap').style.display = type === 'office' ? '' : 'none';
+    document.getElementById('fHoLabel').textContent  = type === 'office' ? 'HO-Stunden (opt.)' : 'HO-Stunden';
+    if (type === 'office') document.getElementById('f-km').value = loadDefaultKm();
+  }
+
+  function fahrtkosten(km) {
+    const k = Math.max(0, parseFloat(km) || 0);
+    if (k <= 20) return k * 0.30;
+    return 20 * 0.30 + (k - 20) * 0.38;
+  }
+
+  // ---- Quick entry ----
+  function localToday() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+
+  function setToday() {
+    document.getElementById('f-date').value = localToday();
+  }
+
+  const LAST_KEY = 'ho_tracker_last';
+  function saveLastValues(ho, priv) {
+    localStorage.setItem(LAST_KEY, JSON.stringify({ ho, priv }));
+  }
+  function loadLastValues() {
+    const last = JSON.parse(localStorage.getItem(LAST_KEY) || 'null');
+    if (last) {
+      document.getElementById('f-ho').value   = last.ho;
+      document.getElementById('f-priv').value = last.priv;
+    }
+  }
+
+  // ---- Recurring ----
+  function toggleRecurring() {
+    const sec = document.getElementById('recurringSection');
+    sec.classList.toggle('open');
+    if (sec.classList.contains('open')) {
+      const today = localToday();
+      if (!document.getElementById('r-from').value) document.getElementById('r-from').value = today;
+      if (!document.getElementById('r-to').value)   document.getElementById('r-to').value   = today;
+      updateRecurringCount();
+    }
+  }
+
+  function updateRecurringCount() {
+    const from = document.getElementById('r-from').value;
+    const to   = document.getElementById('r-to').value;
+    if (!from || !to || from > to) { document.getElementById('recurringCount').textContent = '0'; return; }
+    const sel = [...document.querySelectorAll('input[name="rwd"]:checked')].map(c => parseInt(c.value));
+    let count = 0;
+    const cur = new Date(from + 'T12:00:00');
+    const end = new Date(to   + 'T12:00:00');
+    while (cur <= end) { if (sel.includes(cur.getDay())) count++; cur.setDate(cur.getDate() + 1); }
+    document.getElementById('recurringCount').textContent = count;
+  }
+
+  function addRecurring() {
+    const from = document.getElementById('r-from').value;
+    const to   = document.getElementById('r-to').value;
+    const ho   = parseFloat(document.getElementById('r-ho').value)   || 0;
+    const priv = parseFloat(document.getElementById('r-priv').value) || 0;
+    if (!from || !to)   { toast('Bitte Von- und Bis-Datum angeben.'); return; }
+    if (from > to)      { toast('Von-Datum muss vor Bis-Datum liegen.'); return; }
+    if (ho + priv > 24) { toast('Summe darf 24h nicht überschreiten.'); return; }
+    const sel = [...document.querySelectorAll('input[name="rwd"]:checked')].map(c => parseInt(c.value));
+    if (sel.length === 0) { toast('Bitte mindestens einen Wochentag wählen.'); return; }
+
+    let added = 0, skipped = 0;
+    const cur = new Date(from + 'T12:00:00');
+    const end = new Date(to   + 'T12:00:00');
+    while (cur <= end) {
+      if (sel.includes(cur.getDay())) {
+        const d = cur.toISOString().slice(0, 10);
+        if (entries.find(e => e.date === d)) { skipped++; }
+        else { entries.push({ date: d, type: 'ho', ho, km: 0, priv, note: '' }); added++; }
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+    if (added > 0) { entries.sort((a,b) => a.date.localeCompare(b.date)); save(); render(); }
+    toast(`${added} Einträge hinzugefügt, ${skipped} übersprungen.`);
+  }
+
+  // ---- Monthly helpers ----
+  function workingDaysInMonth(year, month) {
+    const days = new Date(year, month, 0).getDate();
+    let count = 0;
+    for (let d = 1; d <= days; d++) {
+      const dow = new Date(year, month - 1, d).getDay();
+      if (dow !== 0 && dow !== 6) count++;
+    }
+    return count;
+  }
+
+  function pauschale(year, hoDays) {
+    const y = parseInt(year, 10);
+    if (y >= 2023) return { rate: 6, max: 210, amount: Math.min(hoDays, 210) * 6 };
+    return { rate: 5, max: 120, amount: Math.min(hoDays, 120) * 5 };
+  }
+
+  function renderMonthlyTable(yearEntries, selectedYear) {
+    const tbody = document.getElementById('monthlyBody');
+    const empty = document.getElementById('monthlyEmpty');
+    if (yearEntries.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+
+    const byMonth = {};
+    for (const e of yearEntries) {
+      const mo = e.date.slice(0, 7);
+      if (!byMonth[mo]) byMonth[mo] = [];
+      byMonth[mo].push(e);
+    }
+
+    const byYear = {};
+    for (const mo of Object.keys(byMonth).sort()) {
+      const y = mo.slice(0, 4);
+      if (!byYear[y]) byYear[y] = [];
+      byYear[y].push(mo);
+    }
+
+    const years = Object.keys(byYear).sort();
+    let html = '';
+
+    for (const year of years) {
+      let yHoDays = 0, yBürotage = 0, yHoH = 0, yPrivH = 0, yArbeit = 0, yFahrt = 0;
+
+      for (const mo of byYear[year]) {
+        const [y, m] = mo.split('-').map(Number);
+        const arbeit   = workingDaysInMonth(y, m);
+        const mes      = byMonth[mo];
+        const hoDays   = mes.filter(e => (e.type || 'ho') === 'ho' && (e.ho || 0) > 0).length;
+        const bürotage = mes.filter(e => e.type === 'office').length;
+        const hoH      = mes.reduce((s, e) => s + (e.ho   || 0), 0);
+        const privH    = mes.reduce((s, e) => s + (e.priv || 0), 0);
+        const fahrt    = mes.reduce((s, e) => s + (e.type === 'office' ? fahrtkosten(e.km) : 0), 0);
+        const total    = hoH + privH;
+        const bPct     = total > 0 ? hoH / total * 100 : 0;
+        const hoPct    = arbeit > 0 ? hoDays / arbeit * 100 : 0;
+
+        yHoDays += hoDays; yBürotage += bürotage; yHoH += hoH;
+        yPrivH  += privH;  yArbeit   += arbeit;   yFahrt += fahrt;
+
+        html += `<tr>
+          <td>${MONTHS[m - 1]} ${year}</td>
+          <td style="color:var(--muted)">${arbeit}</td>
+          <td><strong>${hoDays}</strong></td>
+          <td>${bürotage > 0 ? `<span style="color:var(--orange)">${bürotage}</span>` : '—'}</td>
+          <td style="color:var(--accent)">${hoH % 1 === 0 ? hoH : hoH.toFixed(1)}h</td>
+          <td style="color:var(--muted)">${privH % 1 === 0 ? privH : privH.toFixed(1)}h</td>
+          <td>${pctBadge(bPct)}</td>
+          <td>${fahrt > 0 ? `<span style="color:var(--accent2)">${fahrt.toFixed(2)}€</span>` : '—'}</td>
+        </tr>`;
+      }
+
+      const p      = pauschale(year, yHoDays);
+      const yTotal = yHoH + yPrivH;
+      const yBPct  = yTotal > 0 ? yHoH / yTotal * 100 : 0;
+      const yHoPct = yArbeit > 0 ? yHoDays / yArbeit * 100 : 0;
+
+      html += `<tr class="year-row">
+        <td>Gesamt ${year}</td>
+        <td>${yArbeit}</td>
+        <td>${yHoDays}</td>
+        <td>${yBürotage}</td>
+        <td>${yHoH % 1 === 0 ? yHoH : yHoH.toFixed(1)}h</td>
+        <td>${yPrivH % 1 === 0 ? yPrivH : yPrivH.toFixed(1)}h</td>
+        <td>${pctBadge(yBPct)}</td>
+        <td>
+          <span class="pauschale-note" title="${p.rate}€/Tag, max ${p.max} Tage">HO: ${p.amount}€</span>
+          ${yFahrt > 0 ? `<span class="pauschale-note" style="color:var(--accent2)" title="Entfernungspauschale">Fahrt: ${yFahrt.toFixed(2)}€</span>` : ''}
+        </td>
+      </tr>`;
+
+      if (years.length > 1) html += `<tr class="year-spacer"><td colspan="8"></td></tr>`;
+    }
+
+    tbody.innerHTML = html;
+  }
+
+  // ---- Render ----
+  function render() {
+    renderYearSelect();
+    const selectedYear = document.getElementById('yearSelect').value;
+    const filterMonth  = document.getElementById('filterMonth').value;
+    const sortDir      = document.getElementById('filterSort').value;
+
+    const yearEntries = selectedYear
+      ? entries.filter(e => e.date.startsWith(selectedYear))
+      : entries;
+
+    let tableEntries = filterMonth
+      ? yearEntries.filter(e => e.date.startsWith(filterMonth))
+      : yearEntries;
+    tableEntries = [...tableEntries].sort((a,b) =>
+      sortDir === 'asc' ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date)
+    );
+
+    renderStats(yearEntries);
+    renderMonthlyTable(yearEntries, selectedYear);
+    renderTable(tableEntries);
+    renderChart(yearEntries);
+    renderCalendar();
+  }
+
+  function renderYearSelect() {
+    const sel = document.getElementById('yearSelect');
+    const years = getYears();
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Alle Jahre</option>' +
+      years.map(y => `<option value="${y}" ${y===cur?'selected':''}>${y}</option>`).join('');
+    if (!yearSelectInitialized && years.length) {
+      sel.value = years[0];
+      yearSelectInitialized = true;
+    }
+  }
+
+  function renderStats(data) {
+    const totalHO   = data.reduce((s,e) => s + (e.ho || 0), 0);
+    const totalPriv = data.reduce((s,e) => s + (e.priv || 0), 0);
+    const totalAll  = totalHO + totalPriv;
+    const pctBusiness = totalAll > 0 ? (totalHO / totalAll * 100) : 0;
+    const pctPrivate  = totalAll > 0 ? (totalPriv / totalAll * 100) : 0;
+    const hoDays     = data.filter(e => (e.type || 'ho') === 'ho' && (e.ho || 0) > 0).length;
+    const officeDays = data.filter(e => e.type === 'office').length;
+    const hoOnlyHours = data.filter(e => (e.type || 'ho') === 'ho' && (e.ho || 0) > 0)
+                            .reduce((s, e) => s + (e.ho || 0), 0);
+    const avgHO = hoDays > 0 ? hoOnlyHours / hoDays : 0;
+
+    document.getElementById('s-hoDays').textContent     = hoDays;
+    document.getElementById('s-officeDays').textContent = officeDays;
+    document.getElementById('s-hoHours').textContent = totalHO % 1 === 0 ? totalHO + 'h' : totalHO.toFixed(1) + 'h';
+    document.getElementById('s-privHours').textContent = totalPriv % 1 === 0 ? totalPriv + 'h' : totalPriv.toFixed(1) + 'h';
+    document.getElementById('s-pct').textContent    = pctBusiness.toFixed(1) + '%';
+
+    document.getElementById('pb1').style.width   = Math.min(pctBusiness,100) + '%';
+    document.getElementById('pb-label1').textContent = pctBusiness.toFixed(1) + '% beruflich';
+    document.getElementById('pb2').style.width   = Math.min(pctPrivate,100) + '%';
+    document.getElementById('pb-label2').textContent = pctPrivate.toFixed(1) + '% privat';
+    const avgPct = Math.min(avgHO / 10 * 100, 100);
+    document.getElementById('pb3').style.width   = avgPct + '%';
+    document.getElementById('pb-label3').textContent = avgHO.toFixed(2) + 'h / Tag';
+  }
+
+  function renderTable(data) {
+    const tbody = document.getElementById('entriesBody');
+    const empty = document.getElementById('emptyMsg');
+    if (data.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+    tbody.innerHTML = data.map(e => {
+      const type  = e.type || 'ho';
+      const total = (e.ho || 0) + (e.priv || 0);
+      const pct   = total > 0 ? ((e.ho || 0) / total * 100) : 0;
+      const typBadge = type === 'ho'
+        ? `<span class="badge badge-green" style="font-size:0.7rem">HO</span>`
+        : `<span class="badge badge-orange" style="font-size:0.7rem">B&uuml;ro</span>`;
+      const mainVal = type === 'ho'
+        ? `<span style="color:var(--accent);font-weight:600">${e.ho || 0}h</span>`
+        : `<span style="color:var(--orange);font-weight:600">${e.km || 0}&thinsp;km</span><span style="color:var(--accent2);font-size:0.78rem;margin-left:4px">(${fahrtkosten(e.km).toFixed(2)}€)</span>${(e.ho||0)>0?`<span style="color:var(--accent);font-size:0.78rem;margin-left:6px">+${e.ho}h&thinsp;HO</span>`:''}`;
+      return `<tr>
+        <td><strong>${fmt(e.date)}</strong></td>
+        <td style="color:var(--muted)">${weekday(e.date)}</td>
+        <td>${typBadge}</td>
+        <td>${mainVal}</td>
+        <td><span style="color:var(--muted)">${e.priv || 0}h</span></td>
+        <td>${total > 0 ? pctBadge(pct) : '—'}</td>
+        <td style="color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.note ? esc(e.note) : '—'}</td>
+        <td style="white-space:nowrap">
+          <button class="edit-btn" onclick="startEdit('${e.date}')" title="Bearbeiten">&#9998;</button>
+          <button class="del-btn" onclick="deleteEntry('${e.date}')" title="L&ouml;schen">&#x2715;</button>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  function renderChart(data) {
+    const chart = document.getElementById('chart');
+    if (data.length === 0) { chart.innerHTML = ''; return; }
+
+    // Group by month for bar chart
+    const byMonth = {};
+    for (const e of data) {
+      const mo = e.date.slice(0,7);
+      if (!byMonth[mo]) byMonth[mo] = { ho: 0, priv: 0 };
+      byMonth[mo].ho   += e.ho   || 0;
+      byMonth[mo].priv += e.priv || 0;
+    }
+    const keys = Object.keys(byMonth).sort();
+    const maxVal = Math.max(...keys.map(k => byMonth[k].ho + byMonth[k].priv), 1);
+    const H = 90; // px height for 100%
+
+    chart.innerHTML = keys.map(k => {
+      const { ho, priv } = byMonth[k];
+      const total = ho + priv;
+      const hoH   = Math.round((ho / maxVal) * H);
+      const privH = Math.round((priv / maxVal) * H);
+      const [y, m] = k.split('-');
+      const label = MONTHS[parseInt(m,10)-1] + ' ' + y.slice(2);
+      return `<div class="chart-bar-wrap" title="${label}: ${ho}h HO, ${priv}h Privat, ${total>0?(ho/total*100).toFixed(0):'0'}% beruflich">
+        <div style="display:flex;flex-direction:column;justify-content:flex-end;height:${H}px;gap:2px">
+          <div class="chart-bar" style="background:var(--orange);height:${privH}px"></div>
+          <div class="chart-bar" style="background:var(--accent);height:${hoH}px"></div>
+        </div>
+        <div class="chart-label">${label}</div>
+      </div>`;
+    }).join('');
+  }
+
+  // ---- Init ----
+  (function init() {
+    document.getElementById('f-date').value = new Date().toISOString().slice(0,10);
+    document.getElementById('printDate').textContent =
+      new Date().toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' });
+    document.getElementById('defaultKm').value = loadDefaultKm();
+    loadLastValues();
+    render();
+  })();
+
+  // close modal on backdrop click
+  document.getElementById('importModal').addEventListener('click', function(e) {
+    if (e.target === this) closeImportModal();
+  });
+
+  // keyboard shortcut: Enter on form
+  document.querySelectorAll('#f-date,#f-ho,#f-priv,#f-note').forEach(el => {
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') addEntry(); });
+  });
+</script>
+</body>
+</html>
