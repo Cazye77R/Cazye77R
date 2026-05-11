@@ -1,5 +1,20 @@
-from services.wifi_scanner import WifiScanner, WifiNetwork
-from services.interpolation import interpolate_measurements
-from services.exporter import Exporter
+from services.wifi_scanner import WifiScanner, WifiResult, WifiNetwork, WifiError
 
-__all__ = ["WifiScanner", "WifiNetwork", "interpolate_measurements", "Exporter"]
+try:
+    from services.interpolation import interpolate_measurements
+except ImportError:
+    interpolate_measurements = None  # type: ignore[assignment]
+
+try:
+    from services.exporter import Exporter
+except ImportError:
+    Exporter = None  # type: ignore[assignment]
+
+__all__ = [
+    "WifiScanner",
+    "WifiResult",
+    "WifiNetwork",
+    "WifiError",
+    "interpolate_measurements",
+    "Exporter",
+]
