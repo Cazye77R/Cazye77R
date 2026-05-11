@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -65,6 +65,21 @@ QPushButton {
 QPushButton:hover { background-color: #0a5070; }
 QPushButton:pressed { background-color: #083040; }
 """
+
+_MEASURE_RUNNING = """
+QPushButton {
+    background-color: #0a2a3a;
+    color: #6090a0;
+    border: 2px solid #1a5070;
+    border-radius: 4px;
+    padding: 7px 4px;
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 0px;
+}
+"""
+
+_SPIN_FRAMES = ["◐", "◓", "◑", "◒"]
 
 _CB_STYLE = "QCheckBox { color: #b0b0c8; font-size: 11px; } QCheckBox::indicator { width: 13px; height: 13px; }"
 
@@ -135,6 +150,10 @@ class ToolbarWidget(QWidget):
         self._measure_btn.clicked.connect(self.measure_triggered)
         layout.addWidget(self._measure_btn)
 
+        self._spin_idx   = 0
+        self._spin_timer = QTimer(self)
+        self._spin_timer.timeout.connect(self._on_spin_tick)
+
         layout.addWidget(_hr())
 
         # ── Snap checkboxes ────────────────────────────────────
@@ -179,10 +198,28 @@ class ToolbarWidget(QWidget):
             btn.setChecked(True)
 
     def set_measure_enabled(self, enabled: bool) -> None:
+        self._spin_timer.stop()
+        self._measure_btn.setText("📶  MESSEN")
         self._measure_btn.setEnabled(enabled)
         self._measure_btn.setStyleSheet(
             _MEASURE_ENABLED if enabled else _MEASURE_DISABLED
         )
+
+    def set_measure_running(self, running: bool) -> None:
+        """Switch button appearance between 'ready' and 'scan in progress'."""
+        if running:
+            self._spin_idx = 0
+            self._spin_timer.start(160)
+            self._measure_btn.setEnabled(False)
+            self._measure_btn.setStyleSheet(_MEASURE_RUNNING)
+        else:
+            self._spin_timer.stop()
+            self._measure_btn.setText("📶  MESSEN")
+
+    def _on_spin_tick(self) -> None:
+        frame = _SPIN_FRAMES[self._spin_idx % len(_SPIN_FRAMES)]
+        self._measure_btn.setText(f"{frame}  Messung läuft…")
+        self._spin_idx += 1
 
     # ── Slots ──────────────────────────────────────────────────
 
