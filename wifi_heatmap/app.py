@@ -148,19 +148,29 @@ class _FloorDialog(QDialog):
 class _ContextTabBar(QTabBar):
     rename_requested    = Signal(int)
     duplicate_requested = Signal(int)
+    move_up_requested   = Signal(int)
+    move_down_requested = Signal(int)
     remove_requested    = Signal(int)
 
     def contextMenuEvent(self, event) -> None:
         idx = self.tabAt(event.pos())
         if idx < 0:
             return
+        n   = self.count()
         menu = QMenu(self)
         menu.setStyleSheet(_TAB_MENU_STYLE)
         menu.addAction("Umbenennen").triggered.connect(
             lambda: self.rename_requested.emit(idx))
         menu.addAction("Duplizieren").triggered.connect(
             lambda: self.duplicate_requested.emit(idx))
-        if self.count() > 1:
+        menu.addSeparator()
+        up_act = menu.addAction("↑  Nach oben verschieben")
+        up_act.setEnabled(idx > 0)
+        up_act.triggered.connect(lambda: self.move_up_requested.emit(idx))
+        dn_act = menu.addAction("↓  Nach unten verschieben")
+        dn_act.setEnabled(idx < n - 1)
+        dn_act.triggered.connect(lambda: self.move_down_requested.emit(idx))
+        if n > 1:
             menu.addSeparator()
             menu.addAction("Löschen").triggered.connect(
                 lambda: self.remove_requested.emit(idx))
@@ -171,6 +181,8 @@ class FloorTabBar(QWidget):
     add_requested       = Signal()
     rename_requested    = Signal(int)
     duplicate_requested = Signal(int)
+    move_up_requested   = Signal(int)
+    move_down_requested = Signal(int)
     remove_requested    = Signal(int)
     floor_changed       = Signal(int)
 
@@ -198,6 +210,8 @@ class FloorTabBar(QWidget):
         self.tab_bar.currentChanged.connect(self.floor_changed)
         self.tab_bar.rename_requested.connect(self.rename_requested)
         self.tab_bar.duplicate_requested.connect(self.duplicate_requested)
+        self.tab_bar.move_up_requested.connect(self.move_up_requested)
+        self.tab_bar.move_down_requested.connect(self.move_down_requested)
         self.tab_bar.remove_requested.connect(self.remove_requested)
 
     def set_floors(self, floors: list[Floor]) -> None:
@@ -268,6 +282,8 @@ class MainWindow(QMainWindow):
         ftb.floor_changed.connect(self._on_tab_changed)
         ftb.rename_requested.connect(self._on_floor_rename)
         ftb.duplicate_requested.connect(self._on_floor_duplicate)
+        ftb.move_up_requested.connect(self._on_floor_move_up)
+        ftb.move_down_requested.connect(self._on_floor_move_down)
         ftb.remove_requested.connect(self._on_floor_remove)
 
         # ── Wire properties panel ──────────────────────────────
@@ -372,10 +388,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _setup_statusbar(self) -> None:
-        # Left: zoom + router distance
+        # Left: zoom · floor · router distance
         self._zoom_label = QLabel("Zoom: 100%")
         self._zoom_label.setStyleSheet("padding: 0 8px; color: #9090a0;")
         self.statusBar().addWidget(self._zoom_label)
+
+        self._floor_label = QLabel("Etage: —")
+        self._floor_label.setStyleSheet("padding: 0 8px; color: #b0b8d0;")
+        self.statusBar().addWidget(self._floor_label)
 
         self._router_dist_label = QLabel("")
         self._router_dist_label.setStyleSheet("padding: 0 8px; color: #4fc3f7;")
@@ -566,6 +586,7 @@ class MainWindow(QMainWindow):
             self._canvas_widget.set_active_floor(floor)
             self._properties_panel.show_floor(floor)
         self._floor_tab_bar.set_current_index(0)
+        self._update_floor_label()
         self._update_title()
 
     def _sync_tabs(self) -> None:
@@ -579,6 +600,14 @@ class MainWindow(QMainWindow):
             self._canvas_widget.set_active_floor(floor)
             self._properties_panel.show_floor(floor)
             self._update_router_distance()
+            self._update_floor_label()
+
+    def _update_floor_label(self) -> None:
+        floor = self._canvas_widget.current_floor()
+        if floor is None:
+            self._floor_label.setText("Etage: —")
+        else:
+            self._floor_label.setText(f"Etage: {floor.name}")
 
     # ------------------------------------------------------------------
     # Floor operations
@@ -612,6 +641,7 @@ class MainWindow(QMainWindow):
             floor.name = name.strip()
             self._sync_tabs()
             self._floor_tab_bar.set_current_index(idx)
+            self._update_floor_label()
 
     def _on_floor_duplicate(self, idx: int) -> None:
         if not self._project or idx >= len(self._project.floors):
@@ -635,6 +665,33 @@ class MainWindow(QMainWindow):
         self._floor_tab_bar.set_current_index(new_idx)
         self._canvas_widget.set_active_floor(new_floor)
         self._properties_panel.show_floor(new_floor)
+
+    def _on_floor_move_up(self, idx: int) -> None:
+        """Move the floor at *idx* one position to the left (lower tab index)."""
+        if not self._project or idx <= 0:
+            return
+        self._swap_floors(idx, idx - 1)
+
+    def _on_floor_move_down(self, idx: int) -> None:
+        """Move the floor at *idx* one position to the right (higher tab index)."""
+        if not self._project or idx >= len(self._project.floors) - 1:
+            return
+        self._swap_floors(idx, idx + 1)
+
+    def _swap_floors(self, a: int, b: int) -> None:
+        """Swap floors at positions *a* and *b*, keep the active floor selected."""
+        floors = self._project.floors          # type: ignore[union-attr]
+        active = self._canvas_widget.current_floor()
+
+        floors[a], floors[b] = floors[b], floors[a]
+        # Re-number levels to match new positions so save/load preserves order
+        floors[a].level, floors[b].level = floors[b].level, floors[a].level
+
+        self._sync_tabs()
+        # Restore selection on the previously active floor
+        new_idx = floors.index(active) if active in floors else min(a, b)
+        self._floor_tab_bar.set_current_index(new_idx)
+        self._update_floor_label()
 
     def _on_floor_remove(self, idx: int) -> None:
         if not self._project or len(self._project.floors) <= 1:
