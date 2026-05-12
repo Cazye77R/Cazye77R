@@ -300,8 +300,9 @@
     td {
       padding: 0.6rem 0.8rem;
       border-bottom: 1px solid var(--border);
-      white-space: nowrap;
     }
+
+    .cell-nowrap { white-space: nowrap; }
 
     tbody tr:last-child td { border-bottom: none; }
     tbody tr:hover { background: rgba(108,99,255,0.05); }
@@ -633,6 +634,14 @@
                   <span class="preview-label">Marge</span>
                   <span class="preview-value" id="prev-margin">— %</span>
                 </div>
+                <div class="preview-item" style="margin-top:.5rem;border-top:1px solid var(--border);padding-top:.5rem;">
+                  <span class="preview-label">Vorgeschlagener Preis</span>
+                  <span class="preview-value" id="prev-suggested-price">— €</span>
+                </div>
+                <div class="preview-item">
+                  <span class="preview-label">Marge (Vorschlag)</span>
+                  <span class="preview-value" id="prev-suggested-margin">— %</span>
+                </div>
               </div>
             </div>
 
@@ -785,6 +794,11 @@
               <input type="number" id="fp-price" placeholder="€/kg" min="0" step="0.01" style="flex:1;min-width:80px;" />
               <button type="button" class="btn btn-neutral" id="btn-add-filament-profile">+ Profil</button>
             </div>
+          </div>
+          <div class="form-group" style="margin-top:1rem;">
+            <label for="s-markup">Preisvorschlag – Aufschlagsfaktor (×)</label>
+            <input type="number" id="s-markup" placeholder="3.0" min="1" step="0.1" />
+            <small style="color:var(--text-muted);display:block;margin-top:.3rem;">Vorgeschlagener Preis = Gesamtkosten × Faktor</small>
           </div>
           <div style="margin-top:1rem;">
             <button type="submit" class="btn btn-primary">Einstellungen speichern</button>
@@ -1004,9 +1018,9 @@
       loadSettings() {
         try {
           const raw = localStorage.getItem(SETTINGS_KEY);
-          return raw ? JSON.parse(raw) : { filamentPricePerKg: 22.99, electricityPricePerKwh: 0.32, filaments: [] };
+          return raw ? JSON.parse(raw) : { filamentPricePerKg: 22.99, electricityPricePerKwh: 0.32, filaments: [], suggestedPriceMarkup: 3.0 };
         } catch (e) {
-          return { filamentPricePerKg: 22.99, electricityPricePerKwh: 0.32, filaments: [] };
+          return { filamentPricePerKg: 22.99, electricityPricePerKwh: 0.32, filaments: [], suggestedPriceMarkup: 3.0 };
         }
       },
 
@@ -1567,6 +1581,7 @@
       const s = loadSettings();
       document.getElementById('s-filament-price').value    = s.filamentPricePerKg;
       document.getElementById('s-electricity-price').value = s.electricityPricePerKwh;
+      document.getElementById('s-markup').value            = s.suggestedPriceMarkup ?? 3.0;
       renderFilamentProfiles();
       populateFilamentDropdown('f-filament-profile');
       populateFilamentDropdown('e-filament-profile');
@@ -1579,6 +1594,7 @@
         filamentPricePerKg:     parseFloat(document.getElementById('s-filament-price').value)   || 0,
         electricityPricePerKwh: parseFloat(document.getElementById('s-electricity-price').value) || 0,
         filaments:              existing.filaments || [],
+        suggestedPriceMarkup:   parseFloat(document.getElementById('s-markup').value) || 3.0,
       };
       saveSettings(settings);
       showToast('Einstellungen gespeichert.', 'success');
@@ -1655,6 +1671,13 @@
         setVal('prev-profit',   profit, true);
         document.getElementById('prev-kwh-total').textContent = totalKwh.toFixed(3) + ' kWh';
         document.getElementById('prev-margin').textContent = margin.toFixed(1) + ' %';
+        const markup = settings.suggestedPriceMarkup ?? 3.0;
+        const suggestedPrice = Math.round(totalCost * markup * 100) / 100;
+        const suggestedMargin = suggestedPrice > 0
+          ? Math.round(((suggestedPrice - totalCost) / suggestedPrice) * 1000) / 10
+          : 0;
+        document.getElementById('prev-suggested-price').textContent  = totalCost > 0 ? formatEur(suggestedPrice)          : '— €';
+        document.getElementById('prev-suggested-margin').textContent = totalCost > 0 ? suggestedMargin.toFixed(1) + ' %'  : '— %';
       },
 
       resetPreview() {
@@ -1666,6 +1689,8 @@
         const pp = document.getElementById('prev-profit');
         pp.textContent = '— €';
         pp.className = 'preview-value';
+        document.getElementById('prev-suggested-price').textContent  = '— €';
+        document.getElementById('prev-suggested-margin').textContent = '— %';
       },
 
       renderBookingsTable() {
@@ -1683,22 +1708,22 @@
           const comment = b.comment || '';
           const shortComment = comment.length > 40 ? escapeHtml(comment.slice(0, 40)) + '…' : escapeHtml(comment);
           return `<tr>
-            <td>${formatDate(b.date)}</td>
+            <td class="cell-nowrap">${formatDate(b.date)}</td>
             <td>${escapeHtml(b.description)}</td>
-            <td>${dur}</td>
+            <td class="cell-nowrap">${dur}</td>
             <td>${escapeHtml(b.filamentProfileName || '—')}</td>
-            <td>${b.filamentGrams}</td>
-            <td>${b.electricityKwPerHour}</td>
-            <td>${(b.electricityKwhTotal || 0).toFixed(3)}</td>
-            <td>${formatEur(b.filamentCost)}</td>
-            <td>${formatEur(b.electricityCost)}</td>
-            <td>${formatEur(b.totalCost)}</td>
-            <td>${formatEur(b.sellingPrice)}</td>
-            <td class="${profitClass}">${formatEur(b.profit)}</td>
-            <td class="${profitClass}">${(b.margin ?? 0).toFixed(1)} %</td>
+            <td class="cell-nowrap">${b.filamentGrams}</td>
+            <td class="cell-nowrap">${b.electricityKwPerHour}</td>
+            <td class="cell-nowrap">${(b.electricityKwhTotal || 0).toFixed(3)}</td>
+            <td class="cell-nowrap">${formatEur(b.filamentCost)}</td>
+            <td class="cell-nowrap">${formatEur(b.electricityCost)}</td>
+            <td class="cell-nowrap">${formatEur(b.totalCost)}</td>
+            <td class="cell-nowrap">${formatEur(b.sellingPrice)}</td>
+            <td class="cell-nowrap ${profitClass}">${formatEur(b.profit)}</td>
+            <td class="cell-nowrap ${profitClass}">${(b.margin ?? 0).toFixed(1)} %</td>
             <td>${escapeHtml(invoices)}</td>
             <td title="${escapeHtml(comment)}">${shortComment}</td>
-            <td style="white-space:nowrap;">
+            <td class="cell-nowrap">
               <button class="btn-icon" title="Bearbeiten" aria-label="Buchung bearbeiten" onclick="openEditModal('${b.id}')">&#9998;</button>
               <button class="btn-icon" title="Kopieren" aria-label="Buchung kopieren" onclick="copyBooking('${b.id}')">&#128203;</button>
               <button class="btn-icon" title="Löschen" aria-label="Buchung löschen" onclick="deleteBooking('${b.id}')">&#128465;</button>
