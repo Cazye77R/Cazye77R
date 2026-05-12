@@ -57,7 +57,7 @@ class TranscriptionEngine:
         self.device = device
         self.compute_type = compute_type
 
-        self.model = self._load_model(model_size, device, compute_type)
+        self.model: WhisperModel | None = self._load_model(model_size, device, compute_type)
 
     # ------------------------------------------------------------------
     # Public API
@@ -127,6 +127,7 @@ class TranscriptionEngine:
                     fraction = min(segment.end / total_duration, 1.0)
                     progress_callback(fraction, f"Segment {len(segments)}: {segment.start:.1f}s – {segment.end:.1f}s")
         except Exception as exc:
+            segments.clear()  # discard partial results; caller gets an error, not silent partial data
             raise TranscriptionError(f"Error while reading segments: {exc}") from exc
         finally:
             # Always free GPU memory, even if an exception occurred mid-stream.
@@ -152,7 +153,7 @@ class TranscriptionEngine:
         """
         if self.model is not None:
             del self.model
-            self.model = None  # type: ignore[assignment]
+            self.model = None
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         logger.info("Whisper model unloaded.")

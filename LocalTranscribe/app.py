@@ -7,6 +7,7 @@ diarization → LLM pipeline, and lets users explore and export results.
 
 from __future__ import annotations
 
+import html as _html
 import json
 import logging
 import os
@@ -23,6 +24,7 @@ from config import (
     DEFAULT_LANGUAGE,
     LANGUAGES,
     OLLAMA_BASE_URL,
+    OLLAMA_GET_TIMEOUT,
     SUPPORTED_FORMATS,
     WHISPER_COMPUTE_TYPE,
     WHISPER_DEVICE,
@@ -41,7 +43,10 @@ st.set_page_config(
 )
 
 load_dotenv()
-logging.basicConfig(level=logging.WARNING)
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("faster_whisper").setLevel(logging.WARNING)
+logging.getLogger("pyannote").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -114,6 +119,18 @@ def _init_state() -> None:
             st.session_state[key] = value
 
 
+def _reset_results() -> None:
+    """Clear all pipeline results and audio-source tracking atomically."""
+    st.session_state.update(
+        segments=None,
+        transcription_meta=None,
+        llm_output=None,
+        rec_audio_bytes=None,
+        rec_audio_id=None,
+        last_file_id=None,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
@@ -129,9 +146,7 @@ def _render_sidebar() -> dict:
         help="Größere Modelle sind genauer, benötigen aber mehr VRAM und Zeit.",
     )  # type: ignore[assignment]
 
-    _default_idx = list(LANGUAGES.keys()).index(
-        next(k for k, v in LANGUAGES.items() if v == DEFAULT_LANGUAGE)
-    )
+    _default_idx = list(LANGUAGES.keys()).index(DEFAULT_LANGUAGE)
     lang_label: str = st.sidebar.radio(
         "Sprache",
         options=list(LANGUAGES.keys()),
@@ -213,6 +228,7 @@ def _render_sidebar() -> dict:
             "Eigener Prompt",
             placeholder="Dein Prompt… {text} wird durch das Transkript ersetzt.",
             height=120,
+            max_chars=4000,
         )
 
     st.sidebar.divider()
@@ -341,14 +357,16 @@ def _run_pipeline(audio_path: Path, settings: dict) -> None:
             l_bar.progress(1.0, text="Übersprungen.")
             st.warning(f"**KI-Analyse übersprungen:** {exc}")
 
-        # ── Persist results ────────────────────────────────────────────────
-        st.session_state["segments"] = segments
-        st.session_state["transcription_meta"] = {
-            "language": result["language"],
-            "duration": result["duration"],
-            "filename": audio_path.name,
-        }
-        st.session_state["llm_output"] = llm_output
+        # ── Persist results (single atomic write – no partial state on rerun) ─
+        st.session_state.update(
+            segments=segments,
+            transcription_meta={
+                "language": result["language"],
+                "duration": result["duration"],
+                "filename": audio_path.name,
+            },
+            llm_output=llm_output,
+        )
         status.update(label="Verarbeitung abgeschlossen ✓", state="complete", expanded=False)
 
 
@@ -356,19 +374,17 @@ def _run_pipeline(audio_path: Path, settings: dict) -> None:
 # Result tabs
 # ---------------------------------------------------------------------------
 
-def _speaker_color(speaker: str, color_map: dict[str, str]) -> str:
-    if speaker not in color_map:
-        color_map[speaker] = _SPEAKER_COLORS[len(color_map) % len(_SPEAKER_COLORS)]
-    return color_map[speaker]
+def _speaker_color(speaker: str) -> str:
+    """Return a stable color for a speaker name, determined by its hash."""
+    return _SPEAKER_COLORS[hash(speaker) % len(_SPEAKER_COLORS)]
 
 
 def _render_transcript_tab(segments: list[dict]) -> None:
-    color_map: dict[str, str] = {}
     rows: list[str] = []
 
     for seg in segments:
         ts = TranscriptionEngine.format_timestamp(seg["start"])
-        text = seg.get("text", "").strip()
+        text = _html.escape(seg.get("text", "").strip())
         if not text:
             continue
         speaker = seg.get("speaker", "")
@@ -376,11 +392,11 @@ def _render_transcript_tab(segments: list[dict]) -> None:
             f'<span style="color:#999;font-size:0.8em;font-family:monospace">[{ts}]</span>'
         )
         if speaker:
-            color = _speaker_color(speaker, color_map)
+            color = _speaker_color(speaker)
             badge = (
                 f'<span style="background:{color};color:#fff;padding:2px 10px;'
                 f'border-radius:12px;font-size:0.8em;font-weight:600;'
-                f'white-space:nowrap">{speaker}</span>'
+                f'white-space:nowrap">{_html.escape(speaker)}</span>'
             )
             rows.append(
                 f'<div style="padding:5px 2px;border-bottom:1px solid #f0f0f0;line-height:1.7">'
@@ -523,14 +539,8 @@ def main() -> None:
             file_id = (uploaded.name, uploaded.size)
             if file_id != st.session_state["last_file_id"]:
                 # New file: clear all previous results and any stored recording.
-                st.session_state.update(
-                    last_file_id=file_id,
-                    rec_audio_bytes=None,
-                    rec_audio_id=None,
-                    segments=None,
-                    transcription_meta=None,
-                    llm_output=None,
-                )
+                _reset_results()
+                st.session_state["last_file_id"] = file_id
             _upload_bytes = uploaded.getvalue()
             _upload_name = uploaded.name
 
@@ -557,14 +567,9 @@ def main() -> None:
                 rec_id = len(wav_bytes)
                 if rec_id != st.session_state["rec_audio_id"]:
                     # New recording: clear previous results and upload state.
-                    st.session_state.update(
-                        rec_audio_bytes=wav_bytes,
-                        rec_audio_id=rec_id,
-                        last_file_id=None,
-                        segments=None,
-                        transcription_meta=None,
-                        llm_output=None,
-                    )
+                    _reset_results()
+                    st.session_state["rec_audio_bytes"] = wav_bytes
+                    st.session_state["rec_audio_id"] = rec_id
 
             stored_rec: bytes | None = st.session_state["rec_audio_bytes"]
             if stored_rec is not None:
@@ -595,13 +600,17 @@ def main() -> None:
 
         if run_pipeline:
             suffix = Path(audio_name).suffix or ".wav"
-            # mkstemp: atomic creation, caller owns the fd and must close it.
             fd, tmp_str = tempfile.mkstemp(suffix=suffix)
             tmp_path = Path(tmp_str)
             try:
                 with os.fdopen(fd, "wb") as fh:
                     fh.write(audio_bytes)
+                fd = -1  # fdopen took ownership; fd is now closed
                 _run_pipeline(tmp_path, settings)
+            except Exception:
+                if fd != -1:
+                    os.close(fd)  # safety net if fdopen itself raised
+                raise
             finally:
                 tmp_path.unlink(missing_ok=True)
     else:

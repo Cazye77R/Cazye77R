@@ -13,6 +13,7 @@ VRAM note (RTX 3060, 6 GB):
 
 from __future__ import annotations
 
+import bisect
 import logging
 import os
 from pathlib import Path
@@ -98,6 +99,7 @@ class SpeakerDiarizer:
             raise DiarizationError(f"Audio file not found: {audio_path}")
 
         self._ensure_pipeline_loaded()
+        assert self._pipeline is not None, "Pipeline failed to load"
 
         pipeline_kwargs: dict = {}
         if num_speakers is not None:
@@ -105,7 +107,7 @@ class SpeakerDiarizer:
 
         try:
             logger.info("Running diarization on '%s'…", audio_path.name)
-            annotation = self._pipeline(str(audio_path), **pipeline_kwargs)  # type: ignore[misc]
+            annotation = self._pipeline(str(audio_path), **pipeline_kwargs)
         except Exception as exc:
             raise DiarizationError(f"Diarization failed: {exc}") from exc
         finally:
@@ -200,16 +202,21 @@ class SpeakerDiarizer:
                 label_map[raw] = _SPEAKER_LABEL_TEMPLATE.format(n=n)
             return label_map[raw]
 
+        # Pre-sort turns by start time and extract starts for binary search.
+        sorted_turns = sorted(speaker_segments, key=lambda t: t["start"])
+        starts = [t["start"] for t in sorted_turns]
+
         result: list[dict] = []
 
         for seg in transcription_segments:
             midpoint = (seg["start"] + seg["end"]) / 2.0
 
-            matched_speaker = "Unbekannt"
-            for turn in speaker_segments:
-                if turn["start"] <= midpoint <= turn["end"]:
-                    matched_speaker = _human_label(turn["speaker"])
-                    break
+            # Binary-search: find the rightmost turn whose start ≤ midpoint.
+            idx = bisect.bisect_right(starts, midpoint) - 1
+            if idx >= 0 and sorted_turns[idx]["end"] >= midpoint:
+                matched_speaker = _human_label(sorted_turns[idx]["speaker"])
+            else:
+                matched_speaker = "Unbekannt"
 
             result.append({**seg, "speaker": matched_speaker})
 

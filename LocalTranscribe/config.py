@@ -39,8 +39,18 @@ WHISPER_COMPUTE_TYPE_FALLBACK = "int8"
 # Supported transcription languages shown in the UI.
 LANGUAGES = {"Deutsch": "de", "English": "en"}
 
-# BCP-47 code used when no language is explicitly selected.
-DEFAULT_LANGUAGE = "de"
+# Display-key (must match a key in LANGUAGES) used when no language is selected.
+DEFAULT_LANGUAGE = "Deutsch"
+assert DEFAULT_LANGUAGE in LANGUAGES, (
+    f"DEFAULT_LANGUAGE '{DEFAULT_LANGUAGE}' not found in LANGUAGES keys"
+)
+
+# ---------------------------------------------------------------------------
+# Ollama timeouts
+# ---------------------------------------------------------------------------
+
+OLLAMA_GET_TIMEOUT = 10       # seconds – used for GET /api/tags
+OLLAMA_GENERATE_TIMEOUT = 120 # seconds – used for POST /api/generate
 
 # ---------------------------------------------------------------------------
 # Ollama settings

@@ -200,6 +200,35 @@ try:
     r = SpeakerDiarizer.assign_speakers(segs_rev, turns_rev)
     check("First encountered speaker → Sprecher 1 regardless of raw ID", r[0]["speaker"] == "Sprecher 1")
 
+    # Edge-case: empty transcript list → returns []
+    r_empty = SpeakerDiarizer.assign_speakers([], turns)
+    check("assign_speakers: empty transcript → []",             r_empty == [])
+
+    # Edge-case: empty turns list → all segments are "Unbekannt"
+    r_no_turns = SpeakerDiarizer.assign_speakers(transcript, [])
+    check("assign_speakers: empty turns → all Unbekannt",
+          all(s["speaker"] == "Unbekannt" for s in r_no_turns))
+
+    # Edge-case: overlapping turns → no crash, returns a result
+    turns_overlap = [
+        {"start": 0.0,  "end": 10.0, "speaker": "SPEAKER_00"},
+        {"start": 5.0,  "end": 15.0, "speaker": "SPEAKER_01"},
+    ]
+    segs_overlap = [{"start": 3.0, "end": 7.0, "text": "Overlap", "words": []}]
+    try:
+        r_overlap = SpeakerDiarizer.assign_speakers(segs_overlap, turns_overlap)
+        check("assign_speakers: overlapping turns → no crash",  len(r_overlap) == 1)
+    except Exception as exc:
+        check("assign_speakers: overlapping turns → no crash",  False, str(exc))
+
+    # Edge-case: segment with start > end (malformed) → no crash
+    segs_bad = [{"start": 5.0, "end": 3.0, "text": "Bad", "words": []}]
+    try:
+        r_bad = SpeakerDiarizer.assign_speakers(segs_bad, turns)
+        check("assign_speakers: start>end segment → no crash",  len(r_bad) == 1)
+    except Exception as exc:
+        check("assign_speakers: start>end segment → no crash",  False, str(exc))
+
 except ImportError as exc:
     skip("diarizer.py tests", f"missing dependency: {exc}")
 
@@ -274,18 +303,20 @@ section("5. Synthetic WAV creation & read-back")
 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as _tmp:
     wav_path = Path(_tmp.name)
 
-make_wav(wav_path, duration_s=2.0, freq_hz=440.0)
-check("WAV file created",           wav_path.exists())
-check("WAV file > 0 bytes",         wav_path.stat().st_size > 0)
+try:
+    make_wav(wav_path, duration_s=2.0, freq_hz=440.0)
+    check("WAV file created",           wav_path.exists())
+    check("WAV file > 0 bytes",         wav_path.stat().st_size > 0)
 
-with wave.open(str(wav_path)) as wf:
-    check("WAV channels = 1",       wf.getnchannels() == 1)
-    check("WAV rate = 16 000 Hz",   wf.getframerate() == 16_000)
-    check("WAV depth = 16-bit",     wf.getsampwidth() == 2)
-    dur = wf.getnframes() / wf.getframerate()
-    check(f"WAV duration ≈ 2.0 s",  abs(dur - 2.0) < 0.05, f"{dur:.3f} s")
+    with wave.open(str(wav_path)) as wf:
+        check("WAV channels = 1",       wf.getnchannels() == 1)
+        check("WAV rate = 16 000 Hz",   wf.getframerate() == 16_000)
+        check("WAV depth = 16-bit",     wf.getsampwidth() == 2)
+        dur = wf.getnframes() / wf.getframerate()
+        check(f"WAV duration ≈ 2.0 s",  abs(dur - 2.0) < 0.05, f"{dur:.3f} s")
+finally:
+    wav_path.unlink(missing_ok=True)
 
-wav_path.unlink()
 check("Temp WAV cleaned up",        not wav_path.exists())
 
 # ---------------------------------------------------------------------------

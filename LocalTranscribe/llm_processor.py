@@ -13,7 +13,7 @@ from typing import Literal
 
 import requests
 
-from config import OLLAMA_BASE_URL
+from config import OLLAMA_BASE_URL, OLLAMA_GENERATE_TIMEOUT, OLLAMA_GET_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ class LLMProcessor:
         """
         url = f"{self.base_url}/api/tags"
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, timeout=OLLAMA_GET_TIMEOUT)
             response.raise_for_status()
         except requests.ConnectionError as exc:
             raise LLMError(
@@ -247,7 +247,7 @@ class LLMProcessor:
         logger.info("Sending task to Ollama model '%s' at %s…", model, self.base_url)
 
         try:
-            response = requests.post(url, json=payload, timeout=120)
+            response = requests.post(url, json=payload, timeout=OLLAMA_GENERATE_TIMEOUT)
             response.raise_for_status()
         except requests.ConnectionError as exc:
             raise LLMError(
@@ -256,14 +256,17 @@ class LLMProcessor:
             ) from exc
         except requests.Timeout as exc:
             raise LLMError(
-                f"Ollama request timed out after 120 s. "
+                f"Ollama request timed out after {OLLAMA_GENERATE_TIMEOUT} s. "
                 "Try a smaller model or shorten the transcript."
             ) from exc
         except requests.HTTPError as exc:
             body = exc.response.text[:300] if exc.response is not None else ""
             raise LLMError(f"Ollama returned HTTP {exc.response.status_code}: {body}") from exc
 
-        result: str = response.json().get("response", "")
+        try:
+            result: str = response.json().get("response", "")
+        except ValueError as exc:
+            raise LLMError(f"Ollama response is not valid JSON: {exc}") from exc
         logger.info("LLM response received (%d chars).", len(result))
         return result.strip()
 
