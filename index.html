@@ -1,0 +1,2066 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D-Drucker Kostenverfolgung</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg-primary: #0f1117;
+      --bg-card: #1a1d27;
+      --bg-input: #252836;
+      --border: #2e3247;
+      --accent: #6c63ff;
+      --accent-light: #8b85ff;
+      --danger: #e05260;
+      --success: #4caf84;
+      --warning: #f59e0b;
+      --text-primary: #e8eaf0;
+      --text-muted: #7b82a0;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 15px;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      display: flex;
+      align-items: center;
+      height: 60px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .header-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--accent-light);
+    }
+
+    .header-subtitle {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+
+    /* ── Nav Tabs ── */
+    nav {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      padding: 0 1.5rem;
+      overflow-x: auto;
+    }
+
+    .tab-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 500;
+      padding: 0.85rem 1rem;
+      position: relative;
+      transition: color 0.2s;
+      white-space: nowrap;
+    }
+
+    .tab-btn:hover { color: var(--text-primary); }
+
+    .tab-btn.active {
+      color: var(--accent-light);
+    }
+
+    .tab-btn.active::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--accent);
+      border-radius: 2px 2px 0 0;
+    }
+
+    /* ── Main ── */
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 1.5rem;
+    }
+
+    .tab-section { display: none; }
+    .tab-section.active { display: block; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.4rem;
+      margin-bottom: 1.2rem;
+    }
+
+    .card-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 1.1rem;
+      padding-bottom: 0.65rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* ── Form ── */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.9rem 1.2rem;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+
+    .form-group.full-width { grid-column: 1 / -1; }
+
+    /* ── Input Validation ── */
+    .form-group input.input-error,
+    .form-group select.input-error {
+      border-color: var(--danger) !important;
+      box-shadow: 0 0 0 2px rgba(224,82,96,0.25);
+    }
+    .field-error-msg {
+      color: var(--danger);
+      font-size: 0.76rem;
+      margin-top: 0.15rem;
+      display: none;
+    }
+    .field-error-msg.visible { display: block; }
+
+    label {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    input[type="date"],
+    select {
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-size: 0.9rem;
+      padding: 0.55rem 0.75rem;
+      transition: border-color 0.2s;
+      width: 100%;
+    }
+
+    input:focus, select:focus {
+      border-color: var(--accent);
+      outline: none;
+    }
+
+    input::placeholder { color: var(--text-muted); }
+
+    /* Duration row */
+    .duration-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+
+    .duration-subgroup {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .duration-subgroup label {
+      font-size: 0.75rem;
+    }
+
+    /* ── Preview Box ── */
+    .preview-box {
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.1rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.6rem 1.2rem;
+    }
+
+    .preview-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.88rem;
+    }
+
+    .preview-label { color: var(--text-muted); }
+
+    .preview-value { font-weight: 600; }
+    .preview-value.positive { color: var(--success); }
+    .preview-value.negative { color: var(--danger); }
+
+    /* ── Buttons ── */
+    .btn {
+      border: none;
+      border-radius: 7px;
+      cursor: pointer;
+      font-size: 0.88rem;
+      font-weight: 600;
+      padding: 0.6rem 1.2rem;
+      transition: opacity 0.15s, transform 0.1s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .btn:hover { opacity: 0.88; }
+    .btn:active { transform: scale(0.97); }
+
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-danger  { background: var(--danger); color: #fff; }
+    .btn-neutral {
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+    }
+
+    .btn-sm { font-size: 0.8rem; padding: 0.35rem 0.8rem; }
+
+    .btn-icon {
+      background: none;
+      border: none;
+      color: var(--danger);
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 0.2rem 0.45rem;
+      border-radius: 4px;
+      transition: background 0.15s;
+    }
+
+    .btn-icon:hover { background: rgba(224,82,96,0.12); }
+
+    /* ── Action Bar ── */
+    .action-bar {
+      display: flex;
+      gap: 0.7rem;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    /* ── Table ── */
+    .table-wrapper {
+      overflow-x: auto;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 0.85rem;
+    }
+
+    thead tr { background: var(--bg-input); }
+
+    th {
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 0.77rem;
+      padding: 0.65rem 0.8rem;
+      text-align: left;
+      white-space: nowrap;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 0.6rem 0.8rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .cell-nowrap { white-space: nowrap; }
+
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: rgba(108,99,255,0.05); }
+
+    .profit-positive { color: var(--success); font-weight: 600; }
+    .profit-negative { color: var(--danger); font-weight: 600; }
+
+    .empty-state {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 2.5rem 1rem;
+      font-size: 0.9rem;
+    }
+
+    /* ── Chart ── */
+    .chart-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      margin-bottom: 1.2rem;
+    }
+
+    .chart-controls label { font-size: 0.88rem; }
+
+    .chart-controls select { width: auto; min-width: 110px; }
+
+    .chart-container {
+      position: relative;
+      height: 380px;
+    }
+
+    #chart-error {
+      display: none;
+      color: var(--danger);
+      padding: 1.5rem;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+
+    /* ── Statistics ── */
+    .stat-controls {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1.2rem;
+    }
+
+    .radio-group {
+      display: flex;
+      gap: 1.2rem;
+      flex-wrap: wrap;
+    }
+
+    .radio-label {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      cursor: pointer;
+      font-size: 0.88rem;
+      color: var(--text-primary);
+    }
+
+    .radio-label input[type="radio"] {
+      accent-color: var(--accent);
+      width: auto;
+    }
+
+    .date-range-row {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+
+    .date-range-row input[type="date"] { width: auto; }
+    .date-range-row span { color: var(--text-muted); font-size: 0.88rem; }
+
+    .hidden { display: none !important; }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+    }
+
+    .stat-card {
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 1.1rem 1.2rem;
+    }
+
+    .stat-card-label {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-bottom: 0.45rem;
+      font-weight: 500;
+    }
+
+    .stat-card-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    .stat-card-value.positive { color: var(--success); }
+    .stat-card-value.negative { color: var(--danger); }
+
+    /* ── Settings ── */
+    .settings-form { max-width: 460px; }
+    .settings-form .form-group { margin-bottom: 0.9rem; }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.65);
+      z-index: 500;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-overlay.open { display: flex; }
+
+    .modal-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.8rem 2rem;
+      max-width: 400px;
+      width: 90%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+
+    .modal-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .modal-body {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin-bottom: 1.4rem;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 0.7rem;
+      flex-wrap: wrap;
+    }
+
+    /* ── Toast ── */
+    #toast-container {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      pointer-events: none;
+    }
+
+    .toast {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1.1rem;
+      font-size: 0.88rem;
+      color: var(--text-primary);
+      box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+      opacity: 0;
+      transform: translateX(20px);
+      transition: opacity 0.25s, transform 0.25s;
+      pointer-events: auto;
+      max-width: 320px;
+    }
+
+    .toast.show { opacity: 1; transform: translateX(0); }
+    .toast.success { border-left-color: var(--success); }
+    .toast.error   { border-left-color: var(--danger); }
+    .toast.info    { border-left-color: #3b9eff; }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      .form-grid { grid-template-columns: 1fr; }
+      .form-group.full-width { grid-column: 1; }
+      .stats-grid { grid-template-columns: 1fr 1fr; }
+      .preview-box { grid-template-columns: 1fr; }
+      header { padding: 0 1rem; }
+      nav { padding: 0 0.5rem; }
+      main { padding: 1rem; }
+    }
+
+    @media (max-width: 480px) {
+      .stats-grid { grid-template-columns: 1fr; }
+    }
+
+    #csv-file-input { display: none; }
+
+    select option {
+      background: var(--bg-card);
+      color: var(--text-primary);
+    }
+
+    input[type="date"]::-webkit-calendar-picker-indicator {
+      filter: invert(0.6);
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div>
+      <div class="header-title">&#128424; 3D-Drucker Kostenverfolgung</div>
+      <div class="header-subtitle">Kosten &amp; Gewinne im Überblick</div>
+    </div>
+  </header>
+
+  <nav id="tab-nav">
+    <button class="tab-btn active" data-tab="buchungen">Buchungen</button>
+    <button class="tab-btn" data-tab="diagramm">Diagramm</button>
+    <button class="tab-btn" data-tab="statistiken">Statistiken</button>
+    <button class="tab-btn" data-tab="einstellungen">Einstellungen</button>
+  </nav>
+
+  <main>
+
+    <!-- ══════════════════════════════════════════
+         TAB 1: BUCHUNGEN
+    ══════════════════════════════════════════ -->
+    <section id="buchungen" class="tab-section active">
+
+      <!-- Booking Form -->
+      <div class="card">
+        <div class="card-title">Neue Buchung</div>
+        <form id="booking-form" autocomplete="off">
+          <div class="form-grid">
+
+            <div class="form-group full-width">
+              <label for="f-desc">Beschreibung</label>
+              <input type="text" id="f-desc" placeholder="z.B. Halterung XYZ" required />
+            </div>
+
+            <div class="form-group">
+              <label for="f-date">Datum</label>
+              <input type="date" id="f-date" required />
+            </div>
+
+            <div class="form-group">
+              <label>Druckdauer</label>
+              <div class="duration-row">
+                <div class="duration-subgroup">
+                  <label for="f-hours">Stunden</label>
+                  <input type="number" id="f-hours" placeholder="0" min="0" step="1" />
+                </div>
+                <div class="duration-subgroup">
+                  <label for="f-minutes">Minuten</label>
+                  <input type="number" id="f-minutes" placeholder="0" min="0" max="59" step="1" />
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="f-filament-profile">Filament-Profil</label>
+              <select id="f-filament-profile">
+                <option value="">— Standard (aus Einstellungen) —</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="f-filament">Filament in Gramm</label>
+              <input type="number" id="f-filament" placeholder="0.00" min="0.01" step="0.01" required />
+            </div>
+
+            <div class="form-group">
+              <label for="f-kwh">kW (Ø Leistung)</label>
+              <input type="number" id="f-kwh" placeholder="0.100" min="0" step="0.001" />
+            </div>
+
+            <div class="form-group">
+              <label for="f-selling">Verkaufspreis in €</label>
+              <input type="number" id="f-selling" placeholder="0.00" min="0" step="0.01" required />
+            </div>
+
+            <div class="form-group full-width">
+              <label>Rechnungsnummern</label>
+              <div id="invoice-list" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.4rem;"></div>
+              <div style="display:flex;gap:.5rem;">
+                <input type="text" id="f-invoice-input" placeholder="z.B. RE-2024-001" style="flex:1;" />
+                <button type="button" class="btn btn-neutral" id="btn-add-invoice">+ Hinzufügen</button>
+              </div>
+            </div>
+
+            <div class="form-group full-width">
+              <label for="f-comment">Kommentar</label>
+              <textarea id="f-comment" rows="2" placeholder="Optionale Notizen..." style="width:100%;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:.6rem .8rem;font-family:inherit;resize:vertical;"></textarea>
+            </div>
+
+            <!-- Live-Vorschau -->
+            <div class="form-group full-width">
+              <label>Live-Vorschau</label>
+              <div class="preview-box">
+                <div class="preview-item">
+                  <span class="preview-label">Filamentkosten</span>
+                  <span class="preview-value" id="prev-filament">— €</span>
+                </div>
+                <div class="preview-item">
+                  <span class="preview-label">Strom gesamt (kWh)</span>
+                  <span class="preview-value" id="prev-kwh-total">— kWh</span>
+                </div>
+                <div class="preview-item">
+                  <span class="preview-label">Stromkosten</span>
+                  <span class="preview-value" id="prev-elec">— €</span>
+                </div>
+                <div class="preview-item">
+                  <span class="preview-label">Gesamtkosten</span>
+                  <span class="preview-value" id="prev-total">— €</span>
+                </div>
+                <div class="preview-item">
+                  <span class="preview-label">Gewinn</span>
+                  <span class="preview-value" id="prev-profit">— €</span>
+                </div>
+                <div class="preview-item">
+                  <span class="preview-label">Marge</span>
+                  <span class="preview-value" id="prev-margin">— %</span>
+                </div>
+                <div class="preview-item" style="margin-top:.5rem;border-top:1px solid var(--border);padding-top:.5rem;">
+                  <span class="preview-label">Vorgeschlagener Preis</span>
+                  <span class="preview-value" id="prev-suggested-price">— €</span>
+                </div>
+                <div class="preview-item">
+                  <span class="preview-label">Marge (Vorschlag)</span>
+                  <span class="preview-value" id="prev-suggested-margin">— %</span>
+                </div>
+              </div>
+            </div>
+
+          </div><!-- /.form-grid -->
+          <div style="display:flex;justify-content:flex-end;gap:.5rem;margin-top:1rem;">
+            <button type="button" class="btn btn-neutral" id="btn-save-repeat">Speichern &amp; Wiederholen</button>
+            <button type="submit" class="btn btn-primary">Buchung speichern</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Action Bar + Table -->
+      <div class="card">
+        <div class="action-bar">
+          <strong style="font-size:0.95rem;">Buchungsübersicht</strong>
+          <button class="btn btn-neutral btn-sm" onclick="exportCSV()">&#8595; CSV exportieren</button>
+          <label class="btn btn-neutral btn-sm" style="cursor:pointer;" for="csv-file-input">&#8593; CSV importieren</label>
+          <input type="file" id="csv-file-input" accept=".csv,text/csv" />
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Datum</th>
+                <th>Beschreibung</th>
+                <th>Dauer</th>
+                <th>Filament-Profil</th>
+                <th>Filament (g)</th>
+                <th>kW (Ø)</th>
+                <th>kWh ges.</th>
+                <th>Filamentkosten</th>
+                <th>Stromkosten</th>
+                <th>Gesamtkosten</th>
+                <th>Verkaufspr.</th>
+                <th>Gewinn</th>
+                <th>Marge</th>
+                <th>Rechnung(en)</th>
+                <th>Kommentar</th>
+                <th>Aktionen</th>
+              </tr>
+            </thead>
+            <tbody id="bookings-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </section><!-- /#buchungen -->
+
+
+    <!-- ══════════════════════════════════════════
+         TAB 2: DIAGRAMM
+    ══════════════════════════════════════════ -->
+    <section id="diagramm" class="tab-section">
+
+      <div class="card">
+        <div class="card-title">Monatsdiagramm</div>
+        <div class="chart-controls">
+          <label for="year-selector">Jahr:</label>
+          <select id="year-selector"></select>
+        </div>
+        <div id="chart-error">Diagramm konnte nicht geladen werden (Chart.js nicht verfügbar).</div>
+        <div class="chart-container">
+          <canvas id="monthly-chart"></canvas>
+        </div>
+      </div>
+
+    </section><!-- /#diagramm -->
+
+
+    <!-- ══════════════════════════════════════════
+         TAB 3: STATISTIKEN
+    ══════════════════════════════════════════ -->
+    <section id="statistiken" class="tab-section">
+
+      <div class="card">
+        <div class="card-title">Statistiken</div>
+
+        <div class="stat-controls">
+          <div class="radio-group">
+            <label class="radio-label">
+              <input type="radio" name="stats-range" value="all" id="range-all" checked />
+              Gesamter Zeitraum
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="stats-range" value="custom" id="range-custom" />
+              Benutzerdefinierter Zeitraum
+            </label>
+          </div>
+          <div class="date-range-row hidden" id="custom-date-range">
+            <label for="date-from" style="font-size:0.82rem;color:var(--text-muted);">Von</label>
+            <input type="date" id="date-from" />
+            <span>–</span>
+            <label for="date-to" style="font-size:0.82rem;color:var(--text-muted);">Bis</label>
+            <input type="date" id="date-to" />
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-card-label">Gesamtumsatz</div>
+            <div class="stat-card-value" id="stat-umsatz">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Gesamtkosten</div>
+            <div class="stat-card-value" id="stat-kosten">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Gesamtgewinn</div>
+            <div class="stat-card-value" id="stat-gewinn">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Anzahl Buchungen</div>
+            <div class="stat-card-value" id="stat-count">—</div>
+          </div>
+        </div>
+      </div>
+
+    </section><!-- /#statistiken -->
+
+
+    <!-- ══════════════════════════════════════════
+         TAB 4: EINSTELLUNGEN
+    ══════════════════════════════════════════ -->
+    <section id="einstellungen" class="tab-section">
+
+      <div class="card">
+        <div class="card-title">Einstellungen</div>
+        <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:1.2rem;">
+          Diese Werte werden als Standardwerte für neue Buchungen verwendet.
+          Bereits gespeicherte Buchungen werden <strong style="color:var(--text-primary);">nicht</strong> rückwirkend angepasst.
+        </p>
+        <form id="settings-form" class="settings-form">
+          <div class="form-group">
+            <label for="s-filament-price">Filamentpreis pro kg (€/kg)</label>
+            <input type="number" id="s-filament-price" placeholder="22.99" min="0" step="0.01" required />
+          </div>
+          <div class="form-group">
+            <label for="s-electricity-price">Strompreis pro kWh (€/kWh)</label>
+            <input type="number" id="s-electricity-price" placeholder="0.32" min="0" step="0.001" required />
+          </div>
+          <div class="form-group full-width" style="margin-top:1.5rem;">
+            <hr style="border-color:var(--border);margin-bottom:1.2rem;">
+            <div style="font-weight:600;margin-bottom:.5rem;color:var(--text-primary);">Filament-Profile</div>
+            <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:.8rem;">
+              Profile stehen im Buchungsformular als Dropdown bereit. Der Standardpreis oben wird verwendet, wenn kein Profil ausgewählt ist.
+            </p>
+            <div id="filament-profiles-list" style="display:flex;flex-direction:column;gap:.4rem;margin-bottom:.8rem;"></div>
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+              <input type="text" id="fp-name" placeholder="Name (z.B. PLA Weiß)" style="flex:2;min-width:120px;" />
+              <input type="number" id="fp-price" placeholder="€/kg" min="0" step="0.01" style="flex:1;min-width:80px;" />
+              <button type="button" class="btn btn-neutral" id="btn-add-filament-profile">+ Profil</button>
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:1rem;">
+            <label for="s-markup">Preisvorschlag – Aufschlagsfaktor (×)</label>
+            <input type="number" id="s-markup" placeholder="3.0" min="1" step="0.1" />
+            <small style="color:var(--text-muted);display:block;margin-top:.3rem;">Vorgeschlagener Preis = Gesamtkosten × Faktor</small>
+          </div>
+          <div style="margin-top:1rem;">
+            <button type="submit" class="btn btn-primary">Einstellungen speichern</button>
+          </div>
+        </form>
+      </div>
+
+    </section><!-- /#einstellungen -->
+
+  </main>
+
+  <!-- Toast Container -->
+  <div id="toast-container"></div>
+
+  <!-- Import Modal -->
+  <div id="import-modal" class="modal-overlay" role="dialog" aria-modal="true">
+    <div class="modal-box">
+      <div class="modal-title">CSV importieren</div>
+      <div class="modal-body">Wie sollen die Daten importiert werden?</div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="modal-merge">Zusammenführen</button>
+        <button class="btn btn-danger" id="modal-replace">Ersetzen</button>
+        <button class="btn btn-neutral" id="modal-cancel">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Modal -->
+  <div id="edit-modal" class="modal-overlay" role="dialog" aria-modal="true">
+    <div class="modal-box" style="max-width:640px;width:95%;">
+      <div class="modal-title">Buchung bearbeiten</div>
+      <input type="hidden" id="edit-id" />
+      <form id="edit-form" class="form-grid" style="margin-top:1rem;" autocomplete="off">
+        <div class="form-group full-width">
+          <label for="e-desc">Beschreibung</label>
+          <input type="text" id="e-desc" required />
+        </div>
+        <div class="form-group">
+          <label for="e-date">Datum</label>
+          <input type="date" id="e-date" required />
+        </div>
+        <div class="form-group">
+          <label>Druckdauer</label>
+          <div class="duration-row">
+            <div class="duration-subgroup">
+              <label for="e-hours">Stunden</label>
+              <input type="number" id="e-hours" min="0" step="1" />
+            </div>
+            <div class="duration-subgroup">
+              <label for="e-minutes">Minuten</label>
+              <input type="number" id="e-minutes" max="59" step="1" />
+            </div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="e-filament-profile">Filament-Profil</label>
+          <select id="e-filament-profile">
+            <option value="">— Standard (aus Einstellungen) —</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="e-filament">Filament in Gramm</label>
+          <input type="number" id="e-filament" min="0.01" step="0.01" required />
+        </div>
+        <div class="form-group">
+          <label for="e-kwh">kW (Ø Leistung)</label>
+          <input type="number" id="e-kwh" min="0" step="0.001" />
+        </div>
+        <div class="form-group">
+          <label for="e-selling">Verkaufspreis in €</label>
+          <input type="number" id="e-selling" min="0" step="0.01" required />
+        </div>
+        <div class="form-group full-width">
+          <label>Rechnungsnummern</label>
+          <div id="edit-invoice-list" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.4rem;"></div>
+          <div style="display:flex;gap:.5rem;">
+            <input type="text" id="e-invoice-input" placeholder="z.B. RE-2024-001" style="flex:1;" />
+            <button type="button" class="btn btn-neutral" id="btn-edit-add-invoice">+ Hinzufügen</button>
+          </div>
+        </div>
+        <div class="form-group full-width">
+          <label for="e-comment">Kommentar</label>
+          <textarea id="e-comment" rows="2" style="width:100%;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:.6rem .8rem;font-family:inherit;resize:vertical;"></textarea>
+        </div>
+        <div class="form-group full-width" style="display:flex;justify-content:flex-end;gap:.5rem;margin-top:.5rem;">
+          <button type="button" class="btn btn-neutral" id="btn-edit-cancel">Abbrechen</button>
+          <button type="submit" class="btn btn-primary">Änderungen speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    'use strict';
+
+    /* ─────────────────────────────────────────────
+       CONSTANTS
+    ───────────────────────────────────────────── */
+    const STORAGE_KEY  = '3d_tracker_bookings';
+    const SETTINGS_KEY = '3d_tracker_settings';
+    const DATA_VERSION = '1.4';
+    const BOM          = '\uFEFF'; // UTF-8 Byte Order Mark für Excel-Kompatibilität
+
+    const CSV_HEADER = [
+      'ID','Datum','Beschreibung','Rechnungsnummern','Kommentar',
+      'Dauer_Stunden','Dauer_Minuten','Filament_Profil','Filament_g','Filament_EUR_per_kg',
+      'Strom_kW_Leistung','Strom_kWh_gesamt','Strom_EUR_per_kWh',
+      'Verkaufspreis_EUR','Filamentkosten_EUR','Stromkosten_EUR',
+      'Gesamtkosten_EUR','Gewinn_EUR','Marge_Prozent'
+    ].join(';');
+
+    const MONTHS_DE = [
+      'Jan','Feb','Mär','Apr','Mai','Jun',
+      'Jul','Aug','Sep','Okt','Nov','Dez'
+    ];
+
+    /* chart instance */
+    let chartInstance = null;
+
+    /* ─────────────────────────────────────────────
+       UTILITIES
+    ───────────────────────────────────────────── */
+    function generateId() {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+      }
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+    }
+
+    function formatEur(val) {
+      return Number(val).toLocaleString('de-DE', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }) + ' €';
+    }
+
+    function formatDate(iso) {
+      if (!iso) return '';
+      const [y, m, d] = iso.split('-');
+      return `${d}.${m}.${y}`;
+    }
+
+    function todayISO() {
+      return new Date().toISOString().slice(0, 10);
+    }
+
+    /* placeholder — real impl moved to CSVHandler below */
+    function csvEscape(val) { return CSVHandler.escape(val); }
+
+    /* ─────────────────────────────────────────────
+       NAMESPACE: StorageManager
+    ───────────────────────────────────────────── */
+    const StorageManager = {
+      migrate(bookings, storedVersion) {
+        if (storedVersion === DATA_VERSION && bookings.every(b =>
+          b.invoiceNumbers !== undefined &&
+          b.comment       !== undefined &&
+          b.margin        !== undefined &&
+          b.filamentProfileName !== undefined
+        )) return bookings;
+
+        let migratedCount = 0;
+        const result = bookings.map(b => {
+          let changed = false;
+          const u = { ...b };
+          if (u.invoiceNumbers      === undefined) { u.invoiceNumbers = [];  changed = true; }
+          if (u.comment             === undefined) { u.comment = '';         changed = true; }
+          if (u.filamentProfileName === undefined) { u.filamentProfileName = ''; changed = true; }
+          if (u.electricityKwPerHour === undefined) { u.electricityKwPerHour = 0; changed = true; }
+          if (u.electricityKwhTotal  === undefined) { u.electricityKwhTotal  = 0; changed = true; }
+          if (u.margin === undefined) {
+            u.margin = u.sellingPrice > 0
+              ? Math.round((u.profit / u.sellingPrice) * 1000) / 10
+              : 0;
+            changed = true;
+          }
+          if (changed) migratedCount++;
+          return u;
+        });
+
+        console.info(
+          `[3D Tracker] Migration: v${storedVersion || 'unbekannt'} → v${DATA_VERSION}` +
+          (migratedCount > 0 ? ` | ${migratedCount} Buchung(en) aktualisiert` : '')
+        );
+        return result;
+      },
+
+      load() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return [];
+          const parsed = JSON.parse(raw);
+          const storedVersion = Array.isArray(parsed) ? null : parsed.version;
+          const bookings      = Array.isArray(parsed) ? parsed : (parsed.bookings || []);
+          return StorageManager.migrate(bookings, storedVersion);
+        } catch (e) {
+          showToast('Fehler beim Laden der Buchungen.', 'error');
+          return [];
+        }
+      },
+
+      save(bookings) {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: DATA_VERSION, bookings }));
+        } catch (e) {
+          if (e.name === 'QuotaExceededError') {
+            showToast('Speicher voll! Buchung konnte nicht gespeichert werden.', 'error');
+          } else {
+            showToast('Fehler beim Speichern.', 'error');
+          }
+        }
+      },
+
+      loadSettings() {
+        try {
+          const raw = localStorage.getItem(SETTINGS_KEY);
+          return raw ? JSON.parse(raw) : { filamentPricePerKg: 22.99, electricityPricePerKwh: 0.32, filaments: [], suggestedPriceMarkup: 3.0 };
+        } catch (e) {
+          return { filamentPricePerKg: 22.99, electricityPricePerKwh: 0.32, filaments: [], suggestedPriceMarkup: 3.0 };
+        }
+      },
+
+      saveSettings(settings) {
+        try {
+          localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        } catch (e) {
+          showToast('Einstellungen konnten nicht gespeichert werden.', 'error');
+        }
+      }
+    };
+    // Wrappers — behalten bestehende Funktionsnamen
+    function migrateData(b, v)   { return StorageManager.migrate(b, v); }
+    function loadFromStorage()   { return StorageManager.load(); }
+    function saveToStorage(b)    { return StorageManager.save(b); }
+    function loadSettings()      { return StorageManager.loadSettings(); }
+    function saveSettings(s)     { return StorageManager.saveSettings(s); }
+
+    /* ─────────────────────────────────────────────
+       NAMESPACE: CostCalculator
+    ───────────────────────────────────────────── */
+    const CostCalculator = {
+      calc(filamentGrams, filamentPricePerKg, electricityKwPerHour, durationHours, durationMinutes, electricityPricePerKwh, sellingPrice) {
+        const filamentCost    = Math.round((filamentGrams / 1000) * filamentPricePerKg * 100) / 100;
+        const totalKwh        = Math.round(electricityKwPerHour * (durationHours + durationMinutes / 60) * 1000) / 1000;
+        const electricityCost = Math.round(totalKwh * electricityPricePerKwh * 100) / 100;
+        const totalCost       = Math.round((filamentCost + electricityCost) * 100) / 100;
+        const profit          = Math.round((sellingPrice - totalCost) * 100) / 100;
+        const margin = sellingPrice > 0 ? Math.round((profit / sellingPrice) * 1000) / 10 : 0;
+        return { filamentCost, electricityCost, totalCost, profit, totalKwh, margin };
+      }
+    };
+    // Wrapper — behält bestehenden Funktionsnamen
+    function calculateCosts(...args) { return CostCalculator.calc(...args); }
+
+    /* ─────────────────────────────────────────────
+       FORM PREVIEW
+    ───────────────────────────────────────────── */
+    function updateFormPreview() { return UI.updateFormPreview(); }
+
+    /* ─────────────────────────────────────────────
+       FORM VALIDATION
+    ───────────────────────────────────────────── */
+    function _fieldErr(id, msg) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.add('input-error');
+      let hint = el.parentElement.querySelector('.field-error-msg');
+      if (!hint) {
+        hint = document.createElement('span');
+        hint.className = 'field-error-msg';
+        el.parentElement.appendChild(hint);
+      }
+      hint.textContent = msg;
+      hint.classList.add('visible');
+    }
+
+    function _fieldOk(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.remove('input-error');
+      const hint = el.parentElement.querySelector('.field-error-msg');
+      if (hint) hint.classList.remove('visible');
+    }
+
+    function clearFormErrors() {
+      ['f-desc','f-date','f-filament','f-hours','f-minutes','f-kwh','f-selling']
+        .forEach(_fieldOk);
+    }
+
+    function validateBookingForm() {
+      const errors = [];
+
+      // Beschreibung — Pflichtfeld
+      const desc = document.getElementById('f-desc').value.trim();
+      if (!desc) { _fieldErr('f-desc', 'Pflichtfeld'); errors.push('Beschreibung fehlt'); }
+      else _fieldOk('f-desc');
+
+      // Datum — Pflichtfeld
+      const date = document.getElementById('f-date').value;
+      if (!date) { _fieldErr('f-date', 'Pflichtfeld'); errors.push('Datum fehlt'); }
+      else _fieldOk('f-date');
+
+      // Filament (g) — Pflichtfeld, > 0, kein NaN
+      const gramsRaw = document.getElementById('f-filament').value;
+      const grams = parseFloat(gramsRaw);
+      if (gramsRaw === '' || isNaN(grams)) {
+        _fieldErr('f-filament', 'Ungültiger Wert'); errors.push('Filamentgewicht: ungültiger Wert');
+      } else if (grams <= 0) {
+        _fieldErr('f-filament', 'Muss > 0 g sein'); errors.push('Filamentgewicht muss > 0 g sein');
+      } else _fieldOk('f-filament');
+
+      // Stunden — optional, aber kein NaN und nicht negativ
+      const hoursRaw = document.getElementById('f-hours').value;
+      if (hoursRaw !== '') {
+        const hours = parseInt(hoursRaw);
+        if (isNaN(hours) || hours < 0) {
+          _fieldErr('f-hours', 'Ungültiger Wert (≥ 0)'); errors.push('Stunden: ungültiger Wert');
+        } else _fieldOk('f-hours');
+      } else _fieldOk('f-hours');
+
+      // Minuten — optional, 0–59, kein NaN
+      const minutesRaw = document.getElementById('f-minutes').value;
+      if (minutesRaw !== '') {
+        const minutes = parseInt(minutesRaw);
+        if (isNaN(minutes) || minutes < 0 || minutes > 59) {
+          _fieldErr('f-minutes', 'Wert 0–59 erwartet'); errors.push('Minuten: Wert 0–59 erwartet');
+        } else _fieldOk('f-minutes');
+      } else _fieldOk('f-minutes');
+
+      // Leistung kW — optional, kein NaN, nicht negativ
+      const powerRaw = document.getElementById('f-kwh').value;
+      if (powerRaw !== '') {
+        const powerKw = parseFloat(powerRaw);
+        if (isNaN(powerKw) || powerKw < 0) {
+          _fieldErr('f-kwh', 'Ungültiger Wert (≥ 0)'); errors.push('Leistung: ungültiger Wert');
+        } else _fieldOk('f-kwh');
+      } else _fieldOk('f-kwh');
+
+      // Verkaufspreis — Pflichtfeld, kein NaN, nicht negativ
+      const sellingRaw = document.getElementById('f-selling').value;
+      const selling = parseFloat(sellingRaw);
+      if (sellingRaw === '' || isNaN(selling)) {
+        _fieldErr('f-selling', 'Ungültiger Wert'); errors.push('Verkaufspreis: ungültiger Wert');
+      } else if (selling < 0) {
+        _fieldErr('f-selling', 'Darf nicht negativ sein'); errors.push('Verkaufspreis darf nicht negativ sein');
+      } else _fieldOk('f-selling');
+
+      if (errors.length > 0) {
+        showToast('Eingabefehler: ' + errors.join(' · '), 'error');
+        return false;
+      }
+
+      // Warnhinweis bei Verkaufspreis = 0 (kein Block)
+      if (!isNaN(selling) && selling === 0) {
+        showToast('Hinweis: Verkaufspreis ist 0 € – Buchung wird trotzdem gespeichert.', 'info');
+      }
+
+      return true;
+    }
+
+    /* ─────────────────────────────────────────────
+       ADD BOOKING
+    ───────────────────────────────────────────── */
+    function addBooking(e) {
+      e.preventDefault();
+      if (!validateBookingForm()) return;
+
+      const settings = loadSettings();
+      const profileSel = document.getElementById('f-filament-profile').value;
+      let filamentPrice = settings.filamentPricePerKg;
+      let filamentProfileName = '';
+      if (profileSel) {
+        const prof = (settings.filaments || []).find(f => f.id === profileSel);
+        if (prof) { filamentPrice = prof.pricePerKg; filamentProfileName = prof.name; }
+      }
+      const grams   = parseFloat(document.getElementById('f-filament').value) || 0;
+      const powerKw = parseFloat(document.getElementById('f-kwh').value)      || 0;
+      const hours   = parseInt(document.getElementById('f-hours').value)      || 0;
+      const minutes = parseInt(document.getElementById('f-minutes').value)    || 0;
+      const selling = parseFloat(document.getElementById('f-selling').value)  || 0;
+
+      const { filamentCost, electricityCost, totalCost, profit, totalKwh, margin } =
+        calculateCosts(grams, filamentPrice, powerKw, hours, minutes, settings.electricityPricePerKwh, selling);
+
+      const booking = {
+        id:                     generateId(),
+        date:                   document.getElementById('f-date').value,
+        description:            document.getElementById('f-desc').value.trim(),
+        invoiceNumbers:         getInvoiceNumbers('invoice-list'),
+        comment:                document.getElementById('f-comment').value.trim(),
+        durationHours:          hours,
+        durationMinutes:        minutes,
+        filamentProfileName,
+        filamentGrams:          grams,
+        filamentPricePerKg:     filamentPrice,
+        electricityKwPerHour:   powerKw,
+        electricityKwhTotal:    totalKwh,
+        electricityPricePerKwh: settings.electricityPricePerKwh,
+        sellingPrice:           selling,
+        filamentCost,
+        electricityCost,
+        totalCost,
+        profit,
+        margin
+      };
+
+      const bookings = loadFromStorage();
+      bookings.push(booking);
+      saveToStorage(bookings);
+
+      document.getElementById('booking-form').reset();
+      document.getElementById('f-date').value = todayISO();
+      clearFormErrors();
+      resetPreview();
+      renderBookingsTable();
+      clearInvoiceTags('invoice-list');
+      showToast('Buchung erfolgreich gespeichert.', 'success');
+    }
+
+    function addBookingAndRepeat() {
+      if (!validateBookingForm()) return;
+      // Build booking from current form — identical logic to addBooking()
+      const settings = loadSettings();
+      const profileSel = document.getElementById('f-filament-profile').value;
+      let filamentPrice = settings.filamentPricePerKg;
+      let filamentProfileName = '';
+      if (profileSel) {
+        const prof = (settings.filaments || []).find(f => f.id === profileSel);
+        if (prof) { filamentPrice = prof.pricePerKg; filamentProfileName = prof.name; }
+      }
+      const desc    = document.getElementById('f-desc').value.trim();
+      const grams   = parseFloat(document.getElementById('f-filament').value) || 0;
+      const powerKw = parseFloat(document.getElementById('f-kwh').value)      || 0;
+      const hours   = parseInt(document.getElementById('f-hours').value)      || 0;
+      const minutes = parseInt(document.getElementById('f-minutes').value)    || 0;
+      const selling = parseFloat(document.getElementById('f-selling').value)  || 0;
+
+      const { filamentCost, electricityCost, totalCost, profit, totalKwh, margin } =
+        calculateCosts(grams, filamentPrice, powerKw, hours, minutes, settings.electricityPricePerKwh, selling);
+
+      const booking = {
+        id:                     generateId(),
+        date:                   document.getElementById('f-date').value,
+        description:            desc,
+        invoiceNumbers:         getInvoiceNumbers('invoice-list'),
+        comment:                document.getElementById('f-comment').value.trim(),
+        durationHours:          hours,
+        durationMinutes:        minutes,
+        filamentProfileName,
+        filamentGrams:          grams,
+        filamentPricePerKg:     filamentPrice,
+        electricityKwPerHour:   powerKw,
+        electricityKwhTotal:    totalKwh,
+        electricityPricePerKwh: settings.electricityPricePerKwh,
+        sellingPrice:           selling,
+        filamentCost, electricityCost, totalCost, profit, margin
+      };
+
+      const bookings = loadFromStorage();
+      bookings.push(booking);
+      saveToStorage(bookings);
+
+      // Only reset date — keep everything else for next booking
+      document.getElementById('f-date').value = todayISO();
+      clearInvoiceTags('invoice-list');
+      renderBookingsTable();
+      showToast('Buchung gespeichert – Formular bereit für nächste Eingabe.', 'success');
+    }
+
+    function resetPreview() { return UI.resetPreview(); }
+
+    /* ─────────────────────────────────────────────
+       DELETE BOOKING
+    ───────────────────────────────────────────── */
+    function copyBooking(id) {
+      const bookings = loadFromStorage();
+      const src = bookings.find(x => x.id === id);
+      if (!src) return;
+      const copy = { ...src, id: generateId(), date: todayISO() };
+      bookings.push(copy);
+      saveToStorage(bookings);
+      renderBookingsTable();
+      showToast('Buchung kopiert (Datum: heute).', 'success');
+    }
+
+    function deleteBooking(id) {
+      if (!confirm('Buchung wirklich löschen?')) return;
+      const bookings = loadFromStorage().filter(b => b.id !== id);
+      saveToStorage(bookings);
+      renderBookingsTable();
+      showToast('Buchung gelöscht.', 'info');
+    }
+
+    /* ─────────────────────────────────────────────
+       RENDER TABLE
+    ───────────────────────────────────────────── */
+    function renderBookingsTable() { return UI.renderBookingsTable(); }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    /* ─────────────────────────────────────────────
+       NAMESPACE: CSVHandler
+    ───────────────────────────────────────────── */
+    const CSVHandler = {
+      escape(val) {
+        const s = String(val == null ? '' : val);
+        if (s.includes(';') || s.includes('"') || s.includes('\n')) {
+          return '"' + s.replace(/"/g, '""') + '"';
+        }
+        return s;
+      },
+
+      parseLine(line) {
+        const result = [];
+        let current  = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (inQuotes) {
+            if (ch === '"' && line[i + 1] === '"') { current += '"'; i++; }
+            else if (ch === '"')                   { inQuotes = false; }
+            else                                   { current += ch; }
+          } else {
+            if (ch === '"')       { inQuotes = true; }
+            else if (ch === ';')  { result.push(current); current = ''; }
+            else                  { current += ch; }
+          }
+        }
+        result.push(current);
+        return result;
+      },
+
+      export() {
+        const bookings = loadFromStorage();
+        if (bookings.length === 0) {
+          showToast('Keine Buchungen zum Exportieren vorhanden.', 'info');
+          return;
+        }
+        const rows = bookings.map(b => [
+          b.id, b.date, b.description,
+          (b.invoiceNumbers || []).join('|'),
+          b.comment || '',
+          b.durationHours, b.durationMinutes,
+          b.filamentProfileName || '',
+          b.filamentGrams, b.filamentPricePerKg,
+          b.electricityKwPerHour, b.electricityKwhTotal, b.electricityPricePerKwh,
+          b.sellingPrice, b.filamentCost, b.electricityCost, b.totalCost, b.profit,
+          b.margin ?? 0
+        ].map(v => CSVHandler.escape(v)).join(';'));
+        const csvContent = CSV_HEADER + '\n' + rows.join('\n');
+        const blob = new Blob([BOM, csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `3d-drucker-buchungen-${todayISO()}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        localStorage.setItem('lastExportDate', todayISO());
+        showToast(`${bookings.length} Buchungen exportiert.`, 'success');
+      },
+
+      import(file, mode) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          try {
+            let text = e.target.result;
+            if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+            const lines = text.split(/\r?\n/).filter(l => l.trim());
+            if (lines.length < 2) { showToast('CSV ist leer oder ungültig.', 'error'); return; }
+            const dataLines = lines.slice(1);
+            const imported  = [];
+            for (const line of dataLines) {
+              const cols = CSVHandler.parseLine(line);
+              if (cols.length < 19) continue;
+              imported.push({
+                id:                     cols[0] || generateId(),
+                date:                   cols[1],
+                description:            cols[2],
+                invoiceNumbers:         cols[3] ? cols[3].split('|').filter(Boolean) : [],
+                comment:                cols[4] || '',
+                durationHours:          Number(cols[5])  || 0,
+                durationMinutes:        Number(cols[6])  || 0,
+                filamentProfileName:    cols[7] || '',
+                filamentGrams:          Number(cols[8])  || 0,
+                filamentPricePerKg:     Number(cols[9])  || 0,
+                electricityKwPerHour:   Number(cols[10]) || 0,
+                electricityKwhTotal:    Number(cols[11]) || 0,
+                electricityPricePerKwh: Number(cols[12]) || 0,
+                sellingPrice:           Number(cols[13]) || 0,
+                filamentCost:           Number(cols[14]) || 0,
+                electricityCost:        Number(cols[15]) || 0,
+                totalCost:              Number(cols[16]) || 0,
+                profit:                 Number(cols[17]) || 0,
+                margin:                 Number(cols[18]) || 0,
+              });
+            }
+            let existing = mode === 'replace' ? [] : loadFromStorage();
+            if (mode === 'merge') {
+              const existingIds = new Set(existing.map(b => b.id));
+              for (const b of imported) {
+                if (!existingIds.has(b.id)) { existing.push(b); existingIds.add(b.id); }
+              }
+            } else {
+              existing = imported;
+            }
+            saveToStorage(existing);
+            renderBookingsTable();
+            showToast(`${imported.length} Buchungen importiert (${mode === 'merge' ? 'zusammengeführt' : 'ersetzt'}).`, 'success');
+          } catch (err) {
+            showToast('Fehler beim Importieren der CSV-Datei.', 'error');
+          }
+        };
+        reader.readAsText(file, 'UTF-8');
+      }
+    };
+    // Wrappers — behalten bestehende Funktionsnamen
+    function exportCSV()           { return CSVHandler.export(); }
+    function importCSV(file, mode) { return CSVHandler.import(file, mode); }
+    function parseCSVLine(line)    { return CSVHandler.parseLine(line); }
+
+    /* _pendingImportFile — state for import modal */
+    let _pendingImportFile = null;
+
+    /* ─────────────────────────────────────────────
+       CHART
+    ───────────────────────────────────────────── */
+    function getAvailableYears() {
+      const bookings = loadFromStorage();
+      const years    = new Set([new Date().getFullYear()]);
+      for (const b of bookings) {
+        if (b.date) years.add(parseInt(b.date.slice(0, 4)));
+      }
+      return [...years].sort((a, b) => b - a);
+    }
+
+    function populateYearSelector() {
+      const sel   = document.getElementById('year-selector');
+      const years = getAvailableYears();
+      const cur   = new Date().getFullYear();
+      sel.innerHTML = years.map(y => `<option value="${y}"${y === cur ? ' selected' : ''}>${y}</option>`).join('');
+    }
+
+    function renderChart(year) {
+      if (typeof Chart === 'undefined') {
+        document.getElementById('chart-error').style.display = 'block';
+        document.getElementById('monthly-chart').style.display = 'none';
+        return;
+      }
+
+      const bookings = loadFromStorage().filter(b => b.date && parseInt(b.date.slice(0, 4)) === year);
+
+      const umsatz = Array(12).fill(0);
+      const kosten = Array(12).fill(0);
+      const gewinn = Array(12).fill(0);
+
+      for (const b of bookings) {
+        const m = parseInt(b.date.slice(5, 7)) - 1;
+        umsatz[m] = Math.round((umsatz[m] + (b.sellingPrice    || 0)) * 100) / 100;
+        kosten[m] = Math.round((kosten[m] + (b.totalCost       || 0)) * 100) / 100;
+        gewinn[m] = Math.round((gewinn[m] + (b.profit          || 0)) * 100) / 100;
+      }
+
+      if (chartInstance) {
+        chartInstance.destroy();
+        chartInstance = null;
+      }
+
+      const ctx = document.getElementById('monthly-chart').getContext('2d');
+      chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: MONTHS_DE,
+          datasets: [
+            {
+              label: 'Umsatz',
+              data: umsatz,
+              backgroundColor: '#6c63ff',
+              borderRadius: 4,
+            },
+            {
+              label: 'Kosten',
+              data: kosten,
+              backgroundColor: '#e05260',
+              borderRadius: 4,
+            },
+            {
+              label: 'Gewinn',
+              data: gewinn,
+              backgroundColor: '#4caf84',
+              borderRadius: 4,
+            },
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: {
+              labels: { color: '#e8eaf0', font: { size: 13 } }
+            },
+            tooltip: {
+              backgroundColor: '#1a1d27',
+              borderColor: '#2e3247',
+              borderWidth: 1,
+              titleColor: '#e8eaf0',
+              bodyColor: '#7b82a0',
+              callbacks: {
+                label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+              }
+            }
+          },
+          scales: {
+            x: {
+              ticks:  { color: '#7b82a0' },
+              grid:   { color: '#2e3247' }
+            },
+            y: {
+              ticks: {
+                color: '#7b82a0',
+                callback: v => v.toLocaleString('de-DE', { minimumFractionDigits: 2 }) + ' €'
+              },
+              grid: { color: '#2e3247' }
+            }
+          }
+        }
+      });
+    }
+
+    /* ─────────────────────────────────────────────
+       STATISTICS
+    ───────────────────────────────────────────── */
+    function renderStatistics() {
+      const isAll = document.getElementById('range-all').checked;
+      const rangeRow = document.getElementById('custom-date-range');
+
+      if (isAll) {
+        rangeRow.classList.add('hidden');
+      } else {
+        rangeRow.classList.remove('hidden');
+      }
+
+      let bookings = loadFromStorage();
+
+      if (!isAll) {
+        const from = document.getElementById('date-from').value;
+        const to   = document.getElementById('date-to').value;
+        if (from) bookings = bookings.filter(b => b.date >= from);
+        if (to)   bookings = bookings.filter(b => b.date <= to);
+      }
+
+      const totalUmsatz = bookings.reduce((s, b) => s + (b.sellingPrice || 0), 0);
+      const totalKosten = bookings.reduce((s, b) => s + (b.totalCost    || 0), 0);
+      const totalGewinn = bookings.reduce((s, b) => s + (b.profit       || 0), 0);
+      const count       = bookings.length;
+
+      document.getElementById('stat-umsatz').textContent = formatEur(Math.round(totalUmsatz * 100) / 100);
+      document.getElementById('stat-kosten').textContent = formatEur(Math.round(totalKosten * 100) / 100);
+
+      const gewinnEl = document.getElementById('stat-gewinn');
+      gewinnEl.textContent = formatEur(Math.round(totalGewinn * 100) / 100);
+      gewinnEl.className   = 'stat-card-value ' + (totalGewinn >= 0 ? 'positive' : 'negative');
+
+      document.getElementById('stat-count').textContent = count;
+    }
+
+    /* ─────────────────────────────────────────────
+       SETTINGS FORM
+    ───────────────────────────────────────────── */
+    function loadSettingsForm() {
+      const s = loadSettings();
+      document.getElementById('s-filament-price').value    = s.filamentPricePerKg;
+      document.getElementById('s-electricity-price').value = s.electricityPricePerKwh;
+      document.getElementById('s-markup').value            = s.suggestedPriceMarkup ?? 3.0;
+      renderFilamentProfiles();
+      populateFilamentDropdown('f-filament-profile');
+      populateFilamentDropdown('e-filament-profile');
+    }
+
+    function saveSettingsForm(e) {
+      e.preventDefault();
+      const existing = loadSettings();
+      const settings = {
+        filamentPricePerKg:     parseFloat(document.getElementById('s-filament-price').value)   || 0,
+        electricityPricePerKwh: parseFloat(document.getElementById('s-electricity-price').value) || 0,
+        filaments:              existing.filaments || [],
+        suggestedPriceMarkup:   parseFloat(document.getElementById('s-markup').value) || 3.0,
+      };
+      saveSettings(settings);
+      showToast('Einstellungen gespeichert.', 'success');
+    }
+
+    /* ─────────────────────────────────────────────
+       NAMESPACE: UI
+    ───────────────────────────────────────────── */
+    const UI = {
+      showToast(message, type) {
+        const container = document.getElementById('toast-container');
+        const toast     = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => toast.classList.add('show'));
+        });
+        setTimeout(() => {
+          toast.classList.remove('show');
+          setTimeout(() => toast.remove(), 300);
+        }, 3000);
+      },
+
+      showImportDialog(file) {
+        _pendingImportFile = file;
+        document.getElementById('import-modal').classList.add('open');
+      },
+
+      closeImportModal() {
+        document.getElementById('import-modal').classList.remove('open');
+        _pendingImportFile = null;
+        document.getElementById('csv-file-input').value = '';
+      },
+
+      activateTab(tabId) {
+        document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        const section = document.getElementById(tabId);
+        const btn     = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+        if (section) section.classList.add('active');
+        if (btn)     btn.classList.add('active');
+        if (tabId === 'diagramm') {
+          populateYearSelector();
+          const sel = document.getElementById('year-selector');
+          renderChart(parseInt(sel.value) || new Date().getFullYear());
+        }
+        if (tabId === 'statistiken') renderStatistics();
+      }
+    };
+      updateFormPreview() {
+        const settings = loadSettings();
+        const profileSel = document.getElementById('f-filament-profile').value;
+        let filamentPrice = settings.filamentPricePerKg;
+        if (profileSel) {
+          const prof = (settings.filaments || []).find(f => f.id === profileSel);
+          if (prof) filamentPrice = prof.pricePerKg;
+        }
+        const grams   = parseFloat(document.getElementById('f-filament').value) || 0;
+        const powerKw = parseFloat(document.getElementById('f-kwh').value)      || 0;
+        const hours   = parseInt(document.getElementById('f-hours').value)      || 0;
+        const minutes = parseInt(document.getElementById('f-minutes').value)    || 0;
+        const selling = parseFloat(document.getElementById('f-selling').value)  || 0;
+        const { filamentCost, electricityCost, totalCost, profit, totalKwh, margin } =
+          calculateCosts(grams, filamentPrice, powerKw, hours, minutes, settings.electricityPricePerKwh, selling);
+        const setVal = (id, val, coloured) => {
+          const el = document.getElementById(id);
+          el.textContent = formatEur(val);
+          if (coloured) el.className = 'preview-value ' + (val > 0 ? 'positive' : 'negative');
+        };
+        setVal('prev-filament', filamentCost, false);
+        setVal('prev-elec',     electricityCost, false);
+        setVal('prev-total',    totalCost, false);
+        setVal('prev-profit',   profit, true);
+        document.getElementById('prev-kwh-total').textContent = totalKwh.toFixed(3) + ' kWh';
+        document.getElementById('prev-margin').textContent = margin.toFixed(1) + ' %';
+        const markup = settings.suggestedPriceMarkup ?? 3.0;
+        const suggestedPrice = Math.round(totalCost * markup * 100) / 100;
+        const suggestedMargin = suggestedPrice > 0
+          ? Math.round(((suggestedPrice - totalCost) / suggestedPrice) * 1000) / 10
+          : 0;
+        document.getElementById('prev-suggested-price').textContent  = totalCost > 0 ? formatEur(suggestedPrice)          : '— €';
+        document.getElementById('prev-suggested-margin').textContent = totalCost > 0 ? suggestedMargin.toFixed(1) + ' %'  : '— %';
+      },
+
+      resetPreview() {
+        ['prev-filament','prev-elec','prev-total'].forEach(id => {
+          const el = document.getElementById(id);
+          el.textContent = '— €';
+          el.className = 'preview-value';
+        });
+        const pp = document.getElementById('prev-profit');
+        pp.textContent = '— €';
+        pp.className = 'preview-value';
+        document.getElementById('prev-suggested-price').textContent  = '— €';
+        document.getElementById('prev-suggested-margin').textContent = '— %';
+      },
+
+      renderBookingsTable() {
+        const tbody    = document.getElementById('bookings-tbody');
+        const bookings = loadFromStorage();
+        if (bookings.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="16" class="empty-state">Keine Buchungen vorhanden</td></tr>';
+          return;
+        }
+        const sorted = [...bookings].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        tbody.innerHTML = sorted.map(b => {
+          const dur = b.durationHours + 'h ' + String(b.durationMinutes).padStart(2, '0') + 'm';
+          const profitClass = (b.profit ?? 0) > 0 ? 'profit-positive' : 'profit-negative';
+          const invoices = (b.invoiceNumbers || []).join(', ');
+          const comment = b.comment || '';
+          const shortComment = comment.length > 40 ? escapeHtml(comment.slice(0, 40)) + '…' : escapeHtml(comment);
+          return `<tr>
+            <td class="cell-nowrap">${formatDate(b.date)}</td>
+            <td>${escapeHtml(b.description)}</td>
+            <td class="cell-nowrap">${dur}</td>
+            <td>${escapeHtml(b.filamentProfileName || '—')}</td>
+            <td class="cell-nowrap">${b.filamentGrams}</td>
+            <td class="cell-nowrap">${b.electricityKwPerHour}</td>
+            <td class="cell-nowrap">${(b.electricityKwhTotal || 0).toFixed(3)}</td>
+            <td class="cell-nowrap">${formatEur(b.filamentCost)}</td>
+            <td class="cell-nowrap">${formatEur(b.electricityCost)}</td>
+            <td class="cell-nowrap">${formatEur(b.totalCost)}</td>
+            <td class="cell-nowrap">${formatEur(b.sellingPrice)}</td>
+            <td class="cell-nowrap ${profitClass}">${formatEur(b.profit)}</td>
+            <td class="cell-nowrap ${profitClass}">${(b.margin ?? 0).toFixed(1)} %</td>
+            <td>${escapeHtml(invoices)}</td>
+            <td title="${escapeHtml(comment)}">${shortComment}</td>
+            <td class="cell-nowrap">
+              <button class="btn-icon" title="Bearbeiten" aria-label="Buchung bearbeiten" onclick="openEditModal('${b.id}')">&#9998;</button>
+              <button class="btn-icon" title="Kopieren" aria-label="Buchung kopieren" onclick="copyBooking('${b.id}')">&#128203;</button>
+              <button class="btn-icon" title="Löschen" aria-label="Buchung löschen" onclick="deleteBooking('${b.id}')">&#128465;</button>
+            </td>
+          </tr>`;
+        }).join('');
+      }
+    };
+    // Wrappers — behalten bestehende Funktionsnamen
+    function showToast(m, t)        { return UI.showToast(m, t); }
+    function showImportDialog(f)    { return UI.showImportDialog(f); }
+    function closeImportModal()     { return UI.closeImportModal(); }
+    function activateTab(tabId)     { return UI.activateTab(tabId); }
+
+    /* ─────────────────────────────────────────────
+       INVOICE TAG HELPERS
+    ───────────────────────────────────────────── */
+    function addInvoiceTag(inputId, containerId) {
+      const input = document.getElementById(inputId);
+      const val = (input.value || '').trim();
+      if (!val) return;
+      renderInvoiceTag(val, containerId);
+      input.value = '';
+    }
+
+    function renderInvoiceTag(value, containerId) {
+      const container = document.getElementById(containerId);
+      const tag = document.createElement('span');
+      tag.style.cssText = 'display:inline-flex;align-items:center;gap:.3rem;background:var(--accent);color:#fff;border-radius:4px;padding:.2rem .5rem;font-size:.8rem;';
+      tag.dataset.value = value;
+      tag.innerHTML = escapeHtml(value) + ' <button type="button" style="background:none;border:none;color:#fff;cursor:pointer;font-size:.9rem;line-height:1;" onclick="this.parentElement.remove()">×</button>';
+      container.appendChild(tag);
+    }
+
+    function getInvoiceNumbers(containerId) {
+      const container = document.getElementById(containerId);
+      return [...container.querySelectorAll('span[data-value]')].map(s => s.dataset.value);
+    }
+
+    function clearInvoiceTags(containerId) {
+      document.getElementById(containerId).innerHTML = '';
+    }
+
+    function renderInvoiceTags(arr, containerId) {
+      clearInvoiceTags(containerId);
+      (arr || []).forEach(v => renderInvoiceTag(v, containerId));
+    }
+
+    /* ─────────────────────────────────────────────
+       FILAMENT PROFILES
+    ───────────────────────────────────────────── */
+    function addFilamentProfile() {
+      const name  = document.getElementById('fp-name').value.trim();
+      const price = parseFloat(document.getElementById('fp-price').value) || 0;
+      if (!name || price <= 0) { showToast('Bitte Name und Preis angeben.', 'error'); return; }
+      const settings = loadSettings();
+      if (!settings.filaments) settings.filaments = [];
+      settings.filaments.push({ id: generateId(), name, pricePerKg: price });
+      saveSettings(settings);
+      document.getElementById('fp-name').value  = '';
+      document.getElementById('fp-price').value = '';
+      renderFilamentProfiles();
+      populateFilamentDropdown('f-filament-profile');
+      populateFilamentDropdown('e-filament-profile');
+      showToast('Filament-Profil gespeichert.', 'success');
+    }
+
+    function removeFilamentProfile(id) {
+      const settings = loadSettings();
+      settings.filaments = (settings.filaments || []).filter(f => f.id !== id);
+      saveSettings(settings);
+      renderFilamentProfiles();
+      populateFilamentDropdown('f-filament-profile');
+      populateFilamentDropdown('e-filament-profile');
+    }
+
+    function renderFilamentProfiles() {
+      const container = document.getElementById('filament-profiles-list');
+      if (!container) return;
+      const settings = loadSettings();
+      const list = settings.filaments || [];
+      if (list.length === 0) {
+        container.innerHTML = '<p style="font-size:.85rem;color:var(--text-muted);">Noch keine Profile vorhanden.</p>';
+        return;
+      }
+      container.innerHTML = list.map(f =>
+        `<div id="fp-row-${f.id}" style="display:flex;align-items:center;gap:.5rem;background:var(--bg-input);padding:.4rem .7rem;border-radius:6px;">
+          <span style="flex:1;">${escapeHtml(f.name)}</span>
+          <span style="color:var(--text-muted);font-size:.85rem;">${formatEur(f.pricePerKg)}/kg</span>
+          <button class="btn-icon" title="Bearbeiten" onclick="startEditFilamentProfile('${f.id}')">&#9998;</button>
+          <button class="btn-icon" title="Entfernen" onclick="removeFilamentProfile('${f.id}')">&#128465;</button>
+        </div>`
+      ).join('');
+    }
+
+    function startEditFilamentProfile(id) {
+      const settings = loadSettings();
+      const f = (settings.filaments || []).find(x => x.id === id);
+      if (!f) return;
+      const row = document.getElementById('fp-row-' + id);
+      const inputStyle = 'background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:.3rem .5rem;font-size:.9rem;';
+      row.innerHTML =
+        `<input type="text" id="fp-edit-name-${id}" value="${escapeHtml(f.name)}" style="flex:2;min-width:100px;${inputStyle}" />` +
+        `<input type="number" id="fp-edit-price-${id}" value="${f.pricePerKg}" step="0.01" min="0" style="flex:1;min-width:70px;${inputStyle}" />` +
+        `<button class="btn-icon" title="Speichern" onclick="saveEditFilamentProfile('${id}')">&#10003;</button>` +
+        `<button class="btn-icon" title="Abbrechen" onclick="renderFilamentProfiles()">&#10005;</button>`;
+    }
+
+    function saveEditFilamentProfile(id) {
+      const name  = (document.getElementById('fp-edit-name-'  + id).value || '').trim();
+      const price = parseFloat(document.getElementById('fp-edit-price-' + id).value) || 0;
+      if (!name || price <= 0) { showToast('Bitte Name und Preis angeben.', 'error'); return; }
+      const settings = loadSettings();
+      const idx = (settings.filaments || []).findIndex(f => f.id === id);
+      if (idx === -1) return;
+      settings.filaments[idx] = { id, name, pricePerKg: price };
+      saveSettings(settings);
+      renderFilamentProfiles();
+      populateFilamentDropdown('f-filament-profile');
+      populateFilamentDropdown('e-filament-profile');
+      showToast('Filament-Profil aktualisiert (gilt nur für neue Buchungen).', 'success');
+    }
+
+    function populateFilamentDropdown(selectId) {
+      const sel = document.getElementById(selectId);
+      if (!sel) return;
+      const settings = loadSettings();
+      const current  = sel.value;
+      sel.innerHTML  = '<option value="">— Standard (aus Einstellungen) —</option>';
+      (settings.filaments || []).forEach(f => {
+        const opt = document.createElement('option');
+        opt.value       = f.id;
+        opt.textContent = f.name + ' (' + formatEur(f.pricePerKg) + '/kg)';
+        sel.appendChild(opt);
+      });
+      if ([...sel.options].some(o => o.value === current)) sel.value = current;
+    }
+
+    /* ─────────────────────────────────────────────
+       EDIT MODAL
+    ───────────────────────────────────────────── */
+    function openEditModal(id) {
+      const bookings = loadFromStorage();
+      const b = bookings.find(x => x.id === id);
+      if (!b) return;
+
+      populateFilamentDropdown('e-filament-profile');
+
+      document.getElementById('edit-id').value      = id;
+      document.getElementById('e-desc').value        = b.description || '';
+      document.getElementById('e-date').value        = b.date || '';
+      document.getElementById('e-hours').value       = b.durationHours || 0;
+      document.getElementById('e-minutes').value     = b.durationMinutes || 0;
+      document.getElementById('e-filament').value    = b.filamentGrams || 0;
+      document.getElementById('e-kwh').value         = b.electricityKwPerHour || 0;
+      document.getElementById('e-selling').value     = b.sellingPrice || 0;
+      document.getElementById('e-comment').value     = b.comment || '';
+
+      // Set filament profile dropdown
+      const settings = loadSettings();
+      const matchProf = (settings.filaments || []).find(f => f.name === b.filamentProfileName);
+      document.getElementById('e-filament-profile').value = matchProf ? matchProf.id : '';
+
+      renderInvoiceTags(b.invoiceNumbers || [], 'edit-invoice-list');
+
+      document.getElementById('edit-modal').classList.add('open');
+    }
+
+    function saveEditBooking(e) {
+      e.preventDefault();
+      const id = document.getElementById('edit-id').value;
+      if (!id) return;
+
+      const settings = loadSettings();
+      const profileSel = document.getElementById('e-filament-profile').value;
+      let filamentPrice = settings.filamentPricePerKg;
+      let filamentProfileName = '';
+      if (profileSel) {
+        const prof = (settings.filaments || []).find(f => f.id === profileSel);
+        if (prof) { filamentPrice = prof.pricePerKg; filamentProfileName = prof.name; }
+      }
+
+      const grams   = parseFloat(document.getElementById('e-filament').value) || 0;
+      const powerKw = parseFloat(document.getElementById('e-kwh').value)      || 0;
+      const hours   = parseInt(document.getElementById('e-hours').value)      || 0;
+      const minutes = parseInt(document.getElementById('e-minutes').value)    || 0;
+      const selling = parseFloat(document.getElementById('e-selling').value)  || 0;
+
+      const { filamentCost, electricityCost, totalCost, profit, totalKwh, margin } =
+        calculateCosts(grams, filamentPrice, powerKw, hours, minutes, settings.electricityPricePerKwh, selling);
+
+      const bookings = loadFromStorage();
+      const idx = bookings.findIndex(x => x.id === id);
+      if (idx === -1) return;
+
+      bookings[idx] = {
+        ...bookings[idx],
+        date:                   document.getElementById('e-date').value,
+        description:            document.getElementById('e-desc').value.trim(),
+        invoiceNumbers:         getInvoiceNumbers('edit-invoice-list'),
+        comment:                document.getElementById('e-comment').value.trim(),
+        durationHours:          hours,
+        durationMinutes:        minutes,
+        filamentProfileName,
+        filamentGrams:          grams,
+        filamentPricePerKg:     filamentPrice,
+        electricityKwPerHour:   powerKw,
+        electricityKwhTotal:    totalKwh,
+        electricityPricePerKwh: settings.electricityPricePerKwh,
+        sellingPrice:           selling,
+        filamentCost,
+        electricityCost,
+        totalCost,
+        profit,
+        margin
+      };
+
+      saveToStorage(bookings);
+      closeEditModal();
+      renderBookingsTable();
+      showToast('Buchung aktualisiert.', 'success');
+    }
+
+    function closeEditModal() {
+      document.getElementById('edit-modal').classList.remove('open');
+      document.getElementById('edit-id').value = '';
+    }
+
+    /* ─────────────────────────────────────────────
+       INIT
+    ───────────────────────────────────────────── */
+    function init() {
+      /* Set today's date in form */
+      document.getElementById('f-date').value = todayISO();
+
+      /* Load settings into form */
+      loadSettingsForm();
+
+      /* Render table */
+      renderBookingsTable();
+
+      /* Backup-Hinweis (max. einmal pro Session) */
+      if (!sessionStorage.getItem('backupHintShown')) {
+        const lastExport = localStorage.getItem('lastExportDate');
+        const needsHint  = !lastExport ||
+          (Date.now() - new Date(lastExport).getTime()) > 7 * 24 * 60 * 60 * 1000;
+        if (needsHint) {
+          setTimeout(() => showToast('Tipp: Exportiere regelmäßig ein CSV-Backup deiner Daten.', 'info'), 1200);
+          sessionStorage.setItem('backupHintShown', '1');
+        }
+      }
+
+      /* Tab nav click handlers */
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+      });
+
+      /* Booking form live preview + clear validation errors on input */
+      ['f-filament', 'f-kwh', 'f-hours', 'f-minutes', 'f-selling'].forEach(id => {
+        document.getElementById(id).addEventListener('input', () => { _fieldOk(id); updateFormPreview(); });
+      });
+      ['f-desc', 'f-date'].forEach(id => {
+        document.getElementById(id).addEventListener('input', () => _fieldOk(id));
+      });
+
+      /* Booking form submit */
+      document.getElementById('booking-form').addEventListener('submit', addBooking);
+      document.getElementById('btn-save-repeat').addEventListener('click', addBookingAndRepeat);
+
+      /* Settings form submit */
+      document.getElementById('settings-form').addEventListener('submit', saveSettingsForm);
+
+      /* CSV file input change */
+      document.getElementById('csv-file-input').addEventListener('change', function() {
+        if (this.files && this.files[0]) {
+          showImportDialog(this.files[0]);
+        }
+      });
+
+      /* Modal buttons */
+      document.getElementById('modal-merge').addEventListener('click', () => {
+        const file = _pendingImportFile;
+        closeImportModal();
+        if (file) importCSV(file, 'merge');
+      });
+
+      document.getElementById('modal-replace').addEventListener('click', () => {
+        const file = _pendingImportFile;
+        closeImportModal();
+        if (file) importCSV(file, 'replace');
+      });
+
+      document.getElementById('modal-cancel').addEventListener('click', closeImportModal);
+
+      /* Close modal on overlay click or Escape */
+      document.getElementById('import-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeImportModal();
+      });
+
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') { closeImportModal(); closeEditModal(); }
+      });
+
+      /* Statistics radio buttons */
+      document.querySelectorAll('input[name="stats-range"]').forEach(r => {
+        r.addEventListener('change', renderStatistics);
+      });
+
+      document.getElementById('date-from').addEventListener('change', renderStatistics);
+      document.getElementById('date-to').addEventListener('change', renderStatistics);
+
+      /* Year selector for chart */
+      document.getElementById('year-selector').addEventListener('change', function() {
+        renderChart(parseInt(this.value));
+      });
+
+      /* Filament profile dropdown change triggers preview */
+      document.getElementById('f-filament-profile').addEventListener('change', updateFormPreview);
+
+      /* Invoice add buttons */
+      document.getElementById('btn-add-invoice').addEventListener('click', () => addInvoiceTag('f-invoice-input', 'invoice-list'));
+      document.getElementById('f-invoice-input').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addInvoiceTag('f-invoice-input', 'invoice-list'); } });
+
+      document.getElementById('btn-edit-add-invoice').addEventListener('click', () => addInvoiceTag('e-invoice-input', 'edit-invoice-list'));
+      document.getElementById('e-invoice-input').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addInvoiceTag('e-invoice-input', 'edit-invoice-list'); } });
+
+      /* Filament profile add button */
+      document.getElementById('btn-add-filament-profile').addEventListener('click', addFilamentProfile);
+
+      /* Edit modal */
+      document.getElementById('edit-form').addEventListener('submit', saveEditBooking);
+      document.getElementById('btn-edit-cancel').addEventListener('click', closeEditModal);
+      document.getElementById('edit-modal').addEventListener('click', function(e) { if (e.target === this) closeEditModal(); });
+    }
+
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+
+</body>
+</html>
