@@ -61,11 +61,11 @@ class ConversationHistory:
 
         try:
             resp = ollama_retry(
-                lambda: requests.post(
-                    f"{url}/api/chat",
+                lambda u=url, mo=model, pr=prompt: requests.post(
+                    f"{u}/api/chat",
                     json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": prompt}],
+                        "model": mo,
+                        "messages": [{"role": "user", "content": pr}],
                         "stream": False,
                     },
                     timeout=120,

@@ -80,9 +80,9 @@ class ChatEngine:
         _messages = messages
         try:
             resp = ollama_retry(
-                lambda: requests.post(
+                lambda m=_model, ms=_messages: requests.post(
                     f"{settings.ollama_url.rstrip('/')}/api/chat",
-                    json={"model": _model, "messages": _messages, "stream": False},
+                    json={"model": m, "messages": ms, "stream": False},
                     timeout=120,
                 ),
                 label="chat",

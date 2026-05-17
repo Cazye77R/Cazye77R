@@ -69,6 +69,8 @@ def consolidate_memories(
     Returns the newly created consolidated Memory.
     """
     llm_model = model or settings.ollama_model
+    if not memories:
+        raise ValueError("consolidate_memories requires at least one Memory")
     entries = "\n\n---\n\n".join(
         f"### {m.metadata.title}\n\n{m.content}" for m in memories
     )
@@ -88,7 +90,7 @@ def consolidate_memories(
     merged_title = "Konsolidiert: " + " + ".join(titles)[:80]
 
     categories = [m.category for m in memories if m.category]
-    category = max(set(categories), key=categories.count) if categories else "general"
+    category = max(sorted(set(categories)), key=categories.count) if categories else "general"
 
     path = save_memory(
         category=category,

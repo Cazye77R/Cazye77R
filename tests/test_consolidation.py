@@ -74,17 +74,18 @@ def test_find_candidates_no_duplicate_pairs(tmp_memories):
     path_a = save_memory("general", "Mem A", "content A", [])
     path_b = save_memory("general", "Mem B", "content B", [])
 
-    # Both memories match each other
+    # Both memories match each other — search returns the other file for each query
     def _search_side_effect(query, top_k, collection):
-        # Return the "other" file for whichever is queried first
-        return [{"source_file": str(path_b.resolve()), "score": 0.95}]
+        if "content A" in query:
+            return [{"source_file": str(path_b.resolve()), "score": 0.95}]
+        return [{"source_file": str(path_a.resolve()), "score": 0.95}]
 
     mock_coll = MagicMock()
     with patch("elephant.memory.consolidation.search_similar", side_effect=_search_side_effect):
         candidates = find_consolidation_candidates(mock_coll, threshold=0.8)
 
-    # Even though both memories would match each other, the pair should appear only once
-    assert len(candidates) <= 1
+    # Both directions are explored but the pair must appear exactly once
+    assert len(candidates) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -182,3 +183,44 @@ def test_consolidate_merges_tags(tmp_memories):
     assert "python" in result.metadata.tags
     assert "ml" in result.metadata.tags
     assert "ai" in result.metadata.tags
+
+
+# ---------------------------------------------------------------------------
+# consolidate_memories — passes collection to embed_memory and delete_embedded
+# ---------------------------------------------------------------------------
+
+def test_consolidate_with_collection_embeds_and_cleans(tmp_memories):
+    path_a = save_memory("general", "Coll A", "content A", [])
+    path_b = save_memory("general", "Coll B", "content B", [])
+    mem_a = load_memory(path_a)
+    mem_b = load_memory(path_b)
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"message": {"content": "merged"}}
+    mock_resp.raise_for_status = MagicMock()
+    mock_coll = MagicMock()
+
+    with patch("elephant.memory.consolidation.requests.post", return_value=mock_resp):
+        with patch("elephant.memory.consolidation.embed_memory") as mock_embed:
+            with patch("elephant.memory.consolidation.delete_embedded") as mock_del_emb:
+                result = consolidate_memories([mem_a, mem_b], collection=mock_coll)
+
+    # embed_memory called once for the merged memory with the collection
+    mock_embed.assert_called_once()
+    _, embed_kwargs = mock_embed.call_args
+    assert embed_kwargs.get("collection") is mock_coll or mock_embed.call_args[0][1] is mock_coll
+
+    # delete_embedded called for each original with the collection
+    assert mock_del_emb.call_count == 2
+
+    assert result.content == "merged"
+
+
+# ---------------------------------------------------------------------------
+# consolidate_memories — raises ValueError for empty list
+# ---------------------------------------------------------------------------
+
+def test_consolidate_raises_on_empty_list(tmp_memories):
+    import pytest
+    with pytest.raises(ValueError, match="at least one"):
+        consolidate_memories([])
