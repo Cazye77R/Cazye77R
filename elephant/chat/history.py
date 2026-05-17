@@ -30,6 +30,13 @@ class ConversationHistory:
     def turn_count(self) -> int:
         return len(self._messages) // 2
 
+    @classmethod
+    def from_messages(cls, messages: list[dict], max_turns: int = 20) -> "ConversationHistory":
+        """Create a ConversationHistory pre-loaded with an existing message list."""
+        instance = cls(max_turns=max_turns)
+        instance._messages = list(messages)
+        return instance
+
     def export_summary(
         self,
         model: Optional[str] = None,

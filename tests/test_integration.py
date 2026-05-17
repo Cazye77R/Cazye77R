@@ -223,3 +223,114 @@ def test_session_summary_endpoint(client):
 def test_session_summary_404_for_unknown(client):
     resp = client.get("/sessions/does-not-exist/summary")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Close session endpoint
+# ---------------------------------------------------------------------------
+
+def test_close_session_returns_closing_status(client):
+    client.post("/chat", json={"message": "Hallo", "session_id": "close-1"})
+    resp = client.post("/sessions/close-1/close")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["session_id"] == "close-1"
+    assert data["status"] == "closing"
+    assert data["turns"] == 1
+
+
+def test_close_session_removes_session(client):
+    client.post("/chat", json={"message": "Hallo", "session_id": "close-2"})
+    assert "close-2" in main_module._sessions
+    client.post("/sessions/close-2/close")
+    assert "close-2" not in main_module._sessions
+
+
+def test_close_session_404_for_unknown(client):
+    resp = client.post("/sessions/ghost-close/close")
+    assert resp.status_code == 404
+
+
+def test_close_session_saves_conversation_summary(client, tmp_memories):
+    """Background task persists a summary file in conversations/."""
+    client.post("/chat", json={"message": "Was ist Elephant?", "session_id": "close-s"})
+    client.post("/sessions/close-s/close")
+    conv_files = list((tmp_memories / "conversations").iterdir())
+    assert len(conv_files) == 1
+    assert conv_files[0].name.startswith("session_close")
+
+
+def test_close_session_summary_content(client, tmp_memories):
+    """Summary file content comes from Ollama's export_summary response."""
+    client.post("/chat", json={"message": "Python Projekt", "session_id": "close-c"})
+    client.post("/sessions/close-c/close")
+    conv_files = list((tmp_memories / "conversations").iterdir())
+    assert len(conv_files) == 1
+    content = conv_files[0].read_text()
+    assert FAKE_CHAT_REPLY in content
+
+
+def test_close_session_turn_count_reflects_history(client):
+    """turn_count in response equals number of completed user+assistant pairs."""
+    sid = "close-turns"
+    client.post("/chat", json={"message": "Eins", "session_id": sid})
+    client.post("/chat", json={"message": "Zwei", "session_id": sid})
+    client.post("/chat", json={"message": "Drei", "session_id": sid})
+    resp = client.post(f"/sessions/{sid}/close")
+    assert resp.json()["turns"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Auto-extraction background task
+# ---------------------------------------------------------------------------
+
+def test_auto_extract_not_triggered_below_four_messages(client):
+    """Single chat turn (2 messages) must NOT trigger extract_and_save."""
+    extract_mock = MagicMock(return_value=0)
+    main_module._engine.extract_and_save = extract_mock
+    client.post("/chat", json={"message": "Erste Frage", "session_id": "ae-1"})
+    extract_mock.assert_not_called()
+
+
+def test_auto_extract_triggered_at_four_messages(client):
+    """Second chat turn (4 messages total) must trigger extract_and_save once."""
+    extract_mock = MagicMock(return_value=0)
+    main_module._engine.extract_and_save = extract_mock
+    sid = "ae-2"
+    client.post("/chat", json={"message": "Runde 1", "session_id": sid})
+    client.post("/chat", json={"message": "Runde 2", "session_id": sid})
+    extract_mock.assert_called_once()
+
+
+def test_auto_extract_called_with_full_conversation_snapshot(client):
+    """extract_and_save receives all messages up to that point."""
+    captured: list[list[dict]] = []
+    original = main_module._engine.extract_and_save
+
+    def _capture(conv):
+        captured.append(conv)
+        return 0
+
+    main_module._engine.extract_and_save = _capture
+    sid = "ae-snap"
+    client.post("/chat", json={"message": "Hallo", "session_id": sid})
+    client.post("/chat", json={"message": "Wie geht's?", "session_id": sid})
+
+    # Background ran synchronously in TestClient
+    assert len(captured) == 1
+    assert len(captured[0]) == 4  # user + assistant + user + assistant
+    assert captured[0][0]["role"] == "user"
+    assert captured[0][1]["role"] == "assistant"
+
+    main_module._engine.extract_and_save = original
+
+
+def test_auto_extract_triggered_again_on_subsequent_turns(client):
+    """extract_and_save fires on every turn once the threshold is reached."""
+    extract_mock = MagicMock(return_value=0)
+    main_module._engine.extract_and_save = extract_mock
+    sid = "ae-multi"
+    for i in range(4):
+        client.post("/chat", json={"message": f"Frage {i}", "session_id": sid})
+    # Turns 2, 3, 4 each trigger extraction (6, 8 msgs also >= 4)
+    assert extract_mock.call_count == 3
