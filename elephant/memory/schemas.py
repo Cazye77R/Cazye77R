@@ -11,6 +11,7 @@ class MemoryMetadata(BaseModel):
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    last_accessed: Optional[datetime] = None
 
 
 class Memory(BaseModel):

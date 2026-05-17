@@ -50,8 +50,8 @@ async def lifespan(app: FastAPI):
     global _engine
     if _engine is None:
         collection = init_collection()
-        _engine = ChatEngine(model=settings.model_name, collection=collection)
-        logger.info("ChatEngine initialised with model=%s", settings.model_name)
+        _engine = ChatEngine(model=settings.ollama_model, collection=collection)
+        logger.info("ChatEngine initialised with model=%s", settings.ollama_model)
     yield
 
 

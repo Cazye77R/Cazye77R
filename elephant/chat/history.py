@@ -3,6 +3,7 @@ from typing import Optional
 import requests
 
 from elephant.config import settings
+from elephant.utils.retry import OllamaError, ollama_retry
 
 
 class ConversationHistory:
@@ -46,7 +47,7 @@ class ConversationHistory:
         if not self._messages:
             return "Keine Konversation vorhanden."
 
-        model = model or settings.model_name
+        model = model or settings.ollama_model
         url = (ollama_url or settings.ollama_url).rstrip("/")
 
         transcript = "\n".join(
@@ -58,14 +59,20 @@ class ConversationHistory:
             + transcript
         )
 
-        resp = requests.post(
-            f"{url}/api/chat",
-            json={
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False,
-            },
-            timeout=120,
-        )
+        try:
+            resp = ollama_retry(
+                lambda: requests.post(
+                    f"{url}/api/chat",
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "stream": False,
+                    },
+                    timeout=120,
+                ),
+                label="export_summary",
+            )
+        except OllamaError:
+            return "Ollama nicht erreichbar — Zusammenfassung konnte nicht erstellt werden."
         resp.raise_for_status()
         return resp.json()["message"]["content"]

@@ -52,9 +52,9 @@ def tmp_memories(tmp_path, monkeypatch):
     import elephant.config as cfg
     import elephant.memory.markdown_store as store
     import elephant.memory.vector_store as vs
-    monkeypatch.setattr(cfg.settings, "memories_base_path", tmp_path)
-    monkeypatch.setattr(store.settings, "memories_base_path", tmp_path)
-    monkeypatch.setattr(vs.settings, "memories_base_path", tmp_path)
+    monkeypatch.setattr(cfg.settings, "memory_path", tmp_path)
+    monkeypatch.setattr(store.settings, "memory_path", tmp_path)
+    monkeypatch.setattr(vs.settings, "memory_path", tmp_path)
     return tmp_path
 
 

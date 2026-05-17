@@ -10,6 +10,7 @@ from elephant.config import settings
 from elephant.memory.extractor import MemoryExtractor
 from elephant.memory.markdown_store import list_memories, save_memory
 from elephant.memory.vector_store import embed_memory, search_similar
+from elephant.utils.retry import OllamaError, ollama_retry
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +76,19 @@ class ChatEngine:
         messages.append({"role": "user", "content": user_message})
 
         # 4. Ollama /api/chat call
-        resp = requests.post(
-            f"{settings.ollama_url.rstrip('/')}/api/chat",
-            json={"model": model or self.model, "messages": messages, "stream": False},
-            timeout=120,
-        )
+        _model = model or self.model
+        _messages = messages
+        try:
+            resp = ollama_retry(
+                lambda: requests.post(
+                    f"{settings.ollama_url.rstrip('/')}/api/chat",
+                    json={"model": _model, "messages": _messages, "stream": False},
+                    timeout=120,
+                ),
+                label="chat",
+            )
+        except OllamaError:
+            raise  # Propagate — main.py returns 503
         resp.raise_for_status()
         return resp.json()["message"]["content"], sources
 

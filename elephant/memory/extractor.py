@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from elephant.config import settings
 from elephant.memory.vector_store import search_similar
+from elephant.utils.retry import OllamaError, ollama_retry
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,11 @@ Antworte NUR als JSON Array. Keine Erklärung.
 
 Konversation:
 {transcript}"""
+
+_STRICT_SUFFIX = (
+    "\n\nWICHTIG: Antworte AUSSCHLIESSLICH mit einem validen JSON Array. "
+    "Kein Text davor oder danach. Kein Markdown. Nur [...] mit den Objekten."
+)
 
 
 class MemoryFact(BaseModel):
@@ -51,40 +57,48 @@ class MemoryExtractor:
             return []
 
         transcript = self._build_transcript(conversation)
-        prompt = EXTRACT_PROMPT.format(transcript=transcript)
+        base_prompt = EXTRACT_PROMPT.format(transcript=transcript)
 
-        resp = requests.post(
-            f"{settings.ollama_url.rstrip('/')}/api/chat",
-            json={
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False,
-            },
-            timeout=120,
-        )
-        resp.raise_for_status()
-        raw = resp.json()["message"]["content"]
-
-        # LLMs sometimes wrap JSON in ```json ... ``` fences — strip them first
-        match = re.search(r"\[.*\]", raw, re.DOTALL)
-        if not match:
-            logger.warning("No JSON array found in LLM response for fact extraction")
-            return []
-
-        try:
-            data = json.loads(match.group())
-        except json.JSONDecodeError as exc:
-            logger.warning("Failed to parse JSON from LLM response: %s", exc)
-            return []
-
-        facts: list[MemoryFact] = []
-        for item in data:
+        for attempt in range(1, 4):
+            prompt = base_prompt if attempt == 1 else base_prompt + _STRICT_SUFFIX
             try:
-                facts.append(MemoryFact(**item))
-            except (ValidationError, TypeError) as exc:
-                logger.warning("Skipping invalid fact item: %s", exc)
+                resp = ollama_retry(
+                    lambda p=prompt: requests.post(
+                        f"{settings.ollama_url.rstrip('/')}/api/chat",
+                        json={"model": self.model,
+                              "messages": [{"role": "user", "content": p}],
+                              "stream": False},
+                        timeout=120,
+                    ),
+                    label=f"extract_facts attempt {attempt}",
+                )
+                resp.raise_for_status()
+            except OllamaError as exc:
+                logger.error("Ollama unavailable during fact extraction: %s", exc)
+                return []
 
-        return facts
+            raw = resp.json()["message"]["content"]
+            match = re.search(r"\[.*\]", raw, re.DOTALL)
+            if not match:
+                logger.warning("Attempt %d/3: no JSON array in LLM response", attempt)
+                continue
+
+            try:
+                data = json.loads(match.group())
+            except json.JSONDecodeError as exc:
+                logger.warning("Attempt %d/3: JSON parse failed: %s", attempt, exc)
+                continue
+
+            facts: list[MemoryFact] = []
+            for item in data:
+                try:
+                    facts.append(MemoryFact(**item))
+                except (ValidationError, TypeError) as exc:
+                    logger.warning("Skipping invalid fact item: %s", exc)
+            return facts
+
+        logger.error("All 3 extraction attempts failed — returning empty")
+        return []
 
     def deduplicate(
         self,

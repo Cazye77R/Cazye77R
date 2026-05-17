@@ -10,11 +10,10 @@ from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 from elephant.config import settings
 from elephant.memory.markdown_store import list_memories, load_memory
+from elephant.utils.retry import OllamaError, ollama_retry
 
-EMBEDDING_MODEL = "nomic-embed-text"
-CHUNK_TOKEN_LIMIT = 500
-CHUNK_OVERLAP_TOKENS = 50
-_CHARS_PER_TOKEN = 4  # rough approximation; 1 token ≈ 4 characters
+import logging
+logger = logging.getLogger(__name__)
 
 _collection: Optional[chromadb.Collection] = None
 
@@ -26,20 +25,22 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
     required by chromadb >= 1.0, including embed_query() and is_legacy().
     """
 
-    def __init__(self, model: str = EMBEDDING_MODEL, base_url: Optional[str] = None):
-        self.model = model
+    def __init__(self, model: str = "", base_url: Optional[str] = None):
+        self.model = model or settings.embedding_model
         self.base_url = (base_url or settings.ollama_url).rstrip("/")
 
     def __call__(self, input: Documents) -> Embeddings:
         embeddings: Embeddings = []
         for text in input:
-            response = requests.post(
-                f"{self.base_url}/api/embeddings",
-                json={"model": self.model, "prompt": text},
-                timeout=60,
-            )
-            response.raise_for_status()
-            embeddings.append(response.json()["embedding"])
+            def _do_embed(t=text):
+                r = requests.post(
+                    f"{self.base_url}/api/embeddings",
+                    json={"model": self.model, "prompt": t},
+                    timeout=60,
+                )
+                r.raise_for_status()
+                return r.json()["embedding"]
+            embeddings.append(ollama_retry(_do_embed, label="embed"))
         return embeddings
 
     @staticmethod
@@ -49,7 +50,7 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
     @staticmethod
     def build_from_config(config: dict) -> "OllamaEmbeddingFunction":
         return OllamaEmbeddingFunction(
-            model=config.get("model", EMBEDDING_MODEL),
+            model=config.get("model", ""),
             base_url=config.get("base_url"),
         )
 
@@ -71,9 +72,18 @@ def init_collection(
     """
     global _collection
     if chroma_client is None:
-        chroma_path = settings.memories_base_path.parent.parent / "chromadb"
-        chroma_path.mkdir(parents=True, exist_ok=True)
-        chroma_client = chromadb.PersistentClient(path=str(chroma_path))
+        path = settings.chroma_path
+        path.mkdir(parents=True, exist_ok=True)
+        try:
+            chroma_client = chromadb.PersistentClient(path=str(path))
+        except Exception as exc:
+            logger.error(
+                "ChromaDB failed to load at %s (%s) — wiping and re-creating", path, exc
+            )
+            import shutil
+            shutil.rmtree(path, ignore_errors=True)
+            path.mkdir(parents=True, exist_ok=True)
+            chroma_client = chromadb.PersistentClient(path=str(path))
 
     embedding_fn = OllamaEmbeddingFunction()
     _collection = chroma_client.get_or_create_collection(
@@ -96,13 +106,13 @@ def _get_collection() -> chromadb.Collection:
 # ---------------------------------------------------------------------------
 
 def _chunk_text(title: str, content: str) -> list[str]:
-    """Split *content* into chunks of ~CHUNK_TOKEN_LIMIT tokens with overlap.
+    """Split *content* into chunks of ~settings.chunk_size characters with overlap.
 
     Each chunk is prefixed with the memory title so retrieval context is
     self-contained.
     """
-    limit_chars = CHUNK_TOKEN_LIMIT * _CHARS_PER_TOKEN
-    overlap_chars = CHUNK_OVERLAP_TOKENS * _CHARS_PER_TOKEN
+    limit_chars = settings.chunk_size
+    overlap_chars = settings.chunk_overlap
 
     paragraphs = [p.strip() for p in re.split(r"\n\n+", content) if p.strip()]
     if not paragraphs:
@@ -199,7 +209,13 @@ def embed_memory(
         }
         for i in range(len(chunks))
     ]
-    coll.add(documents=chunks, ids=ids, metadatas=metadatas)
+    try:
+        coll.add(documents=chunks, ids=ids, metadatas=metadatas)
+    except OllamaError as exc:
+        logger.error(
+            "Ollama unreachable — embedding skipped for %s: %s", filepath.name, exc
+        )
+        return 0
     return len(chunks)
 
 
