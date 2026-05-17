@@ -54,6 +54,7 @@ class ChatEngine:
         self,
         user_message: str,
         conversation_history: Optional[list[dict]] = None,
+        model: Optional[str] = None,
     ) -> tuple[str, list[dict]]:
         """Search memories, build RAG context, call Ollama.
 
@@ -76,7 +77,7 @@ class ChatEngine:
         # 4. Ollama /api/chat call
         resp = requests.post(
             f"{settings.ollama_url.rstrip('/')}/api/chat",
-            json={"model": self.model, "messages": messages, "stream": False},
+            json={"model": model or self.model, "messages": messages, "stream": False},
             timeout=120,
         )
         resp.raise_for_status()

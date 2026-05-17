@@ -83,6 +83,7 @@ class EmbedRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     session_id: str
+    model: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +245,7 @@ def chat_endpoint(req: ChatRequest, background_tasks: BackgroundTasks):
     response_text, sources = _engine.chat(
         req.message,
         conversation_history=history.messages(),
+        model=req.model,
     )
 
     history.add("user", req.message)
