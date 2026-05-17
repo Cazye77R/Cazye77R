@@ -1,4 +1,8 @@
-elephant/__pycache__/
-elephant/memory/__pycache__/
-tests/__pycache__/
+__pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.env
+.claude/worktrees/
