@@ -1,0 +1,4 @@
+elephant/__pycache__/
+elephant/memory/__pycache__/
+tests/__pycache__/
+*.pyc
