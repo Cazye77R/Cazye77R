@@ -30,12 +30,16 @@ Jeder Schritt wird als JSON-Lines in einer Logdatei protokolliert.
 ## Voraussetzungen
 
 - Python 3.11 oder neuer
-- [Ollama](https://ollama.ai) installiert und gestartet
-- Modell herunterladen:
+- [Ollama](https://ollama.ai) installiert **und gestartet** (`ollama serve`)
+- Modell einmalig herunterladen (ca. 4,5 GB):
 
 ```bash
 ollama pull qwen2.5:7b-instruct-q4_K_M
 ```
+
+> **Hinweis:** Ollama muss laufen, bevor die Anwendung gestartet wird.
+> Das Modell muss einmalig mit `ollama pull qwen2.5:7b-instruct-q4_K_M` heruntergeladen werden.
+> Ohne laufendes Ollama und das gepullte Modell ist keine LLM-Funktionalität verfügbar.
 
 - NVIDIA GPU empfohlen (RTX 3060 6 GB VRAM oder besser)
 
