@@ -15,10 +15,11 @@ class MoveResult(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
 
-def _resolve_conflict(destination: Path) -> Path:
+def resolve_conflict(destination: Path) -> Path:
+    """Return a non-colliding path by appending _1, _2, … to the stem."""
     if not destination.exists():
         return destination
-    stem = destination.stem
+    stem   = destination.stem
     suffix = destination.suffix
     parent = destination.parent
     counter = 1
@@ -39,7 +40,7 @@ def move_file(source: Path, destination: Path) -> MoveResult:
         )
 
     destination.parent.mkdir(parents=True, exist_ok=True)
-    final_destination = _resolve_conflict(destination)
+    final_destination = resolve_conflict(destination)
 
     try:
         shutil.move(str(source), str(final_destination))
@@ -47,6 +48,20 @@ def move_file(source: Path, destination: Path) -> MoveResult:
             success=True,
             source_original=source,
             destination_final=final_destination,
+        )
+    except PermissionError as exc:
+        return MoveResult(
+            success=False,
+            source_original=source,
+            destination_final=final_destination,
+            error=f"Zugriff verweigert (Datei gesperrt?): {exc}",
+        )
+    except OSError as exc:
+        return MoveResult(
+            success=False,
+            source_original=source,
+            destination_final=final_destination,
+            error=f"Dateisystem-Fehler: {exc}",
         )
     except Exception as exc:
         return MoveResult(

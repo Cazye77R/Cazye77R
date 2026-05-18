@@ -136,6 +136,41 @@ class SettingsDialog(ctk.CTkToplevel):
 
 
 # ---------------------------------------------------------------------------
+# Plan validation error detail dialog
+# ---------------------------------------------------------------------------
+
+class _PlanErrorDialog(ctk.CTkToplevel):
+    def __init__(self, parent, detail: str) -> None:
+        super().__init__(parent)
+        self.title("Plan abgelehnt")
+        self.geometry("640x400")
+        self.minsize(480, 280)
+        self.configure(fg_color=theme.BG_DEEP)
+        self.grab_set()
+        self.focus_set()
+        self._build(detail)
+
+    def _build(self, detail: str) -> None:
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+        ctk.CTkLabel(self, text="PLAN ABGELEHNT", font=theme.FONT_SECTION,
+                     text_color=theme.ERROR,
+                     ).grid(row=0, column=0, sticky="w", padx=20, pady=(16, 6))
+
+        box = ctk.CTkTextbox(self, fg_color=theme.SURFACE, text_color=theme.TEXT,
+                             font=theme.FONT_MONO_SM, state="normal",
+                             border_color=theme.ERROR, border_width=1)
+        box.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 8))
+        box.insert("end", detail)
+        box.configure(state="disabled")
+
+        ctk.CTkButton(self, text="OK", width=100, command=self.destroy,
+                      **theme.btn_ghost()).grid(row=2, column=0,
+                                                sticky="e", padx=20, pady=(0, 16))
+
+
+# ---------------------------------------------------------------------------
 # Main Window
 # ---------------------------------------------------------------------------
 
@@ -185,12 +220,13 @@ class SorterApp(ctk.CTk):
 
     def _build_ui(self) -> None:
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(3, weight=1)
         self._build_header()
-        self._build_folder_section()
-        self._build_command_section()
-        self._build_action_row()
-        self._build_status_bar()
+        self._build_dry_run_banner()    # row 1 – shown only when dry_run is on
+        self._build_folder_section()   # row 2
+        self._build_command_section()  # row 3
+        self._build_action_row()       # row 4
+        self._build_status_bar()       # row 5
 
     def _build_header(self) -> None:
         hdr = ctk.CTkFrame(self, fg_color=theme.SURFACE, height=52, corner_radius=0)
@@ -213,9 +249,25 @@ class SorterApp(ctk.CTk):
                       **theme.btn_ghost(),
                       ).grid(row=0, column=2, padx=(0, 140), pady=10, sticky="e")
 
+    def _build_dry_run_banner(self) -> None:
+        self._dry_banner = ctk.CTkFrame(self, fg_color="#7d5a00", height=30, corner_radius=0)
+        ctk.CTkLabel(
+            self._dry_banner,
+            text="⚠  DRY-RUN AKTIV – Dateien werden nicht verschoben",
+            font=theme.FONT_MONO_SM,
+            text_color="#ffd700",
+        ).pack(expand=True)
+        self._update_dry_run_banner()
+
+    def _update_dry_run_banner(self) -> None:
+        if self._cfg.get("app", {}).get("dry_run", False):
+            self._dry_banner.grid(row=1, column=0, sticky="ew")
+        else:
+            self._dry_banner.grid_remove()
+
     def _build_folder_section(self) -> None:
         card = ctk.CTkFrame(self, **theme.card())
-        card.grid(row=1, column=0, sticky="ew", padx=16, pady=(12, 4))
+        card.grid(row=2, column=0, sticky="ew", padx=16, pady=(12, 4))
         card.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(card, text="ZIELVERZEICHNIS", font=theme.FONT_SECTION,
@@ -245,7 +297,7 @@ class SorterApp(ctk.CTk):
 
     def _build_command_section(self) -> None:
         card = ctk.CTkFrame(self, **theme.card())
-        card.grid(row=2, column=0, sticky="nsew", padx=16, pady=4)
+        card.grid(row=3, column=0, sticky="nsew", padx=16, pady=4)
         card.grid_columnconfigure(0, weight=1)
         card.grid_rowconfigure(2, weight=1)
 
@@ -304,7 +356,7 @@ class SorterApp(ctk.CTk):
 
     def _build_action_row(self) -> None:
         row = ctk.CTkFrame(self, fg_color="transparent")
-        row.grid(row=3, column=0, sticky="ew", padx=16, pady=8)
+        row.grid(row=4, column=0, sticky="ew", padx=16, pady=8)
 
         self._plan_btn = ctk.CTkButton(row, text="▶  PLAN GENERIEREN", width=200,
                                         command=self._on_generate_plan,
@@ -326,7 +378,7 @@ class SorterApp(ctk.CTk):
 
     def _build_status_bar(self) -> None:
         bar = ctk.CTkFrame(self, fg_color=theme.SURFACE, height=34, corner_radius=0)
-        bar.grid(row=4, column=0, sticky="ew")
+        bar.grid(row=5, column=0, sticky="ew")
         bar.grid_propagate(False)
         bar.grid_columnconfigure(1, weight=1)
 
@@ -408,6 +460,7 @@ class SorterApp(ctk.CTk):
             self._engine.update_settings(self._cfg)
         except Exception:
             pass
+        self._update_dry_run_banner()
 
     def _find_latest_log(self) -> Path | None:
         _LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -508,16 +561,29 @@ class SorterApp(ctk.CTk):
                 color=theme.ACCENT_PRIMARY, progress=0.45))
             self.after(0, lambda: self._set_engine_state(AnimState.THINKING))
 
+            batch_size = self._cfg.get("app", {}).get("max_files_per_batch", 100)
+
+            def _progress_cb(chunk: int, total: int) -> None:
+                if total > 1:
+                    self.after(0, lambda c=chunk, t=total: self._set_status(
+                        f"Verarbeite Chunk {c}/{t} …",
+                        color=theme.ACCENT_PRIMARY))
+
             client = OllamaClient(model=self._cfg["ollama"]["model"],
                                    base_url=self._cfg["ollama"]["base_url"])
-            plan = client.generate_plan(files=files, user_command=command,
-                                         target_folder=self._folder)
+            plan = client.generate_plan(
+                files=files, user_command=command,
+                target_folder=self._folder,
+                batch_size=batch_size,
+                progress_cb=_progress_cb,
+            )
             self.after(0, lambda: self._on_plan_ready(plan))
 
         except PlanValidationError as exc:
-            msg = str(exc)
+            detail = str(exc)
+            self.after(0, lambda d=detail: _PlanErrorDialog(self, d))
             self.after(0, lambda: self._set_status(
-                f"⚠  Plan ungültig: {msg[:80]}", color=theme.ERROR))
+                "⚠  Plan abgelehnt – Details im Dialog.", color=theme.ERROR))
             self.after(0, lambda: self._set_busy(False))
             self.after(0, lambda: self._set_engine_state(AnimState.ERROR))
         except Exception as exc:

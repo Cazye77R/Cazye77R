@@ -10,7 +10,7 @@ from typing import Callable
 import customtkinter as ctk
 
 from src.core.logger import OperationLogger
-from src.core.mover import MoveResult, create_folder, move_file
+from src.core.mover import MoveResult, create_folder, move_file, resolve_conflict
 from src.gui import theme
 from src.gui.hud.animation_engine import AnimState, AnimationEngine
 from src.llm.schemas import OpType, SortPlan
@@ -134,11 +134,12 @@ class PreviewDialog(ctk.CTkToplevel):
         tree.column("source",      width=220, minwidth=100, stretch=True)
         tree.column("destination", width=220, minwidth=100, stretch=True)
         tree.column("reason",      width=180, minwidth=80,  stretch=True)
-        tree.tag_configure("folder",  foreground=theme.ACCENT_DIM)
-        tree.tag_configure("move",    foreground=theme.TEXT)
-        tree.tag_configure("done",    foreground=theme.SUCCESS)
-        tree.tag_configure("fail",    foreground=theme.ERROR)
-        tree.tag_configure("pending", foreground=theme.TEXT_MUTED)
+        tree.tag_configure("folder",   foreground=theme.ACCENT_DIM)
+        tree.tag_configure("move",     foreground=theme.TEXT)
+        tree.tag_configure("conflict", foreground=theme.WARNING)
+        tree.tag_configure("done",     foreground=theme.SUCCESS)
+        tree.tag_configure("fail",     foreground=theme.ERROR)
+        tree.tag_configure("pending",  foreground=theme.TEXT_MUTED)
         return tree
 
     def _build_buttons(self) -> None:
@@ -178,13 +179,20 @@ class PreviewDialog(ctk.CTkToplevel):
         if action.op_type == OpType.create_folder:
             op_str  = "[+] create_folder"
             src_str = "—"
+            reason  = action.reason
             tag     = "folder"
         else:
             op_str  = "[→] move"
             src_str = str(action.source) if action.source else "—"
+            reason  = action.reason
             tag     = "move"
+            # Warn if destination already exists (will be auto-renamed)
+            if action.destination and action.destination.exists():
+                final = resolve_conflict(action.destination)
+                reason = f"⚠ → {final.name}  ({action.reason})"
+                tag    = "conflict"
         iid = self._tree.insert("", "end", values=(
-            op_str, src_str, str(action.destination), action.reason,
+            op_str, src_str, str(action.destination), reason,
         ), tags=(tag,))
         # Brief highlight flash: set to pending, restore after 250 ms
         self._tree.item(iid, tags=("pending",))
@@ -235,7 +243,7 @@ class PreviewDialog(ctk.CTkToplevel):
 
             if action.op_type == OpType.create_folder:
                 success = True if self._dry_run else create_folder(action.destination)
-                logger.log_folder(action.destination, success)
+                logger.log_folder(action.destination, success, dry_run=self._dry_run)
                 tag = "done" if success else "fail"
                 if success:
                     ok_count += 1
@@ -251,9 +259,10 @@ class PreviewDialog(ctk.CTkToplevel):
                         result = MoveResult(success=True,
                                              source_original=action.source,
                                              destination_final=action.destination)
+                        logger.log_move(result, dry_run=True)
                     else:
                         result = move_file(action.source, action.destination)
-                    logger.log_move(result)
+                        logger.log_move(result)
                     if result.success:
                         ok_count += 1
                         tag = "done"

@@ -22,24 +22,33 @@ class OperationLogger:
         self._file.flush()
 
     # ------------------------------------------------------------------
-    def log_move(self, result: MoveResult) -> None:
+    def log_move(self, result: MoveResult, dry_run: bool = False) -> None:
+        if dry_run:
+            status = "dry_run"
+        else:
+            status = "success" if result.success else "error"
         self._write(
             {
                 "op_type": "move_file",
                 "source": str(result.source_original),
                 "destination": str(result.destination_final),
-                "status": "success" if result.success else "error",
+                "status": status,
                 "error": result.error,
             }
         )
 
-    def log_folder(self, path: Path, success: bool, error: str | None = None) -> None:
+    def log_folder(self, path: Path, success: bool,
+                   error: str | None = None, dry_run: bool = False) -> None:
+        if dry_run:
+            status = "dry_run"
+        else:
+            status = "success" if success else "error"
         self._write(
             {
                 "op_type": "create_folder",
                 "source": None,
                 "destination": str(path),
-                "status": "success" if success else "error",
+                "status": status,
                 "error": error,
             }
         )

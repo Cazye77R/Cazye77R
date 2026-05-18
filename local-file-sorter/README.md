@@ -1,94 +1,251 @@
 # local-file-sorter
 
-> KI-gestützter lokaler File-Sorter – gesteuert über Qwen2.5 7B via Ollama, komplett offline.
+KI-gestützter, lokaler Datei-Sorter auf Basis von **Qwen2.5 7B Q4** via Ollama.
 
 ---
 
-## Wichtige Einschränkungen (Hard Constraints)
+## ⚠ Harte Einschränkungen (immer aktiv, nicht deaktivierbar)
 
-> **ACHTUNG: Dateien werden NIEMALS gelöscht.**
->
-> Das System verschiebt Dateien ausschließlich mit `shutil.move`. Löschoperationen (`os.remove`,
-> `os.unlink`, `shutil.rmtree`, `send2trash` o.Ä.) sind im gesamten Projekt verboten.
->
-> Das LLM darf ausschließlich `move_file` und `create_folder` vorschlagen.
-> Jeder Plan mit anderen Operationen wird vollständig abgelehnt.
-
----
-
-## Beschreibung
-
-`local-file-sorter` scannt ein Verzeichnis, sendet die Dateiliste an ein lokales LLM (Qwen2.5 7B Q4
-via Ollama) und lässt dieses einen Sortierplan erstellen. Der Nutzer sieht eine Vorschau aller
-geplanten Verschiebeoperationen und muss diese explizit bestätigen, bevor etwas ausgeführt wird.
-Jeder Schritt wird als JSON-Lines in einer Logdatei protokolliert.
-
-**Ablauf:** Scan → LLM-Plan → Validierung → Preview → Bestätigung → Log → Ausführung
+| Regel | Details |
+|-------|---------|
+| **Kein Löschen** | Das Programm löscht niemals Dateien oder Ordner – auch nicht leere. |
+| **Nur `shutil.move`** | Datei-Operationen ausschließlich via `shutil.move`. |
+| **LLM-Tool-Set** | Das Modell darf nur `move` und `create_folder` vorschlagen. Jeder andere Op-Typ lehnt den gesamten Plan ab. |
+| **Explizite Bestätigung** | Keine Aktion ohne vorherige Nutzer-Bestätigung im Preview-Dialog. |
+| **Pfad-Safety** | Alle Ziel- und Quell-Pfade müssen innerhalb des gewählten Wurzel-Ordners liegen. `../`-Tricks werden abgelehnt. |
 
 ---
 
-## Voraussetzungen
+## Überblick
 
-- Python 3.11 oder neuer
-- [Ollama](https://ollama.ai) installiert **und gestartet** (`ollama serve`)
-- Modell einmalig herunterladen (ca. 4,5 GB):
+```
+Ordner wählen → Befehl eingeben → Plan generieren (LLM) →
+Vorschau prüfen → Bestätigen → Dateien verschieben → Undo möglich
+```
+
+Das UI ist ein JARVIS-Cockpit-Style HUD mit Animations-Layer (Pillow + tkinter Canvas).
+
+---
+
+## Installation
+
+### Voraussetzungen
+
+- Python **3.11+** (Windows-Installer enthält tkinter)
+- NVIDIA GPU mit ≥ 6 GB VRAM empfohlen (RTX 3060 oder besser)
+- Git
+
+### Schritte
+
+```bash
+git clone <repo-url>
+cd local-file-sorter
+
+# Virtuelle Umgebung anlegen
+python -m venv .venv
+
+# Aktivieren
+# Windows:
+.venv\Scripts\activate
+# Linux / macOS:
+source .venv/bin/activate
+
+# Abhängigkeiten installieren
+pip install -r requirements.txt
+```
+
+---
+
+## Ollama-Setup
+
+### 1. Ollama installieren
+
+→ https://ollama.com/download
+
+Ollama startet nach der Installation automatisch als Hintergrund-Dienst.
+
+### 2. Modell laden
 
 ```bash
 ollama pull qwen2.5:7b-instruct-q4_K_M
 ```
 
-> **Hinweis:** Ollama muss laufen, bevor die Anwendung gestartet wird.
-> Das Modell muss einmalig mit `ollama pull qwen2.5:7b-instruct-q4_K_M` heruntergeladen werden.
-> Ohne laufendes Ollama und das gepullte Modell ist keine LLM-Funktionalität verfügbar.
+Download ca. 4,7 GB. Beim ersten Start automatisch auf die GPU geladen.
 
-- NVIDIA GPU empfohlen (RTX 3060 6 GB VRAM oder besser)
+### 3. Prüfen
+
+```bash
+ollama list
+# Ausgabe: qwen2.5:7b-instruct-q4_K_M   ...
+```
 
 ---
 
-## Setup
+## Starten
 
 ```bash
-# 1. Repository klonen / Projektordner aufrufen
-cd local-file-sorter
-
-# 2. Virtuelles Environment anlegen
-python -m venv .venv
-
-# 3. Environment aktivieren
-# Windows:
-.venv\Scripts\activate
-# Linux/macOS:
-source .venv/bin/activate
-
-# 4. Abhängigkeiten installieren
-pip install -r requirements.txt
-
-# 5. Anwendung starten
 python main.py
 ```
 
----
-
-## Konfiguration
-
-Die Konfiguration befindet sich in `config/settings.yaml`.
-
-Wichtige Einstellungen:
-
-| Schlüssel | Standard | Beschreibung |
-|-----------|----------|--------------|
-| `ollama.model` | `qwen2.5:7b-instruct-q4_K_M` | Verwendetes Modell |
-| `ollama.base_url` | `http://localhost:11434` | Ollama-Server-URL |
-| `app.dry_run` | `false` | Trockenlauf – keine echten Datei-Operationen |
-| `app.max_files_per_batch` | `100` | Maximale Dateien pro Sortier-Durchlauf |
-| `app.language` | `de` | Sprache der Benutzeroberfläche |
+Beim ersten Start erscheint die Boot-Sequenz (ESC oder Klick zum Überspringen).
 
 ---
 
-## Logs
+## Verwendung
 
-Alle Operationen werden als JSON-Lines in `./logs/` gespeichert:
+### Grundlegender Ablauf
 
-```json
-{"timestamp": "2025-01-15T14:32:00.123456+00:00", "op_type": "move_file", "source": "/pfad/datei.txt", "destination": "/ziel/datei.txt", "status": "success", "error": null}
+1. **Ordner wählen** – Zielverzeichnis über den `📁 Ordner wählen`-Button auswählen
+2. **Befehl eingeben** – Freitext, z. B.:
+   - `Sortiere nach Dateiendung in Unterordner`
+   - `Alle PDFs nach Documents verschieben`
+   - `Bilder nach JAHR/MONAT sortieren`
+3. **Plan generieren** – `▶ PLAN GENERIEREN` klicken; LLM analysiert die Dateien
+4. **Vorschau prüfen** – Alle geplanten Aktionen in der Treeview-Tabelle sehen
+5. **Bestätigen** – `✓ Ausführen` klicken; Bestätigungs-Dialog erscheint
+6. **Undo** – `↩ Undo letzte Session` macht alle Moves der letzten Session rückgängig
+
+### Gespeicherte Befehle
+
+- **💾 Speichern** – Aktuellen Befehl mit Namen speichern
+- **📂 Verwalten** – Befehle umbenennen oder entfernen
+- Befehle werden als YAML in `config/commands/` gespeichert
+
+### Dry-Run-Modus
+
+Einstellungen → **Dry-Run** aktivieren:
+- Operationen werden simuliert, keine Dateien bewegt
+- Gelbes Banner "DRY-RUN AKTIV" erscheint im Hauptfenster
+- Log-Einträge erhalten Status `dry_run` (werden bei Undo ignoriert)
+
+### Einstellungen
+
+| Feld | Beschreibung |
+|------|-------------|
+| Ollama URL | Standard: `http://localhost:11434` |
+| Modell | Standard: `qwen2.5:7b-instruct-q4_K_M` |
+| Dry-Run | Simulationsmodus |
+| Animationen aktivieren | HUD-Animationen ein/aus |
+| Reduzierte Bewegung | Nur Farb-Wechsel, keine Rotation |
+| Boot-Sequenz | Intro-Animation beim Start |
+
+---
+
+## Große Verzeichnisse
+
+Bei mehr Dateien als `max_files_per_batch` (Standard: 100, konfigurierbar in
+`config/settings.yaml`) werden automatisch mehrere LLM-Anfragen gestellt.
+Im Status erscheint "Verarbeite Chunk 2/5 …". Die Pläne werden zusammengeführt.
+
+---
+
+## Troubleshooting
+
+### Ollama nicht erreichbar
+
 ```
+✗  Modell nicht erreichbar – läuft Ollama?
+```
+
+- Ollama-Dienst prüfen: `ollama list` im Terminal
+- Standard-Port: 11434; URL in Einstellungen kontrollieren
+- Windows: Ollama tray-Icon in Systemleiste suchen; ggf. neu starten
+- Firewall: Port 11434 für `127.0.0.1` freigeben
+
+### Modell antwortet kein JSON
+
+```
+⚠  Plan ungültig: LLM-Antwort konnte nach Retry nicht geparst werden
+```
+
+- Exaktes Modell verwenden: `qwen2.5:7b-instruct-q4_K_M`
+- Modell aktualisieren: `ollama pull qwen2.5:7b-instruct-q4_K_M`
+- Bei anderen Modellen ist JSON-Format nicht garantiert
+
+### Plan abgelehnt – ungültige Aktionen
+
+Ein Detail-Dialog zeigt welche Aktion und warum abgelehnt wurde:
+- Pfad außerhalb des Zielordners → LLM hat falschen Pfad ausgegeben
+- Quelldatei existiert nicht → Datei wurde zwischenzeitlich verschoben
+- `../`-Angriff erkannt → Modell-Output manuell prüfen
+
+### GUI startet nicht
+
+```
+ModuleNotFoundError: No module named 'tkinter'
+```
+
+- **Windows**: Python-Installer mit "tcl/tk and IDLE" Option neu ausführen
+- **Ubuntu/Debian**: `sudo apt install python3-tk`
+- **macOS**: `brew install python-tk@3.11`
+
+```
+ModuleNotFoundError: No module named 'customtkinter'
+```
+
+→ `pip install -r requirements.txt` erneut ausführen (venv aktiv?)
+
+### Dateien wurden nicht verschoben
+
+- Dry-Run aktiv? → Gelbes Banner im Hauptfenster prüfen
+- Log-Viewer öffnen (`📄 Log-Viewer`) → Status-Spalte prüfen
+- Berechtigungen: Schreibrecht auf Zielordner vorhanden?
+- Datei gesperrt (Windows)? Andere Programme schließen
+
+### Undo funktioniert nicht
+
+- Undo liest die letzte `logs/sorter_*.jsonl` Datei
+- Nur `success`-Einträge werden rückgängig gemacht (`dry_run` nicht)
+- Falls Zieldatei bereits verschoben: Konflikt-Meldung im Status
+
+---
+
+## Projektstruktur
+
+```
+local-file-sorter/
+├── main.py
+├── config/
+│   ├── settings.yaml
+│   └── commands/                  # Gespeicherte Befehle (YAML)
+├── logs/                          # JSON-Lines Logs
+├── src/
+│   ├── core/
+│   │   ├── scanner.py             # Verzeichnis-Scanner
+│   │   ├── mover.py               # move_file, resolve_conflict, is_safe_destination
+│   │   ├── logger.py              # OperationLogger (JSON-Lines)
+│   │   └── undo.py                # Session-Undo
+│   ├── llm/
+│   │   ├── schemas.py             # SortPlan, SortAction, OpType
+│   │   ├── prompts.py             # System-Prompt + few-shot Beispiele
+│   │   └── ollama_client.py       # OllamaClient + validate_plan
+│   ├── commands/
+│   │   └── manager.py             # CommandManager
+│   └── gui/
+│       ├── theme.py
+│       ├── app.py
+│       ├── preview_dialog.py
+│       ├── log_viewer.py
+│       ├── commands_dialogs.py
+│       └── hud/                   # Animations-Layer
+└── tests/
+    ├── test_no_delete.py
+    ├── test_path_safety.py
+    ├── test_name_conflict.py
+    ├── test_undo_roundtrip.py
+    └── test_plan_validation.py
+```
+
+---
+
+## Tech-Stack
+
+| Komponente | Technologie |
+|------------|-------------|
+| Sprache | Python 3.11+ |
+| LLM | Ollama – qwen2.5:7b-instruct-q4_K_M |
+| GUI | CustomTkinter 5.2+ |
+| Animationen | tkinter Canvas + Pillow |
+| Datenvalidierung | Pydantic v2 |
+| Konfiguration | PyYAML |
+| Terminal | Rich |
