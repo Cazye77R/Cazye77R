@@ -79,6 +79,27 @@ ollama list
 # Ausgabe: qwen2.5:7b-instruct-q4_K_M   ...
 ```
 
+### 4. Vision-Modell (optional)
+
+Für den Vision-Modus (Bilder nach Inhalt sortieren) wird ein separates Multimodal-Modell benötigt.
+Empfohlene Modelle für 6 GB VRAM:
+
+| Modell | Download | VRAM | Qualität |
+|--------|---------|------|---------|
+| `moondream:1.8b` | ca. 1,1 GB | ~1 GB | Gut für Kategorien |
+| `qwen2-vl:2b` | ca. 1,5 GB | ~1,5 GB | Besser, aber langsamer |
+
+```bash
+# Empfohlen (Standard):
+ollama pull moondream:1.8b
+
+# Alternativ (höhere Qualität):
+ollama pull qwen2-vl:2b
+```
+
+Beide Modelle laufen parallel zum Text-LLM ohne VRAM-Konflikt, da sie jeweils nur kurz
+geladen werden. Das Vision-Modell wird in Einstellungen → **Vision-Modell** konfiguriert.
+
 ---
 
 ## Starten
@@ -118,6 +139,23 @@ Einstellungen → **Dry-Run** aktivieren:
 - Gelbes Banner "DRY-RUN AKTIV" erscheint im Hauptfenster
 - Log-Einträge erhalten Status `dry_run` (werden bei Undo ignoriert)
 
+### Vision-Modus
+
+Einstellungen → **Vision-Modus aktivieren**:
+
+1. Einstellungen öffnen, `Vision-Modus aktivieren` anhaken, Vision-Modell eintragen
+2. Im Dropdown erscheint `🔍 Vision-Modus (Bilder nach Inhalt)` auswählen
+3. `▶ PLAN GENERIEREN` klicken
+
+Das Multimodal-Modell analysiert jeden Bild-Dateiinhalt einzeln und vergibt eine
+Kategorie-Bezeichnung. Bilder mit gleicher Kategorie landen im selben Unterordner.
+
+- Unterstützte Formate: `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.webp`
+- Klassifizierungen werden SHA256-gecacht (`logs/vision_cache.json`) – jedes Bild
+  wird nur einmal analysiert, auch über mehrere Sessions hinweg
+- Bilder werden **ausschließlich gelesen**, nie verändert oder gelöscht
+- Der erzeugte Plan durchläuft dieselbe Validierungspipeline wie ein Text-LLM-Plan
+
 ### Einstellungen
 
 | Feld | Beschreibung |
@@ -128,6 +166,8 @@ Einstellungen → **Dry-Run** aktivieren:
 | Animationen aktivieren | HUD-Animationen ein/aus |
 | Reduzierte Bewegung | Nur Farb-Wechsel, keine Rotation |
 | Boot-Sequenz | Intro-Animation beim Start |
+| Vision-Modus aktivieren | Aktiviert Bild-Klassifizierung |
+| Vision-Modell | Standard: `moondream:1.8b` |
 
 ---
 

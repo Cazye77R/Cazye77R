@@ -23,6 +23,7 @@ _SETTINGS_PATH = Path(__file__).parent.parent.parent / "config" / "settings.yaml
 _LOG_DIR       = Path(__file__).parent.parent.parent / "logs"
 _WINDOW_SIZE   = "960x720"
 _WINDOW_TITLE  = "LOCAL-FILE-SORTER  //  HUD v0.1"
+_VISION_ENTRY  = "🔍  Vision-Modus (Bilder nach Inhalt)"
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +61,7 @@ class SettingsDialog(ctk.CTkToplevel):
         self._parent = parent
         self._cfg    = cfg
         self.title("Einstellungen")
-        self.geometry("500x460")
+        self.geometry("500x580")
         self.resizable(False, False)
         self.configure(fg_color=theme.BG_DEEP)
         self.grab_set()
@@ -91,6 +92,15 @@ class SettingsDialog(ctk.CTkToplevel):
                                             ui.get("reduced_motion", False))
         self._boot_var  = self._add_toggle("Boot-Sequenz beim Start",
                                             ui.get("boot_sequence", True))
+
+        ctk.CTkLabel(self, text="VISION", font=theme.FONT_SECTION,
+                     text_color=theme.TEXT_MUTED).pack(anchor="w", padx=24, pady=(16, 4))
+
+        vis = self._cfg.get("vision", {})
+        self._vision_enabled_var = self._add_toggle(
+            "Vision-Modus aktivieren", vis.get("enabled", False))
+        self._add_entry("Vision-Modell",
+                        vis.get("model", "moondream:1.8b"), "_vision_model")
 
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(fill="x", padx=24, pady=(24, 12))
@@ -130,6 +140,10 @@ class SettingsDialog(ctk.CTkToplevel):
         self._cfg["ui"]["animations_enabled"] = self._anim_var.get()
         self._cfg["ui"]["reduced_motion"]      = self._reduc_var.get()
         self._cfg["ui"]["boot_sequence"]       = self._boot_var.get()
+        if "vision" not in self._cfg:
+            self._cfg["vision"] = {}
+        self._cfg["vision"]["enabled"] = self._vision_enabled_var.get()
+        self._cfg["vision"]["model"]   = self._vision_model.get().strip()
         _save_settings(self._cfg)
         self._parent.reload_settings()
         self.destroy()
@@ -191,6 +205,7 @@ class SorterApp(ctk.CTk):
         self._folder: Path | None = None
         self._last_log_path: Path | None = self._find_latest_log()
         self._busy = False
+        self._vision_mode = False
 
         # Animation engine (created before UI so widgets can register)
         self._engine  = AnimationEngine(self._cfg)
@@ -461,6 +476,7 @@ class SorterApp(ctk.CTk):
         except Exception:
             pass
         self._update_dry_run_banner()
+        self._refresh_command_dropdown()
 
     def _find_latest_log(self) -> Path | None:
         _LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -483,12 +499,24 @@ class SorterApp(ctk.CTk):
         self._cmd_map = {m.name: m.slug for m in metas}
         names = [m.name for m in metas]
         placeholder = "— Gespeicherte Befehle —"
-        self._cmd_menu.configure(values=[placeholder] + names)
+        values = [placeholder] + names
+        if self._cfg.get("vision", {}).get("enabled", False):
+            values.append(_VISION_ENTRY)
+        self._cmd_menu.configure(values=values)
         self._saved_cmd_var.set(placeholder)
 
     def _on_saved_command(self, choice: str) -> None:
         if choice.startswith("—"):
+            self._vision_mode = False
             return
+        if choice == _VISION_ENTRY:
+            self._vision_mode = True
+            self._cmd_box.delete("1.0", "end")
+            self._cmd_box.insert(
+                "end",
+                "[Vision-Modus] Bilder werden per KI-Bildanalyse nach Inhalt sortiert.")
+            return
+        self._vision_mode = False
         slug = self._cmd_map.get(choice)
         if slug is None:
             return
@@ -556,6 +584,10 @@ class SorterApp(ctk.CTk):
                 self.after(0, lambda: self._set_engine_state(AnimState.IDLE))
                 return
 
+            if self._vision_mode:
+                self._generate_plan_vision(files)
+                return
+
             self.after(0, lambda: self._set_status(
                 f"Frage Modell … ({len(files)} Dateien)",
                 color=theme.ACCENT_PRIMARY, progress=0.45))
@@ -591,6 +623,68 @@ class SorterApp(ctk.CTk):
             human = ("Modell nicht erreichbar – läuft Ollama?"
                      if "refused" in msg.lower() or "connect" in msg.lower()
                      else f"Fehler: {msg[:100]}")
+            self.after(0, lambda: self._set_status(f"✗  {human}", color=theme.ERROR))
+            self.after(0, lambda: self._set_busy(False))
+            self.after(0, lambda: self._set_engine_state(AnimState.ERROR))
+
+    def _generate_plan_vision(self, files) -> None:
+        """Vision-branch: classify images, build and validate plan."""
+        try:
+            from src.llm.ollama_client import validate_plan
+            from src.llm.vision_client import VisionClient
+            from src.llm.vision_sorter import build_vision_plan
+
+            vision_cfg   = self._cfg.get("vision", {})
+            allowed_exts = {
+                e.lower() for e in vision_cfg.get(
+                    "allowed_extensions",
+                    [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"],
+                )
+            }
+            images = [f for f in files if f.extension in allowed_exts]
+
+            if not images:
+                self.after(0, lambda: self._set_status(
+                    "⚠  Keine Bilder im Verzeichnis.", color=theme.WARNING))
+                self.after(0, lambda: self._set_busy(False))
+                self.after(0, lambda: self._set_engine_state(AnimState.IDLE))
+                return
+
+            n = len(images)
+            self.after(0, lambda: self._set_status(
+                f"Vision – analysiere {n} Bild{'er' if n != 1 else ''} …",
+                color=theme.ACCENT_PRIMARY, progress=0.3))
+            self.after(0, lambda: self._set_engine_state(AnimState.THINKING))
+
+            def _progress_cb(done: int, total: int) -> None:
+                self.after(0, lambda d=done, t=total: self._set_status(
+                    f"Vision – Bild {d}/{t} …",
+                    color=theme.ACCENT_PRIMARY,
+                    progress=0.3 + 0.6 * (d / t)))
+
+            client = VisionClient(
+                model=vision_cfg.get("model", "moondream:1.8b"),
+                base_url=self._cfg["ollama"]["base_url"],
+            )
+            image_paths = [f.path for f in images]
+            classifications = client.classify_batch(image_paths, progress_cb=_progress_cb)
+
+            plan = build_vision_plan(classifications, self._folder)
+            validate_plan(plan, self._folder)
+            self.after(0, lambda: self._on_plan_ready(plan))
+
+        except PlanValidationError as exc:
+            detail = str(exc)
+            self.after(0, lambda d=detail: _PlanErrorDialog(self, d))
+            self.after(0, lambda: self._set_status(
+                "⚠  Vision-Plan abgelehnt – Details im Dialog.", color=theme.ERROR))
+            self.after(0, lambda: self._set_busy(False))
+            self.after(0, lambda: self._set_engine_state(AnimState.ERROR))
+        except Exception as exc:
+            msg = str(exc)
+            human = ("Vision-Modell nicht erreichbar – läuft Ollama?"
+                     if "refused" in msg.lower() or "connect" in msg.lower()
+                     else f"Vision-Fehler: {msg[:100]}")
             self.after(0, lambda: self._set_status(f"✗  {human}", color=theme.ERROR))
             self.after(0, lambda: self._set_busy(False))
             self.after(0, lambda: self._set_engine_state(AnimState.ERROR))
