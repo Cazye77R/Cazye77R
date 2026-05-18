@@ -5,3 +5,4 @@ __pycache__/
 *.pyo
 logs/*.jsonl
 tmp_test/
+config/commands/_trash/
