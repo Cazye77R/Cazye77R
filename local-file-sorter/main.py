@@ -21,6 +21,19 @@ def check_imports() -> None:
         sys.exit(1)
 
 
-if __name__ == "__main__":
+def main() -> None:
     check_imports()
-    print("Setup OK")
+
+    try:
+        from src.gui.app import SorterApp
+    except Exception as exc:
+        print(f"GUI konnte nicht geladen werden: {exc}", file=sys.stderr)
+        print("Prüfe ob tkinter installiert ist (python3-tk / python3.x-tk).", file=sys.stderr)
+        sys.exit(1)
+
+    app = SorterApp()
+    app.mainloop()
+
+
+if __name__ == "__main__":
+    main()
