@@ -1,4 +1,4 @@
-"""Session log viewer – JSON-Lines formatted in a monospace panel."""
+"""Session log viewer – color-coded JSON-Lines with AnimatedLogCanvas."""
 from __future__ import annotations
 
 import json
@@ -7,6 +7,7 @@ from pathlib import Path
 import customtkinter as ctk
 
 from src.gui import theme
+from src.gui.hud.widgets.animated_log import AnimatedLogCanvas
 
 _REFRESH_MS = 1000
 
@@ -14,12 +15,13 @@ _REFRESH_MS = 1000
 class LogViewer(ctk.CTkToplevel):
     def __init__(self, parent, log_path: Path | None = None) -> None:
         super().__init__(parent)
-        self._log_path  = log_path
-        self._last_size = -1
-        self._closed    = False
+        self._log_path    = log_path
+        self._last_size   = -1
+        self._last_count  = 0
+        self._closed      = False
 
         self.title("Log-Viewer")
-        self.geometry("820x520")
+        self.geometry("860x540")
         self.minsize(600, 360)
         self.configure(fg_color=theme.BG_DEEP)
 
@@ -51,17 +53,10 @@ class LogViewer(ctk.CTkToplevel):
                       command=self._choose_log,
                       **theme.btn_ghost()).grid(row=0, column=2, padx=16, pady=8, sticky="e")
 
-        # Text area
-        self._text = ctk.CTkTextbox(
-            self,
-            fg_color=theme.SURFACE,
-            text_color=theme.TEXT,
-            font=theme.FONT_MONO_SM,
-            corner_radius=0,
-            wrap="none",
-            state="disabled",
-        )
-        self._text.grid(row=1, column=0, sticky="nsew")
+        # AnimatedLogCanvas replaces the plain CTkTextbox
+        self._log_canvas = AnimatedLogCanvas(self, bg=theme.SURFACE,
+                                              highlightthickness=0, bd=0)
+        self._log_canvas.grid(row=1, column=0, sticky="nsew")
 
         # Status bar
         self._status = ctk.CTkLabel(self, text="", font=theme.FONT_MONO_SM,
@@ -79,14 +74,14 @@ class LogViewer(ctk.CTkToplevel):
             initialdir=str(Path(__file__).parent.parent.parent / "logs"),
         )
         if path:
-            self._log_path  = Path(path)
-            self._last_size = -1
+            self._log_path   = Path(path)
+            self._last_size  = -1
+            self._last_count = 0
             self._refresh()
 
     def _refresh(self) -> None:
         if self._closed:
             return
-
         if self._log_path and self._log_path.exists():
             size = self._log_path.stat().st_size
             if size != self._last_size:
@@ -96,11 +91,10 @@ class LogViewer(ctk.CTkToplevel):
             self._status.configure(text=f"Datei nicht gefunden: {self._log_path}")
         else:
             self._status.configure(text="Keine Log-Datei ausgewählt.")
-
         self.after(_REFRESH_MS, self._refresh)
 
     def _reload(self) -> None:
-        lines = []
+        entries: list[dict] = []
         try:
             with self._log_path.open("r", encoding="utf-8") as fh:
                 for raw in fh:
@@ -108,27 +102,24 @@ class LogViewer(ctk.CTkToplevel):
                     if not raw:
                         continue
                     try:
-                        parsed = json.loads(raw)
-                        pretty = json.dumps(parsed, ensure_ascii=False, indent=2)
+                        entries.append(json.loads(raw))
                     except json.JSONDecodeError:
-                        pretty = raw
-                    lines.append(pretty)
-                    lines.append("")
+                        entries.append({"op_type": "raw", "source": raw,
+                                        "destination": "", "timestamp": ""})
         except OSError as exc:
-            lines = [f"Lesefehler: {exc}"]
+            self._status.configure(text=f"Lesefehler: {exc}")
+            return
 
-        content = "\n".join(lines)
-
-        self._text.configure(state="normal")
-        self._text.delete("1.0", "end")
-        self._text.insert("end", content)
-        self._text.configure(state="disabled")
-        self._text.see("end")
+        new_count = len(entries)
+        if new_count != self._last_count:
+            # Full reload (simple: reload all, canvas handles display)
+            self._log_canvas.load_entries(entries)
+            self._last_count = new_count
 
         self._file_label.configure(text=self._log_path.name)
-        n = len([l for l in lines if l.startswith("{")])
         self._status.configure(
-            text=f"{n} Einträge  ·  {self._last_size} Bytes  ·  Auto-Refresh {_REFRESH_MS // 1000}s",
+            text=(f"{new_count} Einträge  ·  {self._last_size} Bytes  "
+                  f"·  Auto-Refresh {_REFRESH_MS // 1000}s"),
             text_color=theme.TEXT_MUTED,
         )
 

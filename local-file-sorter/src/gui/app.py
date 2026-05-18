@@ -1,4 +1,4 @@
-"""Main application window – HUD cockpit aesthetic."""
+"""Main application window – HUD cockpit with animation layer."""
 from __future__ import annotations
 
 import subprocess
@@ -11,15 +11,13 @@ import customtkinter as ctk
 import yaml
 
 from src.core.logger import OperationLogger
-from src.core.mover import move_file, create_folder
+from src.core.mover import create_folder, move_file
 from src.core.scanner import scan_folder
 from src.core.undo import undo_session
 from src.gui import theme
+from src.gui.hud.animation_engine import AnimState, AnimationEngine
 from src.llm.ollama_client import OllamaClient, PlanValidationError
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 _SETTINGS_PATH = Path(__file__).parent.parent.parent / "config" / "settings.yaml"
 _LOG_DIR       = Path(__file__).parent.parent.parent / "logs"
 _WINDOW_SIZE   = "960x720"
@@ -27,7 +25,7 @@ _WINDOW_TITLE  = "LOCAL-FILE-SORTER  //  HUD v0.1"
 
 
 # ---------------------------------------------------------------------------
-# Settings helpers
+# Settings I/O
 # ---------------------------------------------------------------------------
 
 def _load_settings() -> dict:
@@ -39,10 +37,6 @@ def _save_settings(cfg: dict) -> None:
     with _SETTINGS_PATH.open("w", encoding="utf-8") as fh:
         yaml.dump(cfg, fh, allow_unicode=True, default_flow_style=False)
 
-
-# ---------------------------------------------------------------------------
-# OS helper
-# ---------------------------------------------------------------------------
 
 def _open_in_explorer(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
@@ -56,7 +50,7 @@ def _open_in_explorer(path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Settings Dialog
+# Settings Dialog (with animation toggles)
 # ---------------------------------------------------------------------------
 
 class SettingsDialog(ctk.CTkToplevel):
@@ -64,47 +58,50 @@ class SettingsDialog(ctk.CTkToplevel):
         super().__init__(parent)
         self._parent = parent
         self._cfg    = cfg
-
         self.title("Einstellungen")
-        self.geometry("480x340")
+        self.geometry("500x460")
         self.resizable(False, False)
         self.configure(fg_color=theme.BG_DEEP)
         self.grab_set()
         self.focus_set()
-
         self._build()
 
     def _build(self) -> None:
-        pad = {"padx": 24, "pady": 10}
-
+        pad = {"padx": 24, "pady": 8}
         ctk.CTkLabel(self, text="EINSTELLUNGEN", font=theme.FONT_SECTION,
                      text_color=theme.TEXT_MUTED).pack(anchor="w", **pad)
 
-        self._add_row("Ollama URL",   self._cfg["ollama"]["base_url"],  "_url")
-        self._add_row("Modell",       self._cfg["ollama"]["model"],     "_model")
+        self._add_entry("Ollama URL",  self._cfg["ollama"]["base_url"], "_url")
+        self._add_entry("Modell",      self._cfg["ollama"]["model"],    "_model")
 
-        # Dry-run toggle
-        dry_frame = ctk.CTkFrame(self, fg_color="transparent")
-        dry_frame.pack(fill="x", padx=24, pady=8)
-        ctk.CTkLabel(dry_frame, text="Dry-Run (kein echtes Verschieben)",
-                     text_color=theme.TEXT, font=theme.FONT_BODY).pack(side="left")
-        self._dry_var = ctk.BooleanVar(value=self._cfg["app"]["dry_run"])
-        ctk.CTkCheckBox(dry_frame, text="", variable=self._dry_var,
-                        fg_color=theme.ACCENT_PRIMARY,
-                        checkmark_color=theme.BG_DEEP).pack(side="right")
+        ctk.CTkLabel(self, text="APP", font=theme.FONT_SECTION,
+                     text_color=theme.TEXT_MUTED).pack(anchor="w", padx=24, pady=(16, 4))
 
-        # Buttons
-        btn_row = ctk.CTkFrame(self, fg_color="transparent")
-        btn_row.pack(fill="x", padx=24, pady=(20, 12))
-        ctk.CTkButton(btn_row, text="Speichern", width=120,
+        self._dry_var = self._add_toggle("Dry-Run (kein echtes Verschieben)",
+                                          self._cfg["app"]["dry_run"])
+
+        ctk.CTkLabel(self, text="ANIMATIONEN", font=theme.FONT_SECTION,
+                     text_color=theme.TEXT_MUTED).pack(anchor="w", padx=24, pady=(16, 4))
+
+        ui = self._cfg.get("ui", {})
+        self._anim_var  = self._add_toggle("Animationen aktivieren",
+                                            ui.get("animations_enabled", True))
+        self._reduc_var = self._add_toggle("Reduzierte Bewegung",
+                                            ui.get("reduced_motion", False))
+        self._boot_var  = self._add_toggle("Boot-Sequenz beim Start",
+                                            ui.get("boot_sequence", True))
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(fill="x", padx=24, pady=(24, 12))
+        ctk.CTkButton(row, text="Speichern", width=120,
                       command=self._save, **theme.btn_primary()).pack(side="right", padx=(8, 0))
-        ctk.CTkButton(btn_row, text="Abbrechen", width=120,
+        ctk.CTkButton(row, text="Abbrechen", width=120,
                       command=self.destroy, **theme.btn_ghost()).pack(side="right")
 
-    def _add_row(self, label: str, default: str, attr: str) -> None:
+    def _add_entry(self, label: str, default: str, attr: str) -> None:
         row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(fill="x", padx=24, pady=6)
-        ctk.CTkLabel(row, text=label, width=120, anchor="w",
+        row.pack(fill="x", padx=24, pady=5)
+        ctk.CTkLabel(row, text=label, width=130, anchor="w",
                      text_color=theme.TEXT_MUTED, font=theme.FONT_BODY).pack(side="left")
         var = ctk.StringVar(value=default)
         setattr(self, attr, var)
@@ -112,10 +109,26 @@ class SettingsDialog(ctk.CTkToplevel):
                      border_color=theme.SURFACE_HI, text_color=theme.TEXT,
                      font=theme.FONT_MONO_SM).pack(side="left", fill="x", expand=True)
 
+    def _add_toggle(self, label: str, initial: bool) -> ctk.BooleanVar:
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(fill="x", padx=24, pady=4)
+        ctk.CTkLabel(row, text=label, text_color=theme.TEXT,
+                     font=theme.FONT_BODY).pack(side="left")
+        var = ctk.BooleanVar(value=initial)
+        ctk.CTkCheckBox(row, text="", variable=var,
+                        fg_color=theme.ACCENT_PRIMARY,
+                        checkmark_color=theme.BG_DEEP).pack(side="right")
+        return var
+
     def _save(self) -> None:
         self._cfg["ollama"]["base_url"] = self._url.get().strip()
         self._cfg["ollama"]["model"]    = self._model.get().strip()
         self._cfg["app"]["dry_run"]     = self._dry_var.get()
+        if "ui" not in self._cfg:
+            self._cfg["ui"] = {}
+        self._cfg["ui"]["animations_enabled"] = self._anim_var.get()
+        self._cfg["ui"]["reduced_motion"]      = self._reduc_var.get()
+        self._cfg["ui"]["boot_sequence"]       = self._boot_var.get()
         _save_settings(self._cfg)
         self._parent.reload_settings()
         self.destroy()
@@ -131,8 +144,6 @@ class SorterApp(ctk.CTk):
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
-
-        # Patch mono fonts after Tk is alive
         theme.apply_mono_family(theme.resolve_mono_family())
 
         self.title(_WINDOW_TITLE)
@@ -140,16 +151,28 @@ class SorterApp(ctk.CTk):
         self.minsize(800, 600)
         self.configure(fg_color=theme.BG_DEEP)
 
-        self._cfg: dict = _load_settings()
+        self._cfg: dict           = _load_settings()
         self._folder: Path | None = None
         self._last_log_path: Path | None = self._find_latest_log()
         self._busy = False
 
+        # Animation engine (created before UI so widgets can register)
+        self._engine = AnimationEngine(self._cfg)
+
         self._build_ui()
         self._set_status("Bereit", color=theme.TEXT_MUTED)
 
-        # Prevent accidental Enter-key execution
-        self.bind_all("<Return>", lambda e: "break" if self._busy else None)
+        # CoreIndicator floated top-right via place()
+        self._attach_core_indicator()
+
+        # Boot sequence (deferred until window is mapped)
+        if self._engine.boot_sequence and self._engine.enabled:
+            self.after(150, self._start_boot)
+        else:
+            self._engine.set_state(AnimState.IDLE)
+
+        # Block Enter from triggering execution
+        self.bind_all("<Return>",   lambda e: "break" if self._busy else None)
         self.bind_all("<KP_Enter>", lambda e: "break" if self._busy else None)
 
     # ------------------------------------------------------------------
@@ -159,7 +182,6 @@ class SorterApp(ctk.CTk):
     def _build_ui(self) -> None:
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
-
         self._build_header()
         self._build_folder_section()
         self._build_command_section()
@@ -173,17 +195,19 @@ class SorterApp(ctk.CTk):
         hdr.grid_propagate(False)
 
         ctk.CTkLabel(hdr, text="⚡  LOCAL-FILE-SORTER",
-                     font=theme.FONT_TITLE, text_color=theme.ACCENT_PRIMARY
+                     font=theme.FONT_TITLE,
+                     text_color=theme.ACCENT_PRIMARY,
                      ).grid(row=0, column=0, padx=20, pady=14, sticky="w")
 
         ctk.CTkLabel(hdr, text="Qwen2.5 7B · Ollama",
-                     font=theme.FONT_MONO_SM, text_color=theme.TEXT_MUTED
+                     font=theme.FONT_MONO_SM,
+                     text_color=theme.TEXT_MUTED,
                      ).grid(row=0, column=1, sticky="w", padx=6)
 
         ctk.CTkButton(hdr, text="⚙", width=40, height=32,
                       command=self._open_settings,
-                      **theme.btn_ghost()
-                      ).grid(row=0, column=2, padx=16, pady=10, sticky="e")
+                      **theme.btn_ghost(),
+                      ).grid(row=0, column=2, padx=(0, 140), pady=10, sticky="e")
 
     def _build_folder_section(self) -> None:
         card = ctk.CTkFrame(self, **theme.card())
@@ -191,25 +215,25 @@ class SorterApp(ctk.CTk):
         card.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(card, text="ZIELVERZEICHNIS", font=theme.FONT_SECTION,
-                     text_color=theme.TEXT_MUTED).grid(row=0, column=0, columnspan=3,
-                                                        sticky="w", padx=16, pady=(12, 4))
+                     text_color=theme.TEXT_MUTED,
+                     ).grid(row=0, column=0, columnspan=3, sticky="w",
+                            padx=16, pady=(12, 4))
 
         ctk.CTkButton(card, text="📁  Ordner wählen", width=160,
                       command=self._choose_folder,
-                      **theme.btn_ghost()
+                      **theme.btn_ghost(),
                       ).grid(row=1, column=0, padx=16, pady=(0, 12), sticky="w")
 
-        self._path_label = ctk.CTkLabel(card, text="— kein Ordner gewählt —",
+        self._path_label = ctk.CTkLabel(card,
+                                         text="— kein Ordner gewählt —",
                                          font=theme.FONT_MONO_SM,
-                                         text_color=theme.TEXT_MUTED,
-                                         anchor="w")
+                                         text_color=theme.TEXT_MUTED, anchor="w")
         self._path_label.grid(row=1, column=1, padx=8, pady=(0, 12), sticky="ew")
 
         self._recursive_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(card, text="Unterordner einbeziehen",
                         variable=self._recursive_var,
-                        font=theme.FONT_BODY_SM,
-                        text_color=theme.TEXT,
+                        font=theme.FONT_BODY_SM, text_color=theme.TEXT,
                         fg_color=theme.ACCENT_PRIMARY,
                         checkmark_color=theme.BG_DEEP,
                         hover_color=theme.ACCENT_DIM,
@@ -222,12 +246,11 @@ class SorterApp(ctk.CTk):
         card.grid_rowconfigure(2, weight=1)
 
         ctk.CTkLabel(card, text="SORTIERBEFEHL", font=theme.FONT_SECTION,
-                     text_color=theme.TEXT_MUTED).grid(row=0, column=0,
-                                                         sticky="w", padx=16, pady=(12, 4))
+                     text_color=theme.TEXT_MUTED,
+                     ).grid(row=0, column=0, sticky="w", padx=16, pady=(12, 4))
 
-        # Saved commands dropdown (populated in Phase 5)
         self._saved_cmd_var = ctk.StringVar(value="— Gespeicherte Befehle —")
-        self._cmd_menu = ctk.CTkOptionMenu(
+        ctk.CTkOptionMenu(
             card,
             variable=self._saved_cmd_var,
             values=["— Gespeicherte Befehle —"],
@@ -241,25 +264,26 @@ class SorterApp(ctk.CTk):
             dropdown_text_color=theme.TEXT,
             font=theme.FONT_BODY_SM,
             width=260,
-        )
-        self._cmd_menu.grid(row=1, column=0, sticky="w", padx=16, pady=(0, 8))
+        ).grid(row=1, column=0, sticky="w", padx=16, pady=(0, 8))
 
         self._cmd_box = ctk.CTkTextbox(
-            card,
-            height=110,
+            card, height=90,
             fg_color=theme.SURFACE_HI,
-            border_color=theme.SURFACE_HI,
-            border_width=1,
+            border_color=theme.SURFACE_HI, border_width=1,
             text_color=theme.TEXT,
-            font=theme.FONT_MONO,
-            corner_radius=6,
-            wrap="word",
+            font=theme.FONT_MONO, corner_radius=6, wrap="word",
         )
-        self._cmd_box.grid(row=2, column=0, sticky="nsew", padx=16, pady=(0, 12))
+        self._cmd_box.grid(row=2, column=0, sticky="nsew", padx=16, pady=(0, 4))
         self._cmd_box.insert("end", "Sortiere nach Dateiendung in Unterordner")
-
-        # Prevent Enter from submitting
         self._cmd_box.bind("<Return>", lambda e: None)
+
+        # WaveformIndicator below command box
+        try:
+            from src.gui.hud.widgets.waveform import WaveformIndicator
+            self._wave = WaveformIndicator(card, self._engine)
+            self._wave.grid(row=3, column=0, padx=16, pady=(2, 12), sticky="w")
+        except Exception:
+            pass
 
     def _build_action_row(self) -> None:
         row = ctk.CTkFrame(self, fg_color="transparent")
@@ -305,7 +329,41 @@ class SorterApp(ctk.CTk):
         self._progress.set(0)
 
     # ------------------------------------------------------------------
-    # State helpers
+    # CoreIndicator overlay
+    # ------------------------------------------------------------------
+
+    def _attach_core_indicator(self) -> None:
+        try:
+            from src.gui.hud.widgets.core_indicator import CoreIndicator
+            self._core = CoreIndicator(self, self._engine)
+            # Float top-right; re-place on resize
+            self._place_core()
+            self.bind("<Configure>", lambda _: self._place_core(), add="+")
+        except Exception:
+            pass
+
+    def _place_core(self) -> None:
+        try:
+            self._core.place(relx=1.0, rely=0.0, x=-128, y=8,
+                              width=120, height=120)
+            self._core.lift()
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Boot sequence
+    # ------------------------------------------------------------------
+
+    def _start_boot(self) -> None:
+        try:
+            from src.gui.hud.widgets.boot_sequence import BootSequence
+            boot = BootSequence(self, on_done=lambda: self._engine.set_state(AnimState.IDLE))
+            self.after(80, boot.start)
+        except Exception:
+            self._engine.set_state(AnimState.IDLE)
+
+    # ------------------------------------------------------------------
+    # Helpers
     # ------------------------------------------------------------------
 
     def _set_status(self, msg: str, color: str = theme.TEXT_MUTED,
@@ -315,14 +373,29 @@ class SorterApp(ctk.CTk):
         if progress is not None:
             self._progress.set(progress)
 
+    def _set_engine_state(self, state: AnimState) -> None:
+        try:
+            self._engine.set_state(state)
+        except Exception:
+            pass
+
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
-        state = "disabled" if busy else "normal"
-        self._plan_btn.configure(state=state)
-        self._undo_btn.configure(state=state)
+        st = "disabled" if busy else "normal"
+        self._plan_btn.configure(state=st)
+        self._undo_btn.configure(state=st)
 
     def reload_settings(self) -> None:
         self._cfg = _load_settings()
+        try:
+            self._engine.update_settings(self._cfg)
+        except Exception:
+            pass
+
+    def _find_latest_log(self) -> Path | None:
+        _LOG_DIR.mkdir(parents=True, exist_ok=True)
+        logs = sorted(_LOG_DIR.glob("sorter_*.jsonl"))
+        return logs[-1] if logs else None
 
     # ------------------------------------------------------------------
     # Event handlers
@@ -348,7 +421,7 @@ class SorterApp(ctk.CTk):
         LogViewer(self, log_path=self._last_log_path)
 
     # ------------------------------------------------------------------
-    # Plan generation (threaded)
+    # Plan generation
     # ------------------------------------------------------------------
 
     def _on_generate_plan(self) -> None:
@@ -358,7 +431,6 @@ class SorterApp(ctk.CTk):
         if not self._folder.is_dir():
             self._set_status("⚠  Pfad existiert nicht.", color=theme.WARNING)
             return
-
         command = self._cmd_box.get("1.0", "end").strip()
         if not command:
             self._set_status("⚠  Befehl ist leer.", color=theme.WARNING)
@@ -366,38 +438,32 @@ class SorterApp(ctk.CTk):
 
         self._set_busy(True)
         self._set_status("Scanne Verzeichnis …", color=theme.ACCENT_PRIMARY, progress=0.15)
+        self.after(0, lambda: self._set_engine_state(AnimState.SCANNING))
 
-        threading.Thread(
-            target=self._generate_plan_worker,
-            args=(command,),
-            daemon=True,
-        ).start()
+        threading.Thread(target=self._generate_plan_worker,
+                         args=(command,), daemon=True).start()
 
     def _generate_plan_worker(self, command: str) -> None:
         try:
-            recursive = self._recursive_var.get()
-            files = scan_folder(self._folder, recursive=recursive)
+            files = scan_folder(self._folder, recursive=self._recursive_var.get())
             files = [f for f in files if not f.is_dir]
 
             if not files:
                 self.after(0, lambda: self._set_status(
                     "⚠  Keine Dateien im Verzeichnis.", color=theme.WARNING))
                 self.after(0, lambda: self._set_busy(False))
+                self.after(0, lambda: self._set_engine_state(AnimState.IDLE))
                 return
 
             self.after(0, lambda: self._set_status(
-                f"Frage Modell … ({len(files)} Dateien)", color=theme.ACCENT_PRIMARY, progress=0.45))
+                f"Frage Modell … ({len(files)} Dateien)",
+                color=theme.ACCENT_PRIMARY, progress=0.45))
+            self.after(0, lambda: self._set_engine_state(AnimState.THINKING))
 
-            client = OllamaClient(
-                model=self._cfg["ollama"]["model"],
-                base_url=self._cfg["ollama"]["base_url"],
-            )
-            plan = client.generate_plan(
-                files=files,
-                user_command=command,
-                target_folder=self._folder,
-            )
-
+            client = OllamaClient(model=self._cfg["ollama"]["model"],
+                                   base_url=self._cfg["ollama"]["base_url"])
+            plan = client.generate_plan(files=files, user_command=command,
+                                         target_folder=self._folder)
             self.after(0, lambda: self._on_plan_ready(plan))
 
         except PlanValidationError as exc:
@@ -405,41 +471,37 @@ class SorterApp(ctk.CTk):
             self.after(0, lambda: self._set_status(
                 f"⚠  Plan ungültig: {msg[:80]}", color=theme.ERROR))
             self.after(0, lambda: self._set_busy(False))
+            self.after(0, lambda: self._set_engine_state(AnimState.ERROR))
         except Exception as exc:
             msg = str(exc)
-            if "refused" in msg.lower() or "connect" in msg.lower():
-                human = "Modell nicht erreichbar – läuft Ollama?"
-            else:
-                human = f"Fehler: {msg[:100]}"
+            human = ("Modell nicht erreichbar – läuft Ollama?"
+                     if "refused" in msg.lower() or "connect" in msg.lower()
+                     else f"Fehler: {msg[:100]}")
             self.after(0, lambda: self._set_status(f"✗  {human}", color=theme.ERROR))
             self.after(0, lambda: self._set_busy(False))
+            self.after(0, lambda: self._set_engine_state(AnimState.ERROR))
 
     def _on_plan_ready(self, plan) -> None:
         from src.gui.preview_dialog import PreviewDialog
+        self._set_engine_state(AnimState.IDLE)
         self._set_status("Plan empfangen – Vorschau …", color=theme.SUCCESS, progress=0.9)
         dlg = PreviewDialog(
-            parent=self,
-            plan=plan,
-            target_folder=self._folder,
-            log_dir=_LOG_DIR,
-            dry_run=self._cfg["app"]["dry_run"],
+            parent=self, plan=plan, target_folder=self._folder,
+            log_dir=_LOG_DIR, dry_run=self._cfg["app"]["dry_run"],
+            engine=self._engine,
             on_complete=self._on_execution_complete,
         )
         dlg.grab_set()
         self._set_busy(False)
-
-    # ------------------------------------------------------------------
-    # Execution completion callback
-    # ------------------------------------------------------------------
 
     def _on_execution_complete(self, ok: int, fail: int, log_path: Path) -> None:
         self._last_log_path = log_path
         color = theme.SUCCESS if fail == 0 else theme.WARNING
         self._set_status(
             f"✓ Fertig – {ok} erfolgreich, {fail} fehlgeschlagen.  Log: {log_path.name}",
-            color=color,
-            progress=1.0,
-        )
+            color=color, progress=1.0)
+        self._set_engine_state(AnimState.SUCCESS)
+        self.after(600, lambda: self._set_engine_state(AnimState.IDLE))
 
     # ------------------------------------------------------------------
     # Undo
@@ -450,9 +512,10 @@ class SorterApp(ctk.CTk):
         if log_path is None or not log_path.exists():
             self._set_status("⚠  Kein Session-Log gefunden.", color=theme.WARNING)
             return
-
         self._set_busy(True)
-        self._set_status("Mache letzte Session rückgängig …", color=theme.ACCENT_PRIMARY, progress=0.2)
+        self._set_status("Mache letzte Session rückgängig …",
+                         color=theme.ACCENT_PRIMARY, progress=0.2)
+        self._set_engine_state(AnimState.EXECUTING)
 
         def _worker():
             try:
@@ -461,20 +524,16 @@ class SorterApp(ctk.CTk):
                 fail = sum(1 for r in results if not r.success)
                 color = theme.SUCCESS if fail == 0 else theme.WARNING
                 self.after(0, lambda: self._set_status(
-                    f"↩  Undo abgeschlossen – {ok} zurück, {fail} Konflikte.", color=color, progress=1.0))
+                    f"↩  Undo – {ok} zurück, {fail} Konflikte.", color=color, progress=1.0))
+                self.after(0, lambda: self._set_engine_state(
+                    AnimState.SUCCESS if fail == 0 else AnimState.ERROR))
+                self.after(700, lambda: self._set_engine_state(AnimState.IDLE))
             except Exception as exc:
                 msg = str(exc)
-                self.after(0, lambda: self._set_status(f"✗  Undo-Fehler: {msg[:100]}", color=theme.ERROR))
+                self.after(0, lambda: self._set_status(
+                    f"✗  Undo-Fehler: {msg[:100]}", color=theme.ERROR))
+                self.after(0, lambda: self._set_engine_state(AnimState.ERROR))
             finally:
                 self.after(0, lambda: self._set_busy(False))
 
         threading.Thread(target=_worker, daemon=True).start()
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    def _find_latest_log(self) -> Path | None:
-        _LOG_DIR.mkdir(parents=True, exist_ok=True)
-        logs = sorted(_LOG_DIR.glob("sorter_*.jsonl"))
-        return logs[-1] if logs else None
