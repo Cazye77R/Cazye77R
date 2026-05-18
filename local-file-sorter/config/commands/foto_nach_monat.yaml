@@ -1,0 +1,6 @@
+name: "Fotos nach Aufnahmemonat"
+description: "Sortiert Bilddateien nach Jahr/Monat"
+prompt_text: "Sortiere alle Bilder (.jpg, .png, .heic, .raw) nach Aufnahmemonat in\
+  \ Unterordner JAHR/MONAT"
+default_recursive: true
+created_at: '2025-05-18T12:34:56'

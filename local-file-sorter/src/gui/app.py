@@ -10,6 +10,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 import yaml
 
+from src.commands.manager import CommandManager
 from src.core.logger import OperationLogger
 from src.core.mover import create_folder, move_file
 from src.core.scanner import scan_folder
@@ -157,9 +158,12 @@ class SorterApp(ctk.CTk):
         self._busy = False
 
         # Animation engine (created before UI so widgets can register)
-        self._engine = AnimationEngine(self._cfg)
+        self._engine  = AnimationEngine(self._cfg)
+        self._cmd_mgr = CommandManager()
+        self._cmd_map: dict[str, str] = {}  # display name → slug
 
         self._build_ui()
+        self._refresh_command_dropdown()
         self._set_status("Bereit", color=theme.TEXT_MUTED)
 
         # CoreIndicator floated top-right via place()
@@ -249,9 +253,13 @@ class SorterApp(ctk.CTk):
                      text_color=theme.TEXT_MUTED,
                      ).grid(row=0, column=0, sticky="w", padx=16, pady=(12, 4))
 
+        # Controls row: dropdown + save/manage buttons
+        ctrl = ctk.CTkFrame(card, fg_color="transparent")
+        ctrl.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 8))
+
         self._saved_cmd_var = ctk.StringVar(value="— Gespeicherte Befehle —")
-        ctk.CTkOptionMenu(
-            card,
+        self._cmd_menu = ctk.CTkOptionMenu(
+            ctrl,
             variable=self._saved_cmd_var,
             values=["— Gespeicherte Befehle —"],
             command=self._on_saved_command,
@@ -264,7 +272,16 @@ class SorterApp(ctk.CTk):
             dropdown_text_color=theme.TEXT,
             font=theme.FONT_BODY_SM,
             width=260,
-        ).grid(row=1, column=0, sticky="w", padx=16, pady=(0, 8))
+        )
+        self._cmd_menu.pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(ctrl, text="💾  Speichern", width=130,
+                      command=self._open_save_command_dialog,
+                      **theme.btn_ghost()).pack(side="left", padx=(0, 6))
+
+        ctk.CTkButton(ctrl, text="📂  Verwalten", width=130,
+                      command=self._open_manage_commands_dialog,
+                      **theme.btn_ghost()).pack(side="left")
 
         self._cmd_box = ctk.CTkTextbox(
             card, height=90,
@@ -408,10 +425,41 @@ class SorterApp(ctk.CTk):
             self._path_label.configure(text=str(self._folder),
                                         text_color=theme.TEXT)
 
+    def _refresh_command_dropdown(self) -> None:
+        metas = self._cmd_mgr.list_commands()
+        self._cmd_map = {m.name: m.slug for m in metas}
+        names = [m.name for m in metas]
+        placeholder = "— Gespeicherte Befehle —"
+        self._cmd_menu.configure(values=[placeholder] + names)
+        self._saved_cmd_var.set(placeholder)
+
     def _on_saved_command(self, choice: str) -> None:
-        if not choice.startswith("—"):
-            self._cmd_box.delete("1.0", "end")
-            self._cmd_box.insert("end", choice)
+        if choice.startswith("—"):
+            return
+        slug = self._cmd_map.get(choice)
+        if slug is None:
+            return
+        try:
+            cmd = self._cmd_mgr.load_command(slug)
+        except Exception:
+            return
+        self._cmd_box.delete("1.0", "end")
+        self._cmd_box.insert("end", cmd.prompt_text)
+        self._recursive_var.set(cmd.default_recursive)
+
+    def _open_save_command_dialog(self) -> None:
+        from src.gui.commands_dialogs import SaveCommandDialog
+        SaveCommandDialog(
+            self, self._cmd_mgr,
+            prompt_text=self._cmd_box.get("1.0", "end").strip(),
+            recursive=self._recursive_var.get(),
+            on_saved=self._refresh_command_dropdown,
+        )
+
+    def _open_manage_commands_dialog(self) -> None:
+        from src.gui.commands_dialogs import ManageCommandsDialog
+        ManageCommandsDialog(self, self._cmd_mgr,
+                             on_changed=self._refresh_command_dropdown)
 
     def _open_settings(self) -> None:
         SettingsDialog(self, self._cfg)
