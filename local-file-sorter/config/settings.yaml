@@ -1,0 +1,17 @@
+ollama:
+  base_url: http://localhost:11434
+  model: qwen2.5:7b-instruct-q4_K_M
+
+paths:
+  log_dir: ./logs
+  commands_dir: ./config/commands
+
+app:
+  language: de
+  dry_run: false
+  max_files_per_batch: 100
+
+ui:
+  animations_enabled: true
+  reduced_motion: false
+  boot_sequence: true
