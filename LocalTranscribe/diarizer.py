@@ -21,10 +21,12 @@ from pathlib import Path
 import torch
 import torchaudio
 
-# torchaudio 2.5+ removed list_audio_backends(); pyannote.audio 3.x still
-# calls it at import time. Provide a no-op shim so any torchaudio version works.
+# torchaudio 2.5+ removed list_audio_backends(); pyannote.audio 3.x calls it
+# unconditionally at import time and then does backends[0] if "soundfile" is
+# not in the list – so returning [] causes an IndexError. Return the Windows
+# default backend name so pyannote picks "soundfile" without crashing.
 if not hasattr(torchaudio, "list_audio_backends"):
-    torchaudio.list_audio_backends = lambda: []  # type: ignore[attr-defined]
+    torchaudio.list_audio_backends = lambda: ["soundfile"]  # type: ignore[attr-defined]
 
 from dotenv import load_dotenv
 from pyannote.audio import Pipeline
