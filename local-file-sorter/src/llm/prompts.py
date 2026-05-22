@@ -21,6 +21,16 @@ Du darfst ausschließlich folgende zwei Operationen vorschlagen:
 - Kopieren von Dateien
 - Jede andere Operation, die nicht "move" oder "create_folder" ist
 
+## PFAD-REGELN (kritisch)
+- Verwende als Präfix IMMER exakt den Zielordner-Pfad, den du in der Aufgabe erhältst
+- Hänge Unterordner und Dateinamen direkt mit Trennzeichen an
+- NIEMALS einen führenden Schrägstrich oder Backslash VOR dem Laufwerksbuchstaben
+- Windows-Beispiel (Zielordner: C:\\Users\\Max\\Ziel):
+    Richtig:  C:\\Users\\Max\\Ziel\\PDF\\datei.pdf
+    FALSCH:  \\C:\\Users\\Max\\Ziel\\PDF\\datei.pdf   ← verbotener führender Backslash
+- Linux-Beispiel (Zielordner: /home/max/ziel):
+    Richtig:  /home/max/ziel/PDF/datei.pdf
+
 ## ANTWORTFORMAT
 Antworte ausschließlich als JSON-Objekt gemäß diesem Schema. Keine Erklärungen, \
 kein Prosa-Text außerhalb des JSON:
@@ -41,73 +51,6 @@ kein Prosa-Text außerhalb des JSON:
     }
   ],
   "summary": "<Ein-Satz Zusammenfassung des Plans>"
-}
-
-## BEISPIELE
-
-### Beispiel 1 – Sortiere nach Dateiendung in Unterordner
-Eingabe-Dateien (Auszug):
-| Name           | Ext  | Datum      | Größe |
-|----------------|------|------------|-------|
-| bericht.pdf    | .pdf | 2024-01-10 | 45 KB |
-| foto.jpg       | .jpg | 2024-02-03 | 3 MB  |
-| notizen.txt    | .txt | 2024-03-15 | 12 KB |
-
-Befehl: "Sortiere nach Endung in Unterordner"
-
-Antwort:
-{
-  "actions": [
-    {"op_type": "create_folder", "source": null, "destination": "/ziel/PDF",  "reason": "Ordner für PDF-Dateien"},
-    {"op_type": "create_folder", "source": null, "destination": "/ziel/JPG",  "reason": "Ordner für JPEG-Bilder"},
-    {"op_type": "create_folder", "source": null, "destination": "/ziel/TXT",  "reason": "Ordner für Textdateien"},
-    {"op_type": "move", "source": "/ziel/bericht.pdf",  "destination": "/ziel/PDF/bericht.pdf",  "reason": "PDF-Datei"},
-    {"op_type": "move", "source": "/ziel/foto.jpg",     "destination": "/ziel/JPG/foto.jpg",     "reason": "JPEG-Bild"},
-    {"op_type": "move", "source": "/ziel/notizen.txt",  "destination": "/ziel/TXT/notizen.txt",  "reason": "Textdatei"}
-  ],
-  "summary": "Dateien nach Endung in Unterordner PDF, JPG und TXT sortiert."
-}
-
-### Beispiel 2 – Sortiere nach Erstellungsdatum in JAHR/MONAT/-Unterordner
-Eingabe-Dateien (Auszug):
-| Name        | Ext  | Datum      | Größe |
-|-------------|------|------------|-------|
-| img001.jpg  | .jpg | 2023-06-14 | 2 MB  |
-| img002.jpg  | .jpg | 2024-01-05 | 1 MB  |
-| doc.pdf     | .pdf | 2023-06-20 | 80 KB |
-
-Befehl: "Sortiere nach Erstellungsdatum in JAHR/MONAT/ Unterordner"
-
-Antwort:
-{
-  "actions": [
-    {"op_type": "create_folder", "source": null, "destination": "/ziel/2023/06", "reason": "Ordner für Juni 2023"},
-    {"op_type": "create_folder", "source": null, "destination": "/ziel/2024/01", "reason": "Ordner für Januar 2024"},
-    {"op_type": "move", "source": "/ziel/img001.jpg", "destination": "/ziel/2023/06/img001.jpg", "reason": "Erstellt Juni 2023"},
-    {"op_type": "move", "source": "/ziel/doc.pdf",    "destination": "/ziel/2023/06/doc.pdf",    "reason": "Erstellt Juni 2023"},
-    {"op_type": "move", "source": "/ziel/img002.jpg", "destination": "/ziel/2024/01/img002.jpg", "reason": "Erstellt Januar 2024"}
-  ],
-  "summary": "Dateien nach Erstellungsjahr und -monat in Unterordner sortiert."
-}
-
-### Beispiel 3 – Sortiere alle PDFs in Unterordner Documents
-Eingabe-Dateien (Auszug):
-| Name          | Ext  | Datum      | Größe  |
-|---------------|------|------------|--------|
-| rechnung.pdf  | .pdf | 2024-05-01 | 120 KB |
-| foto.png      | .png | 2024-05-02 | 4 MB   |
-| vertrag.pdf   | .pdf | 2024-05-10 | 300 KB |
-
-Befehl: "Sortiere alle PDFs in Unterordner Documents"
-
-Antwort:
-{
-  "actions": [
-    {"op_type": "create_folder", "source": null, "destination": "/ziel/Documents", "reason": "Zielordner für PDFs"},
-    {"op_type": "move", "source": "/ziel/rechnung.pdf", "destination": "/ziel/Documents/rechnung.pdf", "reason": "PDF-Datei"},
-    {"op_type": "move", "source": "/ziel/vertrag.pdf",  "destination": "/ziel/Documents/vertrag.pdf",  "reason": "PDF-Datei"}
-  ],
-  "summary": "Alle PDF-Dateien in den Unterordner Documents verschoben."
 }
 """
 
@@ -136,8 +79,13 @@ def build_user_prompt(
 
     file_table = "\n".join([header, separator] + rows)
 
+    sep = "\\" if "\\" in str(target_folder) else "/"
+    path_example = f"{target_folder}{sep}UNTERORDNER{sep}datei.ext"
+
     return (
-        f"Zielordner: {target_folder}\n\n"
+        f"Zielordner: {target_folder}\n"
+        f"Pfad-Beispiel für deine Ausgabe: {path_example}\n"
+        f"(Wichtig: Verwende diesen Pfad exakt als Präfix, OHNE führenden Schrägstrich davor)\n\n"
         f"Dateien im Verzeichnis:{truncation_note}\n"
         f"{file_table}\n\n"
         f"Befehl: {user_command}\n\n"

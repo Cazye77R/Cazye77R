@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from enum import Enum
 from pathlib import Path
 
@@ -18,6 +19,15 @@ class SortAction(BaseModel):
     reason: str
 
     model_config = {"arbitrary_types_allowed": True}
+
+    @field_validator("destination", "source", mode="before")
+    @classmethod
+    def _normalize_path(cls, v: object) -> object:
+        if isinstance(v, str) and v:
+            # LLM on Windows sometimes outputs \C:\path instead of C:\path.
+            # Strip any leading backslashes before a drive letter (e.g. \C:\ → C:\).
+            v = re.sub(r'^\\+([A-Za-z]:[\\])', r'\1', v)
+        return v
 
 
 class SortPlan(BaseModel):

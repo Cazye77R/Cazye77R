@@ -241,7 +241,8 @@ class SorterApp(ctk.CTk):
         self._build_folder_section()   # row 2
         self._build_command_section()  # row 3
         self._build_action_row()       # row 4
-        self._build_status_bar()       # row 5
+        self._build_activity_log()     # row 5
+        self._build_status_bar()       # row 6
 
     def _build_header(self) -> None:
         hdr = ctk.CTkFrame(self, fg_color=theme.SURFACE, height=52, corner_radius=0)
@@ -391,9 +392,32 @@ class SorterApp(ctk.CTk):
                       command=self._open_log_viewer,
                       **theme.btn_ghost()).pack(side="left", padx=(10, 0))
 
+    def _build_activity_log(self) -> None:
+        card = ctk.CTkFrame(self, **theme.card())
+        card.grid(row=5, column=0, sticky="ew", padx=16, pady=(0, 4))
+        card.grid_columnconfigure(0, weight=1)
+
+        hdr = ctk.CTkFrame(card, fg_color="transparent")
+        hdr.grid(row=0, column=0, sticky="ew", padx=12, pady=(8, 2))
+        ctk.CTkLabel(hdr, text="AKTIVITÄTSLOG", font=theme.FONT_SECTION,
+                     text_color=theme.TEXT_MUTED).pack(side="left")
+        ctk.CTkButton(hdr, text="✕ Leeren", width=80, height=22,
+                      command=self._clear_log,
+                      **theme.btn_ghost()).pack(side="right")
+
+        self._log_box = ctk.CTkTextbox(
+            card, height=110,
+            fg_color=theme.SURFACE_HI,
+            border_color=theme.SURFACE_HI, border_width=0,
+            text_color=theme.TEXT_MUTED,
+            font=theme.FONT_MONO_SM,
+            corner_radius=4, wrap="none", state="disabled",
+        )
+        self._log_box.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 10))
+
     def _build_status_bar(self) -> None:
         bar = ctk.CTkFrame(self, fg_color=theme.SURFACE, height=34, corner_radius=0)
-        bar.grid(row=5, column=0, sticky="ew")
+        bar.grid(row=6, column=0, sticky="ew")
         bar.grid_propagate(False)
         bar.grid_columnconfigure(1, weight=1)
 
@@ -468,6 +492,25 @@ class SorterApp(ctk.CTk):
         st = "disabled" if busy else "normal"
         self._plan_btn.configure(state=st)
         self._undo_btn.configure(state=st)
+
+    def _log(self, msg: str) -> None:
+        """Append a timestamped message to the activity log (thread-safe)."""
+        import datetime
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        line = f"[{ts}]  {msg}\n"
+        def _append():
+            if not self.winfo_exists():
+                return
+            self._log_box.configure(state="normal")
+            self._log_box.insert("end", line)
+            self._log_box.see("end")
+            self._log_box.configure(state="disabled")
+        self.after(0, _append)
+
+    def _clear_log(self) -> None:
+        self._log_box.configure(state="normal")
+        self._log_box.delete("1.0", "end")
+        self._log_box.configure(state="disabled")
 
     def reload_settings(self) -> None:
         self._cfg = _load_settings()
@@ -574,8 +617,10 @@ class SorterApp(ctk.CTk):
 
     def _generate_plan_worker(self, command: str) -> None:
         try:
+            self._log(f"Scan: {self._folder}")
             files = scan_folder(self._folder, recursive=self._recursive_var.get())
             files = [f for f in files if not f.is_dir]
+            self._log(f"Scan abgeschlossen: {len(files)} Datei(en) gefunden.")
 
             if not files:
                 self.after(0, lambda: self._set_status(
@@ -588,6 +633,8 @@ class SorterApp(ctk.CTk):
                 self._generate_plan_vision(files)
                 return
 
+            model_name = self._cfg["ollama"]["model"]
+            self._log(f"Sende Anfrage an Modell: {model_name}")
             self.after(0, lambda: self._set_status(
                 f"Frage Modell … ({len(files)} Dateien)",
                 color=theme.ACCENT_PRIMARY, progress=0.45))
@@ -596,12 +643,13 @@ class SorterApp(ctk.CTk):
             batch_size = self._cfg.get("app", {}).get("max_files_per_batch", 100)
 
             def _progress_cb(chunk: int, total: int) -> None:
+                self._log(f"Chunk {chunk}/{total} verarbeitet.")
                 if total > 1:
                     self.after(0, lambda c=chunk, t=total: self._set_status(
                         f"Verarbeite Chunk {c}/{t} …",
                         color=theme.ACCENT_PRIMARY))
 
-            client = OllamaClient(model=self._cfg["ollama"]["model"],
+            client = OllamaClient(model=model_name,
                                    base_url=self._cfg["ollama"]["base_url"])
             plan = client.generate_plan(
                 files=files, user_command=command,
@@ -609,10 +657,12 @@ class SorterApp(ctk.CTk):
                 batch_size=batch_size,
                 progress_cb=_progress_cb,
             )
+            self._log(f"Plan empfangen: {len(plan.actions)} Aktion(en). Validierung OK.")
             self.after(0, lambda: self._on_plan_ready(plan))
 
         except PlanValidationError as exc:
             detail = str(exc)
+            self._log(f"FEHLER – Plan abgelehnt: {str(exc)[:200]}")
             self.after(0, lambda d=detail: _PlanErrorDialog(self, d))
             self.after(0, lambda: self._set_status(
                 "⚠  Plan abgelehnt – Details im Dialog.", color=theme.ERROR))
@@ -620,6 +670,7 @@ class SorterApp(ctk.CTk):
             self.after(0, lambda: self._set_engine_state(AnimState.ERROR))
         except Exception as exc:
             msg = str(exc)
+            self._log(f"FEHLER: {msg[:200]}")
             if "refused" in msg.lower() or "connect" in msg.lower():
                 human = "Modell nicht erreichbar – läuft Ollama?"
             elif "404" in msg or "not found" in msg.lower():
@@ -713,6 +764,7 @@ class SorterApp(ctk.CTk):
     def _on_execution_complete(self, ok: int, fail: int, log_path: Path) -> None:
         self._last_log_path = log_path
         color = theme.SUCCESS if fail == 0 else theme.WARNING
+        self._log(f"Ausführung abgeschlossen: {ok} ✓  {fail} ✗  – Log: {log_path.name}")
         self._set_status(
             f"✓ Fertig – {ok} erfolgreich, {fail} fehlgeschlagen.  Log: {log_path.name}",
             color=color, progress=1.0)
@@ -735,9 +787,14 @@ class SorterApp(ctk.CTk):
 
         def _worker():
             try:
+                self._log(f"Undo: lese Session-Log {log_path.name}")
                 results = undo_session(log_path)
                 ok   = sum(1 for r in results if r.success)
                 fail = sum(1 for r in results if not r.success)
+                self._log(f"Undo abgeschlossen: {ok} zurück, {fail} Konflikte.")
+                for r in results:
+                    if not r.success and r.error:
+                        self._log(f"  Konflikt: {r.error[:120]}")
                 color = theme.SUCCESS if fail == 0 else theme.WARNING
                 self.after(0, lambda: self._set_status(
                     f"↩  Undo – {ok} zurück, {fail} Konflikte.", color=color, progress=1.0))
@@ -746,6 +803,7 @@ class SorterApp(ctk.CTk):
                 self.after(700, lambda: self._set_engine_state(AnimState.IDLE))
             except Exception as exc:
                 msg = str(exc)
+                self._log(f"Undo FEHLER: {msg[:200]}")
                 self.after(0, lambda: self._set_status(
                     f"✗  Undo-Fehler: {msg[:100]}", color=theme.ERROR))
                 self.after(0, lambda: self._set_engine_state(AnimState.ERROR))
