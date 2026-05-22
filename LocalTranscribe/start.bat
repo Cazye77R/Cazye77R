@@ -16,8 +16,8 @@ if not exist ".venv\Scripts\python.exe" (
 
 :: 2. Abhaengigkeiten installieren / aktualisieren
 echo Installiere Abhaengigkeiten...
-.venv\Scripts\python.exe -m pip install --quiet --upgrade pip
-.venv\Scripts\python.exe -m pip install --quiet -r requirements.txt
+.venv\Scripts\python.exe -m pip install --quiet --no-cache-dir --upgrade pip
+.venv\Scripts\python.exe -m pip install --quiet --no-cache-dir -r requirements.txt
 
 :: 3. App starten
 echo Starte LocalTranscribe...
