@@ -18,6 +18,14 @@ if not exist ".venv\Scripts\python.exe" (
 echo Installiere Abhaengigkeiten...
 .venv\Scripts\python.exe -m pip install --quiet --no-cache-dir --upgrade pip
 .venv\Scripts\python.exe -m pip install --quiet --no-cache-dir -r requirements.txt
+if errorlevel 1 (
+    echo.
+    echo Installation fehlgeschlagen. Starte mit frischer Umgebung...
+    rmdir /s /q .venv
+    python -m venv .venv
+    .venv\Scripts\python.exe -m pip install --quiet --no-cache-dir --upgrade pip
+    .venv\Scripts\python.exe -m pip install --quiet --no-cache-dir -r requirements.txt
+)
 
 :: 3. App starten
 echo Starte LocalTranscribe...
