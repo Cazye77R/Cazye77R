@@ -19,6 +19,13 @@ import os
 from pathlib import Path
 
 import torch
+import torchaudio
+
+# torchaudio 2.5+ removed list_audio_backends(); pyannote.audio 3.x still
+# calls it at import time. Provide a no-op shim so any torchaudio version works.
+if not hasattr(torchaudio, "list_audio_backends"):
+    torchaudio.list_audio_backends = lambda: []  # type: ignore[attr-defined]
+
 from dotenv import load_dotenv
 from pyannote.audio import Pipeline
 
