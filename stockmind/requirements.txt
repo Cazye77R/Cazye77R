@@ -9,7 +9,7 @@
 streamlit==1.56.0
 
 # --- Marktdaten ---
-yfinance==0.2.51
+yfinance>=0.2.52
 requests==2.33.1
 
 # --- Datenverarbeitung ---
