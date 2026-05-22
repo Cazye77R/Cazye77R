@@ -76,7 +76,7 @@ class VisionClient:
                 "images": [b64],
             }],
         )
-        category = resp["message"]["content"].strip().strip('"').strip()
+        category = resp.message.content.strip().strip('"').strip()
         self._cache[key] = category
         self._save_cache()
         return category

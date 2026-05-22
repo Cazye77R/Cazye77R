@@ -38,6 +38,7 @@ class BootSequence(tk.Canvas):
         self._on_done = on_done
         self._done    = False
         self._photo: ImageTk.PhotoImage | None = None
+        self._img_id: int | None = None
         self._sweep_x = 0
 
         # Bind skip keys
@@ -91,7 +92,10 @@ class BootSequence(tk.Canvas):
             draw.line([(x, 0), (x, h)], fill=(*_CYAN, 255), width=2)
 
         self._photo = ImageTk.PhotoImage(img.convert("RGB"))
-        self.create_image(0, 0, anchor="nw", image=self._photo)
+        if self._img_id is None:
+            self._img_id = self.create_image(0, 0, anchor="nw", image=self._photo)
+        else:
+            self.itemconfig(self._img_id, image=self._photo)
 
     # ------------------------------------------------------------------
     # Type-on phase
@@ -154,11 +158,13 @@ class BootSequence(tk.Canvas):
             self._draw_string(draw, 60, base_y + i * 36, line, _DIM, font)
 
         # Current partial line with cursor
-        cursor = partial + ("█" if (int(self._parent.tk.call("after", "info") or "0")) % 2 == 0 else " ")
         self._draw_string(draw, 60, base_y + current_line * 36, partial + "█", _CYAN, font)
 
         self._photo = ImageTk.PhotoImage(img.convert("RGB"))
-        self.create_image(0, 0, anchor="nw", image=self._photo)
+        if self._img_id is None:
+            self._img_id = self.create_image(0, 0, anchor="nw", image=self._photo)
+        else:
+            self.itemconfig(self._img_id, image=self._photo)
 
     @staticmethod
     def _draw_string(draw, x, y, text, color, font) -> None:

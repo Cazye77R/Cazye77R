@@ -6,18 +6,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
-def _make_client(tmp_path, cache_file, chat_return="Landschaft"):
-    """Helper: return a patched VisionClient whose ollama.Client is mocked."""
-    mock_instance = MagicMock()
-    mock_instance.chat.return_value = {"message": {"content": chat_return}}
-    with patch("ollama.Client", return_value=mock_instance):
-        from src.llm.vision_client import VisionClient
-        client = VisionClient(
-            model="moondream:1.8b",
-            base_url="http://localhost:11434",
-            cache_path=cache_file,
-        )
-    return client, mock_instance
+def _mock_chat_response(content: str) -> MagicMock:
+    """Return a mock that mirrors the ollama ChatResponse attribute structure."""
+    resp = MagicMock()
+    resp.message.content = content
+    return resp
 
 
 def test_cache_hit_skips_model_call(tmp_path):
@@ -29,7 +22,7 @@ def test_cache_hit_skips_model_call(tmp_path):
     with patch("ollama.Client") as MockClient:
         mock_inst = MagicMock()
         MockClient.return_value = mock_inst
-        mock_inst.chat.return_value = {"message": {"content": "Landschaft"}}
+        mock_inst.chat.return_value = _mock_chat_response("Landschaft")
 
         from src.llm.vision_client import VisionClient
 
@@ -54,7 +47,7 @@ def test_cache_persisted_to_disk(tmp_path):
     with patch("ollama.Client") as MockClient:
         mock_inst = MagicMock()
         MockClient.return_value = mock_inst
-        mock_inst.chat.return_value = {"message": {"content": "Natur"}}
+        mock_inst.chat.return_value = _mock_chat_response("Natur")
 
         from src.llm.vision_client import VisionClient
         client = VisionClient(cache_path=cache_file)
@@ -77,7 +70,9 @@ def test_different_files_get_separate_cache_entries(tmp_path):
 
     def fake_chat(**kwargs):
         counter["n"] += 1
-        return {"message": {"content": f"Kategorie{counter['n']}"}}
+        resp = MagicMock()
+        resp.message.content = f"Kategorie{counter['n']}"
+        return resp
 
     with patch("ollama.Client") as MockClient:
         mock_inst = MagicMock()
@@ -105,7 +100,7 @@ def test_classify_batch_returns_all_paths(tmp_path):
     with patch("ollama.Client") as MockClient:
         mock_inst = MagicMock()
         MockClient.return_value = mock_inst
-        mock_inst.chat.return_value = {"message": {"content": "Tier"}}
+        mock_inst.chat.return_value = _mock_chat_response("Tier")
 
         from src.llm.vision_client import VisionClient
         client = VisionClient(cache_path=cache_file)
@@ -126,7 +121,7 @@ def test_classify_batch_progress_cb(tmp_path):
     with patch("ollama.Client") as MockClient:
         mock_inst = MagicMock()
         MockClient.return_value = mock_inst
-        mock_inst.chat.return_value = {"message": {"content": "X"}}
+        mock_inst.chat.return_value = _mock_chat_response("X")
 
         from src.llm.vision_client import VisionClient
         client = VisionClient(cache_path=cache_file)
