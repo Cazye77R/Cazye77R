@@ -1299,7 +1299,7 @@ with tab1:
                         from modules.trainer import _METHODS as _AVAIL_METHODS
                         _cmp = compare_bandits(_hist, _AVAIL_METHODS)
                     if _cmp["figure"].data:
-                        st.plotly_chart(_cmp["figure"], use_container_width=True)
+                        st.plotly_chart(_cmp["figure"], width="stretch")
                         fr = _cmp.get("final_rewards", {})
                         _cr1, _cr2, _cr3 = st.columns(3)
                         _cr1.metric("UCB1 Gesamt",     f"{fr.get('UCB1', 0):.1f}")
@@ -1378,12 +1378,12 @@ with tab1:
                         st.plotly_chart(
                             _equity_chart(eq_df, bt_budget,
                                           f"Equity Curve – {bt_method}"),
-                            use_container_width=True,
+                            width="stretch",
                         )
                         st.plotly_chart(
                             _underwater_chart(eq_series,
                                               f"Drawdown – {bt_method}"),
-                            use_container_width=True,
+                            width="stretch",
                         )
 
         # ── Trainings-Statistiken ────────────────────────────────────────────
@@ -1535,7 +1535,7 @@ with tab2:
     _section("📋 Offene Positionen")
     if summary.get("positions"):
         pos_df = pd.DataFrame(summary["positions"])
-        st.dataframe(pos_df, use_container_width=True, hide_index=True)
+        st.dataframe(pos_df, width="stretch", hide_index=True)
     else:
         st.markdown(
             '<div class="sm-card" style="text-align:center;color:#8b949e;'
@@ -1689,7 +1689,7 @@ with tab2:
             show = [c for c in cols if c in th.columns]
             st.dataframe(
                 th[show].sort_values("timestamp", ascending=False),
-                use_container_width=True, hide_index=True,
+                width="stretch", hide_index=True,
             )
         else:
             st.info("Noch keine Trades.")
@@ -1921,7 +1921,7 @@ with tab3:
         },
     ]
     comp_df = pd.DataFrame(comparison)
-    st.dataframe(comp_df, use_container_width=True, hide_index=True)
+    st.dataframe(comp_df, width="stretch", hide_index=True)
 
     # ── Aktive Konfiguration ──────────────────────────────────────────────────
     st.divider()

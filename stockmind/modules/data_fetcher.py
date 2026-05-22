@@ -444,7 +444,7 @@ def fetch_ohlcv(
             raw = _fetch_yf_download(symbol, period, interval)
 
     if raw is None:
-        # Fallback: deutsche Regionalbörse (z. B. BMW3.F) → XETRA (BMW.DE) probieren
+        # Fallback 1: deutsche Regionalbörse (z. B. BMW3.F) → XETRA (BMW.DE) probieren
         parts = symbol.rsplit(".", 1)
         if len(parts) == 2 and parts[1] in _DE_SFXS:
             xetra = parts[0] + ".DE"
@@ -458,6 +458,22 @@ def fetch_ohlcv(
                 return _empty_df(
                     f"Keine Daten für '{symbol}' (auch '{xetra}' erfolglos). "
                     f"Bitte Ticker prüfen – Xetra-Symbole enden auf '.DE'."
+                )
+        elif "." not in symbol and not symbol.endswith("-USD") and not symbol.startswith("^"):
+            # Fallback 2: kein Suffix, kein Krypto, kein Index → XETRA (.DE) versuchen
+            xetra = symbol + ".DE"
+            logger.info(f"Kein Suffix für '{symbol}' – versuche XETRA-Fallback: {xetra}")
+            raw = _fetch_yf_history(xetra, period, interval)
+            if raw is None:
+                raw = _fetch_yf_download(xetra, period, interval)
+            if raw is not None:
+                symbol = xetra
+            else:
+                logger.warning(f"Alle Quellen erfolglos für {symbol} + {xetra} (period={period})")
+                return _empty_df(
+                    f"Keine Daten für '{symbol}' (auch '{xetra}' erfolglos). "
+                    "Ticker prüfen: Deutsche Aktien = SYMBOL.DE (z. B. BMW.DE), "
+                    "US-Aktien = AAPL / MSFT, Krypto = BTC-USD, Indizes = ^GDAXI."
                 )
         else:
             logger.warning(f"Alle Quellen erfolglos für {symbol} (period={period})")
