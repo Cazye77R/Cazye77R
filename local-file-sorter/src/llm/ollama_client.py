@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from src.core.mover import is_safe_destination
 from src.core.scanner import FileInfo
 from src.llm.prompts import SYSTEM_PROMPT, build_user_prompt
+from src.llm.quick_planner import try_quick_plan
 from src.llm.schemas import OpType, SortAction, SortPlan
 
 
@@ -79,13 +80,23 @@ class OllamaClient:
         target_folder: Path,
         batch_size: int = 100,
         progress_cb: Callable[[int, int], None] | None = None,
-    ) -> SortPlan:
-        """Generate and validate a SortPlan, chunking large file lists."""
+    ) -> tuple[SortPlan, bool]:
+        """Generate and validate a SortPlan, chunking large file lists.
+
+        Returns (plan, used_quick_planner).  Callers that don't care about the
+        flag can ignore the second element.
+        """
+        quick = try_quick_plan(user_command, files, target_folder)
+        if quick is not None:
+            if progress_cb:
+                progress_cb(1, 1)
+            return quick, True
+
         if len(files) <= batch_size:
             plan = self._generate_single(files, user_command, target_folder)
             if progress_cb:
                 progress_cb(1, 1)
-            return plan
+            return plan, False
 
         # ---- chunked mode ----
         chunks = [files[i:i + batch_size] for i in range(0, len(files), batch_size)]
@@ -105,7 +116,7 @@ class OllamaClient:
             + "; ".join(summaries[:2])
             + ("…" if total > 2 else "")
         )
-        return SortPlan(actions=all_actions, summary=combined_summary)
+        return SortPlan(actions=all_actions, summary=combined_summary), False
 
     # ------------------------------------------------------------------
     def _generate_single(

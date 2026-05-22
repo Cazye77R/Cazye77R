@@ -633,6 +633,19 @@ class SorterApp(ctk.CTk):
                 self._generate_plan_vision(files)
                 return
 
+            # --- Quick-plan check (no LLM needed) ---
+            from src.llm.quick_planner import try_quick_plan
+            quick = try_quick_plan(command, files, self._folder)
+            if quick is not None:
+                n = len(quick.actions)
+                self._log(f"Schnellplan (kein LLM-Aufruf): {n} Aktion(en). {quick.summary}")
+                self.after(0, lambda: self._set_status(
+                    f"Schnellplan erstellt ({n} Aktionen) – kein LLM-Aufruf nötig.",
+                    color=theme.ACCENT_PRIMARY, progress=1.0))
+                self.after(0, lambda: self._on_plan_ready(quick))
+                return
+
+            # --- LLM path ---
             model_name = self._cfg["ollama"]["model"]
             self._log(f"Sende Anfrage an Modell: {model_name}")
             self.after(0, lambda: self._set_status(
@@ -651,7 +664,7 @@ class SorterApp(ctk.CTk):
 
             client = OllamaClient(model=model_name,
                                    base_url=self._cfg["ollama"]["base_url"])
-            plan = client.generate_plan(
+            plan, _ = client.generate_plan(
                 files=files, user_command=command,
                 target_folder=self._folder,
                 batch_size=batch_size,
