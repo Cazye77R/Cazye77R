@@ -77,19 +77,37 @@ if errorlevel 1 (
 )
 echo [OK] Alle Abhaengigkeiten installiert.
 
-:: ---- 6. Ollama prüfen (Hinweis, kein Abbruch) ----------------
+:: ---- 6. Ollama und Modell prüfen ----------------------------
 curl -s --connect-timeout 2 http://localhost:11434 >nul 2>&1
 if errorlevel 1 (
     echo.
     echo [WARNUNG] Ollama laeuft nicht auf localhost:11434.
-    echo           Starte Ollama und lade das Modell:
+    echo           Starte Ollama, dann lade das Modell:
     echo             ollama pull qwen2.5:7b-instruct-q4_K_M
     echo           Das Programm startet trotzdem.
     echo.
+    goto :start_app
+)
+echo [OK] Ollama erreichbar.
+
+:: Modell prüfen und bei Bedarf automatisch laden
+echo [..] Prüfe ob Modell vorhanden ist ...
+ollama list 2>nul | findstr /i "qwen2.5:7b-instruct-q4_K_M" >nul 2>&1
+if errorlevel 1 (
+    echo [..] Modell nicht gefunden -- lade qwen2.5:7b-instruct-q4_K_M ...
+    echo      ^(ca. 4,7 GB -- bitte warten^)
+    ollama pull qwen2.5:7b-instruct-q4_K_M
+    if errorlevel 1 (
+        echo [WARNUNG] Modell konnte nicht geladen werden.
+        echo           Versuche es manuell: ollama pull qwen2.5:7b-instruct-q4_K_M
+    ) else (
+        echo [OK] Modell erfolgreich geladen.
+    )
 ) else (
-    echo [OK] Ollama erreichbar.
+    echo [OK] Modell vorhanden.
 )
 
+:start_app
 :: ---- 7. Programm starten -------------------------------------
 echo [..] Starte LOCAL-FILE-SORTER ...
 echo.

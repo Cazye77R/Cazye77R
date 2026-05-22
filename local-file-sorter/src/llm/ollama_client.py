@@ -153,6 +153,8 @@ class OllamaClient:
                 messages=messages,
                 format="json",
             )
+        except ollama.ResponseError:
+            raise   # API errors (404 model not found, etc.) must not be swallowed
         except Exception as exc:
             return None, f"Ollama-Verbindungsfehler: {exc}"
 

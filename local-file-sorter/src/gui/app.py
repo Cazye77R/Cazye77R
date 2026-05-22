@@ -620,10 +620,14 @@ class SorterApp(ctk.CTk):
             self.after(0, lambda: self._set_engine_state(AnimState.ERROR))
         except Exception as exc:
             msg = str(exc)
-            human = ("Modell nicht erreichbar – läuft Ollama?"
-                     if "refused" in msg.lower() or "connect" in msg.lower()
-                     else f"Fehler: {msg[:100]}")
-            self.after(0, lambda: self._set_status(f"✗  {human}", color=theme.ERROR))
+            if "refused" in msg.lower() or "connect" in msg.lower():
+                human = "Modell nicht erreichbar – läuft Ollama?"
+            elif "404" in msg or "not found" in msg.lower():
+                model = self._cfg.get("ollama", {}).get("model", "qwen2.5:7b-instruct-q4_K_M")
+                human = f"Modell nicht gefunden → ollama pull {model}"
+            else:
+                human = f"Fehler: {msg[:120]}"
+            self.after(0, lambda h=human: self._set_status(f"✗  {h}", color=theme.ERROR))
             self.after(0, lambda: self._set_busy(False))
             self.after(0, lambda: self._set_engine_state(AnimState.ERROR))
 
@@ -682,10 +686,14 @@ class SorterApp(ctk.CTk):
             self.after(0, lambda: self._set_engine_state(AnimState.ERROR))
         except Exception as exc:
             msg = str(exc)
-            human = ("Vision-Modell nicht erreichbar – läuft Ollama?"
-                     if "refused" in msg.lower() or "connect" in msg.lower()
-                     else f"Vision-Fehler: {msg[:100]}")
-            self.after(0, lambda: self._set_status(f"✗  {human}", color=theme.ERROR))
+            if "refused" in msg.lower() or "connect" in msg.lower():
+                human = "Vision-Modell nicht erreichbar – läuft Ollama?"
+            elif "404" in msg or "not found" in msg.lower():
+                model = self._cfg.get("vision", {}).get("model", "moondream:1.8b")
+                human = f"Vision-Modell nicht gefunden → ollama pull {model}"
+            else:
+                human = f"Vision-Fehler: {msg[:120]}"
+            self.after(0, lambda h=human: self._set_status(f"✗  {h}", color=theme.ERROR))
             self.after(0, lambda: self._set_busy(False))
             self.after(0, lambda: self._set_engine_state(AnimState.ERROR))
 
