@@ -1,59 +1,108 @@
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { ChevronRight } from 'lucide-react'
+
+const TOOLS = [
+  {
+    emoji: '🐴',
+    title: 'Reittagebuch',
+    description: 'Einheiten dokumentieren & auswerten',
+    href: '/reittagebuch',
+    enabled: true,
+  },
+  {
+    emoji: '🖨️',
+    title: 'Druckkosten',
+    description: '3D-Druck Kalkulation',
+    href: '/druckkosten',
+    enabled: false,
+  },
+]
 
 export default function Dashboard() {
-  const { user, logout, isAdmin } = useAuth()
+  const { user } = useAuth()
   const navigate = useNavigate()
 
-  function handleLogout() {
-    logout()
-    navigate('/login', { replace: true })
-  }
-
   return (
-    <div className="min-h-screen bg-[#faf8f4]">
-      {/* Top bar */}
-      <header className="bg-white border-b border-[#e8ede8] px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="text-2xl select-none">🧰</span>
-          <span className="font-serif text-xl text-[#2d3b2e] tracking-tight">Toolbox</span>
-        </div>
-        <div className="flex items-center gap-4">
-          {isAdmin && (
-            <button
-              onClick={() => navigate('/admin/users')}
-              className="text-sm text-[#5b7c5e] font-medium hover:underline"
-            >
-              Benutzerverwaltung
-            </button>
-          )}
-          <div className="flex items-center gap-3">
-            <div className="text-right">
-              <p className="text-sm font-medium text-[#2d3b2e] leading-none">{user?.display_name}</p>
-              <p className="text-xs text-[#7a9178] mt-0.5">{user?.username}{user?.is_admin ? ' · Admin' : ''}</p>
-            </div>
-            <button
-              onClick={handleLogout}
-              className="text-sm text-[#a8baa9] hover:text-[#5b7c5e] transition-colors"
-            >
-              Abmelden
-            </button>
-          </div>
-        </div>
-      </header>
+    <div className="max-w-4xl">
+      {/* Greeting */}
+      <div className="mb-8">
+        <h1 className="font-serif text-[2rem] text-[#2d3b2e] leading-tight">
+          Hallo, {user?.display_name}! 👋
+        </h1>
+        <p className="text-[#7a9178] mt-1.5 text-sm">Was möchtest du heute tun?</p>
+      </div>
 
-      {/* Content */}
-      <main className="max-w-4xl mx-auto px-6 py-12">
-        <h2 className="font-serif text-3xl text-[#2d3b2e] mb-2">
-          Hallo, {user?.display_name} 👋
-        </h2>
-        <p className="text-[#7a9178] mb-10">Willkommen im Toolbox-Dashboard.</p>
+      {/* Tool grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {TOOLS.map(tool => (
+          <ToolTile
+            key={tool.href}
+            {...tool}
+            onClick={() => tool.enabled && navigate(tool.href)}
+          />
+        ))}
 
-        <div className="rounded-2xl bg-white border border-[#e8ede8] p-8 text-center"
-          style={{ boxShadow: '0 2px 12px rgba(60,80,62,0.06)' }}>
-          <p className="text-[#a8baa9] text-sm">Hier kommen bald deine Tools hin.</p>
+        {/* Placeholder tile */}
+        <div className="rounded-2xl border-2 border-dashed border-[#d4e2d5] p-6 flex flex-col items-center justify-center text-center min-h-[148px] select-none">
+          <span className="text-3xl opacity-30 mb-2">➕</span>
+          <p className="text-sm text-[#b0c4b1]">Kommt bald…</p>
         </div>
-      </main>
+      </div>
     </div>
+  )
+}
+
+function ToolTile({ emoji, title, description, enabled, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={!enabled}
+      className={[
+        'relative text-left rounded-2xl border p-6 min-h-[148px] w-full transition-all duration-150 group',
+        enabled
+          ? 'bg-white border-[#dceadd] hover:border-[#5b7c5e] hover:shadow-[0_4px_20px_rgba(91,124,94,0.14)] cursor-pointer'
+          : 'bg-[#fafafa] border-[#e8e8e8] cursor-not-allowed',
+      ].join(' ')}
+    >
+      {/* "Kommt bald" badge */}
+      {!enabled && (
+        <span className="absolute top-4 right-4 text-[10px] font-semibold bg-[#ececec] text-[#aaaaaa] px-2 py-0.5 rounded-full tracking-wide uppercase">
+          Kommt bald
+        </span>
+      )}
+
+      {/* Emoji icon */}
+      <div
+        className={[
+          'text-[2rem] mb-3 leading-none transition-transform duration-150',
+          !enabled ? 'grayscale opacity-30' : 'group-hover:scale-110',
+        ].join(' ')}
+      >
+        {emoji}
+      </div>
+
+      {/* Title */}
+      <h3
+        className={[
+          'font-semibold text-base mb-1',
+          enabled ? 'text-[#2d3b2e]' : 'text-[#b0b0b0]',
+        ].join(' ')}
+      >
+        {title}
+      </h3>
+
+      {/* Description */}
+      <p className={['text-sm leading-snug', enabled ? 'text-[#7a9178]' : 'text-[#c8c8c8]'].join(' ')}>
+        {description}
+      </p>
+
+      {/* Hover CTA */}
+      {enabled && (
+        <div className="absolute bottom-5 right-5 flex items-center gap-0.5 text-xs font-medium text-[#5b7c5e] opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+          Öffnen <ChevronRight size={13} />
+        </div>
+      )}
+    </button>
   )
 }
