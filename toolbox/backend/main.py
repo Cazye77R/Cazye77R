@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from .database import Base, SessionLocal, engine
 from .models import User
 from .auth import get_password_hash
-from .routers import users
+from .routers.users import auth_router, users_router
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
@@ -24,12 +24,14 @@ async def lifespan(app: FastAPI):
         if db.query(User).count() == 0:
             admin = User(
                 username="admin",
+                display_name="Administrator",
                 hashed_password=get_password_hash("admin"),
                 is_active=True,
                 is_admin=True,
             )
             db.add(admin)
             db.commit()
+            print("⚠️  Standard-Admin erstellt (admin/admin) — bitte Passwort ändern!")
     finally:
         db.close()
     yield
@@ -48,7 +50,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(users.router)
+app.include_router(auth_router)
+app.include_router(users_router)
 
 # Serve React frontend static assets (production)
 if (FRONTEND_DIST / "assets").exists():
