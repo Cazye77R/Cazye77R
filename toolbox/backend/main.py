@@ -11,6 +11,7 @@ from .database import Base, SessionLocal, engine
 from .models import User
 from .auth import get_password_hash
 from .routers.users import auth_router, users_router
+from .routers.reittagebuch import router as reittagebuch_router
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
@@ -52,6 +53,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(users_router)
+app.include_router(reittagebuch_router)
 
 # Serve React frontend static assets (production)
 if (FRONTEND_DIST / "assets").exists():
