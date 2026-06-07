@@ -42,6 +42,7 @@ export const getUsers = () => apiFetch('/api/users/')
 export const createUser = (data) => apiFetch('/api/users/', { method: 'POST', body: JSON.stringify(data) })
 export const updateUser = (id, data) => apiFetch(`/api/users/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 export const deleteUser = (id) => apiFetch(`/api/users/${id}`, { method: 'DELETE' })
+export const changePassword = (data) => apiFetch('/api/users/me/password', { method: 'PUT', body: JSON.stringify(data) })
 
 // ── Reittagebuch: Tiere ───────────────────────────────────────────
 

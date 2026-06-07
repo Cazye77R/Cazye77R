@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { getTiere, createTier, updateTier, deleteTier, getStats } from '../../lib/api'
 import { useToast } from '../../context/ToastContext'
+import { SkeletonCards } from '../../components/Skeleton'
 
 const TYPEN = ['Pferd', 'Pony', 'Esel', 'Maultier']
 
@@ -51,7 +52,7 @@ export default function Animals() {
     toast(`${tier.name} reaktiviert`)
   }
 
-  if (loading) return <Spinner />
+  if (loading) return <SkeletonCards count={4} />
 
   const active   = tiere.filter(t => t.aktiv)
   const inactive = tiere.filter(t => !t.aktiv)
@@ -273,14 +274,6 @@ function TierModal({ title, initial, onClose, onSubmit }) {
           </div>
         </form>
       </div>
-    </div>
-  )
-}
-
-function Spinner() {
-  return (
-    <div className="flex justify-center py-16">
-      <div className="w-7 h-7 border-4 border-[#5b7c5e] border-t-transparent rounded-full animate-spin" />
     </div>
   )
 }

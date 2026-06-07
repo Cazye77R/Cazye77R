@@ -61,6 +61,11 @@ class UserUpdate(BaseModel):
     is_admin: Optional[bool] = None
 
 
+class PasswordChange(BaseModel):
+    old_password: str
+    new_password: str
+
+
 # --- Auth routes ---
 
 @auth_router.post("/login", response_model=Token)
@@ -107,6 +112,20 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
 @users_router.get("/me", response_model=UserOut)
 def get_me(current_user: models.User = Depends(get_current_user)):
     return current_user
+
+
+@users_router.put("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+def change_password(
+    body: PasswordChange,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not verify_password(body.old_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Falsches aktuelles Passwort")
+    if len(body.new_password) < 4:
+        raise HTTPException(status_code=400, detail="Neues Passwort zu kurz (mind. 4 Zeichen)")
+    current_user.hashed_password = get_password_hash(body.new_password)
+    db.commit()
 
 
 @users_router.get("/", response_model=list[UserOut])

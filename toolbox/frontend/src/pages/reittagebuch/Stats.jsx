@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import { getStats } from '../../lib/api'
 import { useToast } from '../../context/ToastContext'
+import { SkeletonStatCards, SkeletonChart } from '../../components/Skeleton'
 
 export default function Stats() {
   const [stats, setStats] = useState(null)
@@ -47,7 +48,11 @@ export default function Stats() {
       </div>
 
       {loading || !stats ? (
-        <Spinner />
+        <div className="space-y-7">
+          <SkeletonStatCards />
+          <SkeletonChart height={220} />
+          <SkeletonChart height={240} />
+        </div>
       ) : (
         <>
           {/* Stat Cards */}
@@ -177,14 +182,6 @@ function ChartCard({ title, children }) {
     <div className="bg-white rounded-2xl border border-[#e4ede4] p-6 shadow-sm">
       <h3 className="text-sm font-semibold text-[#3d4f3e] mb-4">{title}</h3>
       {children}
-    </div>
-  )
-}
-
-function Spinner() {
-  return (
-    <div className="flex justify-center py-16">
-      <div className="w-7 h-7 border-4 border-[#5b7c5e] border-t-transparent rounded-full animate-spin" />
     </div>
   )
 }

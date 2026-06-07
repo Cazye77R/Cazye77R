@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Pencil, Trash2, X } from 'lucide-react'
 import { getEintraege, deleteEintrag, getTiere } from '../../lib/api'
 import { useToast } from '../../context/ToastContext'
+import { SkeletonTableRows } from '../../components/Skeleton'
 
 function fmt(dateStr) {
   if (!dateStr) return ''
@@ -81,86 +82,112 @@ export default function Overview() {
           </button>
         )}
         <p className="ml-auto text-sm text-[#a8baa9] self-end pb-2">
-          {eintraege.length} {eintraege.length === 1 ? 'Eintrag' : 'Einträge'}
+          {loading ? '…' : `${eintraege.length} ${eintraege.length === 1 ? 'Eintrag' : 'Einträge'}`}
         </p>
       </div>
 
-      {/* Table */}
       {loading ? (
-        <Spinner />
+        <>
+          <div className="md:hidden space-y-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="bg-white rounded-2xl border border-[#e4ede4] p-4 animate-pulse">
+                <div className="h-4 bg-[#eef4ee] rounded w-24 mb-3" />
+                <div className="h-3 bg-[#eef4ee] rounded w-full mb-2" />
+                <div className="h-3 bg-[#eef4ee] rounded w-3/4" />
+              </div>
+            ))}
+          </div>
+          <div className="hidden md:block">
+            <SkeletonTableRows rows={5} />
+          </div>
+        </>
       ) : eintraege.length === 0 ? (
         <EmptyState hasFilters={hasFilters} onNew={() => navigate('/reittagebuch/neu')} />
       ) : (
-        <div className="bg-white rounded-2xl border border-[#e4ede4] overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[700px]">
-              <thead>
-                <tr className="bg-[#f5f8f5] border-b border-[#e8ede8]">
-                  {['Datum', 'Tiere', 'Aktivität', 'Kinder', 'Jugendliche', 'Besonderheiten', ''].map(h => (
-                    <th key={h} className="text-left px-4 py-3 text-[10px] font-semibold text-[#7a9178] uppercase tracking-widest whitespace-nowrap">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#f0f4f0]">
-                {eintraege.map(e => (
-                  <tr key={e.id} className="hover:bg-[#fdfaf8] transition-colors align-top">
-                    <td className="px-4 py-3 text-[#2d3b2e] font-medium whitespace-nowrap">
-                      {fmt(e.datum)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {e.tiere.map(t => (
-                          <span
-                            key={t.id}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[#eef4ee] text-[#4a6b4d]"
-                          >
-                            {t.emoji} {t.name}
-                          </span>
-                        ))}
-                        {e.tiere.length === 0 && <span className="text-[#c0cfc1] text-xs">—</span>}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-[#3d4f3e] max-w-[180px]">
-                      <p className="line-clamp-2">{e.aktivitaet}</p>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <KidsBadge value={e.anzahl_kinder} color="blue" />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <KidsBadge value={e.anzahl_jugendliche} color="purple" />
-                    </td>
-                    <td className="px-4 py-3 text-[#7a9178] max-w-[160px]">
-                      <p className="line-clamp-2 text-xs">{e.besonderheiten || '—'}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1 justify-end">
-                        <button
-                          onClick={() => navigate(`/reittagebuch/neu?id=${e.id}`)}
-                          className="p-1.5 rounded-lg text-[#c0cfc1] hover:text-[#5b7c5e] hover:bg-[#eef4ee] transition-colors"
-                          title="Bearbeiten"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          onClick={() => setDeleteId(e.id)}
-                          className="p-1.5 rounded-lg text-[#c0cfc1] hover:text-red-500 hover:bg-red-50 transition-colors"
-                          title="Löschen"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <>
+          {/* Mobile card list */}
+          <div className="md:hidden space-y-3">
+            {eintraege.map(e => (
+              <MobileCard
+                key={e.id}
+                entry={e}
+                onEdit={() => navigate(`/reittagebuch/neu?id=${e.id}`)}
+                onDelete={() => setDeleteId(e.id)}
+              />
+            ))}
           </div>
-        </div>
+
+          {/* Desktop table */}
+          <div className="hidden md:block bg-white rounded-2xl border border-[#e4ede4] overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[700px]">
+                <thead>
+                  <tr className="bg-[#f5f8f5] border-b border-[#e8ede8]">
+                    {['Datum', 'Tiere', 'Aktivität', 'Kinder', 'Jugendliche', 'Besonderheiten', ''].map(h => (
+                      <th key={h} className="text-left px-4 py-3 text-[10px] font-semibold text-[#7a9178] uppercase tracking-widest whitespace-nowrap">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#f0f4f0]">
+                  {eintraege.map(e => (
+                    <tr key={e.id} className="hover:bg-[#fdfaf8] transition-colors align-top">
+                      <td className="px-4 py-3 text-[#2d3b2e] font-medium whitespace-nowrap">
+                        {fmt(e.datum)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {e.tiere.map(t => (
+                            <span
+                              key={t.id}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[#eef4ee] text-[#4a6b4d]"
+                            >
+                              {t.emoji} {t.name}
+                            </span>
+                          ))}
+                          {e.tiere.length === 0 && <span className="text-[#c0cfc1] text-xs">—</span>}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-[#3d4f3e] max-w-[180px]">
+                        <p className="line-clamp-2">{e.aktivitaet}</p>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <KidsBadge value={e.anzahl_kinder} color="blue" />
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <KidsBadge value={e.anzahl_jugendliche} color="purple" />
+                      </td>
+                      <td className="px-4 py-3 text-[#7a9178] max-w-[160px]">
+                        <p className="line-clamp-2 text-xs">{e.besonderheiten || '—'}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1 justify-end">
+                          <button
+                            onClick={() => navigate(`/reittagebuch/neu?id=${e.id}`)}
+                            className="p-2 rounded-lg text-[#c0cfc1] hover:text-[#5b7c5e] hover:bg-[#eef4ee] transition-colors"
+                            title="Bearbeiten"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            onClick={() => setDeleteId(e.id)}
+                            className="p-2 rounded-lg text-[#c0cfc1] hover:text-red-500 hover:bg-red-50 transition-colors"
+                            title="Löschen"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
 
-      {/* Delete confirm */}
       {deleteId && (
         <ConfirmModal
           message={`Eintrag vom ${fmt(deleteTarget?.datum)} wirklich löschen?`}
@@ -168,6 +195,52 @@ export default function Overview() {
           onCancel={() => setDeleteId(null)}
         />
       )}
+    </div>
+  )
+}
+
+function MobileCard({ entry, onEdit, onDelete }) {
+  return (
+    <div className="bg-white rounded-2xl border border-[#e4ede4] p-4">
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <span className="text-sm font-medium text-[#2d3b2e]">{fmt(entry.datum)}</span>
+        <div className="flex gap-1">
+          <button
+            onClick={onEdit}
+            className="p-2.5 rounded-xl text-[#c0cfc1] hover:text-[#5b7c5e] hover:bg-[#eef4ee] transition-colors"
+            title="Bearbeiten"
+          >
+            <Pencil size={14} />
+          </button>
+          <button
+            onClick={onDelete}
+            className="p-2.5 rounded-xl text-[#c0cfc1] hover:text-red-500 hover:bg-red-50 transition-colors"
+            title="Löschen"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+
+      {entry.tiere.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {entry.tiere.map(t => (
+            <span key={t.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[#eef4ee] text-[#4a6b4d]">
+              {t.emoji} {t.name}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <p className="text-sm text-[#3d4f3e] mb-2 line-clamp-2">{entry.aktivitaet}</p>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        {entry.anzahl_kinder > 0 && <KidsBadge value={entry.anzahl_kinder} color="blue" />}
+        {entry.anzahl_jugendliche > 0 && <KidsBadge value={entry.anzahl_jugendliche} color="purple" />}
+        {entry.besonderheiten && (
+          <p className="text-xs text-[#a8baa9] line-clamp-1 flex-1 min-w-0">{entry.besonderheiten}</p>
+        )}
+      </div>
     </div>
   )
 }
@@ -212,22 +285,14 @@ function ConfirmModal({ message, onConfirm, onCancel }) {
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
         <p className="text-sm text-[#3d4f3e] mb-6">{message}</p>
         <div className="flex gap-3">
-          <button onClick={onCancel} className="flex-1 py-2 rounded-xl border border-[#d4e2d5] text-sm text-[#6b7c6c] hover:bg-[#f5f8f5] transition-colors">
+          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl border border-[#d4e2d5] text-sm text-[#6b7c6c] hover:bg-[#f5f8f5] transition-colors">
             Abbrechen
           </button>
-          <button onClick={onConfirm} className="flex-1 py-2 rounded-xl bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors">
+          <button onClick={onConfirm} className="flex-1 py-2.5 rounded-xl bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors">
             Löschen
           </button>
         </div>
       </div>
-    </div>
-  )
-}
-
-function Spinner() {
-  return (
-    <div className="flex justify-center py-16">
-      <div className="w-7 h-7 border-4 border-[#5b7c5e] border-t-transparent rounded-full animate-spin" />
     </div>
   )
 }
