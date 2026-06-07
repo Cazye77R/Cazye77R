@@ -3,11 +3,11 @@ from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, selectinload
 
-from ..auth import get_current_user
+from ..auth import get_current_admin, get_current_user
 from ..database import get_db
 from ..models import Eintrag, Tier, User, eintrag_tiere
 
@@ -215,6 +215,18 @@ def list_eintraege(
     )
 
 
+@router.get("/eintraege/{eintrag_id}", response_model=EintragOut)
+def get_eintrag(
+    eintrag_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    eintrag = _reload(eintrag_id, db)
+    if not eintrag or eintrag.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+    return eintrag
+
+
 @router.post("/eintraege", response_model=EintragOut, status_code=status.HTTP_201_CREATED)
 def create_eintrag(
     body: EintragCreate,
@@ -413,4 +425,21 @@ def export_xlsx(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="reittagebuch_{von_str}_{bis_str}.xlsx"'},
+    )
+
+
+# ── DB-Backup ────────────────────────────────────────────────────
+
+@router.get("/backup")
+def download_backup(_: User = Depends(get_current_admin)):
+    """Lädt die SQLite-Datenbank als Backup herunter (nur Admin)."""
+    from pathlib import Path
+    db_path = Path(__file__).resolve().parent.parent.parent / "data" / "toolbox.db"
+    if not db_path.exists():
+        raise HTTPException(status_code=404, detail="Datenbank-Datei nicht gefunden")
+    return FileResponse(
+        path=str(db_path),
+        media_type="application/octet-stream",
+        filename="toolbox.db",
+        headers={"Content-Disposition": 'attachment; filename="toolbox.db"'},
     )

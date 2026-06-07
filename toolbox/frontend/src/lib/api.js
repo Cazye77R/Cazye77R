@@ -19,6 +19,8 @@ async function apiFetch(path, options = {}) {
   return res.json()
 }
 
+// ── Auth ─────────────────────────────────────────────────────────
+
 export async function login(username, password) {
   const body = new URLSearchParams({ username, password })
   const res = await fetch(`${BASE_URL}/api/auth/login`, {
@@ -33,15 +35,61 @@ export async function login(username, password) {
   return res.json()
 }
 
+// ── Users ─────────────────────────────────────────────────────────
+
 export const getMe = () => apiFetch('/api/users/me')
-
 export const getUsers = () => apiFetch('/api/users/')
+export const createUser = (data) => apiFetch('/api/users/', { method: 'POST', body: JSON.stringify(data) })
+export const updateUser = (id, data) => apiFetch(`/api/users/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+export const deleteUser = (id) => apiFetch(`/api/users/${id}`, { method: 'DELETE' })
 
-export const createUser = (data) =>
-  apiFetch('/api/users/', { method: 'POST', body: JSON.stringify(data) })
+// ── Reittagebuch: Tiere ───────────────────────────────────────────
 
-export const updateUser = (id, data) =>
-  apiFetch(`/api/users/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+export const getTiere = () => apiFetch('/api/reittagebuch/tiere')
+export const createTier = (data) => apiFetch('/api/reittagebuch/tiere', { method: 'POST', body: JSON.stringify(data) })
+export const updateTier = (id, data) => apiFetch(`/api/reittagebuch/tiere/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+export const deleteTier = (id) => apiFetch(`/api/reittagebuch/tiere/${id}`, { method: 'DELETE' })
 
-export const deleteUser = (id) =>
-  apiFetch(`/api/users/${id}`, { method: 'DELETE' })
+// ── Reittagebuch: Einträge ────────────────────────────────────────
+
+function buildQs(params) {
+  const q = new URLSearchParams()
+  Object.entries(params).forEach(([k, v]) => { if (v != null && v !== '') q.set(k, v) })
+  const s = q.toString()
+  return s ? `?${s}` : ''
+}
+
+export const getEintraege = (params = {}) => apiFetch(`/api/reittagebuch/eintraege${buildQs(params)}`)
+export const getEintrag = (id) => apiFetch(`/api/reittagebuch/eintraege/${id}`)
+export const createEintrag = (data) => apiFetch('/api/reittagebuch/eintraege', { method: 'POST', body: JSON.stringify(data) })
+export const updateEintrag = (id, data) => apiFetch(`/api/reittagebuch/eintraege/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+export const deleteEintrag = (id) => apiFetch(`/api/reittagebuch/eintraege/${id}`, { method: 'DELETE' })
+
+// ── Reittagebuch: Stats ───────────────────────────────────────────
+
+export const getStats = (params = {}) => apiFetch(`/api/reittagebuch/stats${buildQs(params)}`)
+
+// ── Reittagebuch: Downloads ───────────────────────────────────────
+
+async function downloadBlob(url, filename) {
+  const token = getToken()
+  const res = await fetch(`${BASE_URL}${url}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error('Download fehlgeschlagen')
+  const blob = await res.blob()
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(link.href)
+}
+
+export const downloadExport = (params = {}) =>
+  downloadBlob(
+    `/api/reittagebuch/export${buildQs(params)}`,
+    `reittagebuch_${params.von || 'alle'}_${params.bis || 'alle'}.xlsx`,
+  )
+
+export const downloadBackup = () =>
+  downloadBlob('/api/reittagebuch/backup', 'toolbox.db')

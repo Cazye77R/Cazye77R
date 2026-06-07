@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Users, LogOut, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Users, LogOut, Menu, X, BookOpen } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
 const NAV_ITEMS = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', end: true },
+  { to: '/reittagebuch', icon: BookOpen, label: 'Reittagebuch' },
 ]
 
 export default function Layout() {
@@ -47,7 +48,6 @@ export default function Layout() {
               Toolbox
             </span>
           </div>
-          {/* Close button (mobile only) */}
           <button
             onClick={close}
             className="md:hidden p-1 rounded-lg text-[#a8baa9] hover:text-[#5b7c5e] hover:bg-[#f0f6f0] transition-colors"
@@ -70,12 +70,7 @@ export default function Layout() {
                   Admin
                 </p>
               </div>
-              <SidebarLink
-                to="/admin/users"
-                icon={Users}
-                label="Benutzer"
-                onClick={close}
-              />
+              <SidebarLink to="/admin/users" icon={Users} label="Benutzer" onClick={close} />
             </>
           )}
         </nav>
@@ -83,7 +78,6 @@ export default function Layout() {
         {/* User section */}
         <div className="px-4 py-4 border-t border-[#f0f4f0]">
           <div className="flex items-center gap-2">
-            {/* Avatar circle */}
             <div className="w-7 h-7 rounded-full bg-[#eef4ee] flex items-center justify-center flex-shrink-0">
               <span className="text-xs font-semibold text-[#5b7c5e]">
                 {user?.display_name?.[0]?.toUpperCase() ?? '?'}
@@ -122,7 +116,6 @@ export default function Layout() {
           <span className="font-serif text-lg text-[#2d3b2e] tracking-tight">Toolbox</span>
         </header>
 
-        {/* Page content via Outlet */}
         <main className="flex-1 p-6 lg:p-8 overflow-y-auto">
           <Outlet />
         </main>

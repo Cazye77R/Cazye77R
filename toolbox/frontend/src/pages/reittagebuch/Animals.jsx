@@ -1,0 +1,289 @@
+import { useEffect, useState } from 'react'
+import { Plus, X } from 'lucide-react'
+import { getTiere, createTier, updateTier, deleteTier, getStats } from '../../lib/api'
+import { useToast } from '../../context/ToastContext'
+
+const TYPEN = ['Pferd', 'Pony', 'Esel', 'Maultier']
+
+export default function Animals() {
+  const [tiere, setTiere] = useState([])
+  const [einsaetze, setEinsaetze] = useState({})   // { tier_id: anzahl }
+  const [loading, setLoading] = useState(true)
+  const [editingTier, setEditingTier] = useState(null)
+  const [showCreate, setShowCreate] = useState(false)
+  const toast = useToast()
+
+  useEffect(() => {
+    Promise.all([getTiere(), getStats()])
+      .then(([t, s]) => {
+        setTiere(t)
+        const map = {}
+        s.tiere_einsaetze.forEach(e => { map[e.tier_id] = e.anzahl })
+        setEinsaetze(map)
+      })
+      .catch(err => toast(err.message, 'error'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleCreate(form) {
+    const tier = await createTier(form)
+    setTiere(prev => [...prev, tier])
+    setShowCreate(false)
+    toast(`${tier.emoji} ${tier.name} angelegt`)
+  }
+
+  async function handleEdit(form) {
+    const updated = await updateTier(editingTier.id, form)
+    setTiere(prev => prev.map(t => t.id === updated.id ? updated : t))
+    setEditingTier(null)
+    toast('Tier aktualisiert')
+  }
+
+  async function handleDeactivate(tier) {
+    await deleteTier(tier.id)
+    setTiere(prev => prev.map(t => t.id === tier.id ? { ...t, aktiv: false } : t))
+    toast(`${tier.name} deaktiviert`)
+  }
+
+  async function handleReactivate(tier) {
+    const updated = await updateTier(tier.id, { aktiv: true })
+    setTiere(prev => prev.map(t => t.id === updated.id ? updated : t))
+    toast(`${tier.name} reaktiviert`)
+  }
+
+  if (loading) return <Spinner />
+
+  const active   = tiere.filter(t => t.aktiv)
+  const inactive = tiere.filter(t => !t.aktiv)
+
+  return (
+    <div>
+      {/* Active animals */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
+        {active.map(t => (
+          <TierCard
+            key={t.id}
+            tier={t}
+            einsaetze={einsaetze[t.id] ?? 0}
+            onEdit={() => setEditingTier(t)}
+            onDeactivate={() => handleDeactivate(t)}
+          />
+        ))}
+
+        {/* "Neues Tier" card */}
+        <button
+          onClick={() => setShowCreate(true)}
+          className="rounded-2xl border-2 border-dashed border-[#c8d8c9] p-5 flex flex-col items-center justify-center gap-2 text-[#7a9178] hover:border-[#5b7c5e] hover:text-[#5b7c5e] transition-colors min-h-[140px] cursor-pointer"
+        >
+          <Plus size={24} strokeWidth={1.5} />
+          <span className="text-sm font-medium">Neues Tier</span>
+        </button>
+      </div>
+
+      {/* Inactive animals */}
+      {inactive.length > 0 && (
+        <div>
+          <h3 className="text-xs font-semibold text-[#a8baa9] uppercase tracking-widest mb-3">
+            Inaktiv
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+            {inactive.map(t => (
+              <TierCard
+                key={t.id}
+                tier={t}
+                einsaetze={einsaetze[t.id] ?? 0}
+                onEdit={() => setEditingTier(t)}
+                onReactivate={() => handleReactivate(t)}
+                inactive
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Modals */}
+      {showCreate && (
+        <TierModal
+          title="Neues Tier"
+          onClose={() => setShowCreate(false)}
+          onSubmit={handleCreate}
+        />
+      )}
+      {editingTier && (
+        <TierModal
+          title={`${editingTier.emoji} ${editingTier.name} bearbeiten`}
+          initial={editingTier}
+          onClose={() => setEditingTier(null)}
+          onSubmit={handleEdit}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Tier Card ─────────────────────────────────────────────────────
+
+function TierCard({ tier, einsaetze, onEdit, onDeactivate, onReactivate, inactive }) {
+  return (
+    <div className={[
+      'rounded-2xl border p-5 flex flex-col gap-3 transition-all group relative',
+      inactive
+        ? 'bg-[#fafafa] border-[#e8e8e8] opacity-60'
+        : 'bg-white border-[#e4ede4] hover:border-[#5b7c5e] hover:shadow-[0_4px_16px_rgba(91,124,94,0.10)]',
+    ].join(' ')}>
+      {/* Emoji */}
+      <div className="text-4xl leading-none select-none">
+        {inactive ? <span className="grayscale">{tier.emoji}</span> : tier.emoji}
+      </div>
+
+      <div className="flex-1">
+        <p className="font-semibold text-[#2d3b2e] text-base leading-tight">{tier.name}</p>
+        <p className="text-xs text-[#7a9178] mt-0.5">{tier.typ}</p>
+        <p className="text-xs text-[#a8baa9] mt-2">
+          {einsaetze} {einsaetze === 1 ? 'Einsatz' : 'Einsätze'} gesamt
+        </p>
+      </div>
+
+      {/* Actions */}
+      <div className="flex gap-1.5">
+        {!inactive && (
+          <button
+            onClick={onEdit}
+            className="flex-1 py-1.5 rounded-lg text-xs font-medium text-[#5b7c5e] bg-[#eef4ee] hover:bg-[#ddeedd] transition-colors"
+          >
+            Bearbeiten
+          </button>
+        )}
+        {!inactive && onDeactivate && (
+          <button
+            onClick={onDeactivate}
+            className="py-1.5 px-2 rounded-lg text-xs text-[#c0cfc1] hover:text-red-500 hover:bg-red-50 transition-colors"
+            title="Deaktivieren"
+          >
+            <X size={13} />
+          </button>
+        )}
+        {inactive && onReactivate && (
+          <button
+            onClick={onReactivate}
+            className="flex-1 py-1.5 rounded-lg text-xs font-medium text-[#5b7c5e] bg-[#eef4ee] hover:bg-[#ddeedd] transition-colors"
+          >
+            Reaktivieren
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Tier Modal ────────────────────────────────────────────────────
+
+function TierModal({ title, initial, onClose, onSubmit }) {
+  const [form, setForm] = useState({
+    name: initial?.name ?? '',
+    typ: initial?.typ ?? 'Pferd',
+    emoji: initial?.emoji ?? '🐴',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const toast = useToast()
+
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (!form.name.trim()) return
+    setSaving(true)
+    setError('')
+    try {
+      await onSubmit({ ...form, name: form.name.trim() })
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#f0f4f0]">
+          <h2 className="font-serif text-xl text-[#2d3b2e]">{title}</h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-[#a8baa9] hover:text-[#5b7c5e] hover:bg-[#eef4ee] transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
+
+          {/* Emoji picker */}
+          <div>
+            <label className={lbl}>Emoji</label>
+            <div className="flex gap-2 flex-wrap">
+              {['🐴', '🐎', '🦄', '🫏', '🐂'].map(e => (
+                <button
+                  key={e} type="button"
+                  onClick={() => setForm(f => ({ ...f, emoji: e }))}
+                  className={[
+                    'w-10 h-10 rounded-xl text-xl flex items-center justify-center transition-all',
+                    form.emoji === e
+                      ? 'bg-[#5b7c5e] shadow-sm scale-110'
+                      : 'bg-[#f5f8f5] hover:bg-[#eef4ee]',
+                  ].join(' ')}
+                >
+                  {e}
+                </button>
+              ))}
+              <input
+                value={form.emoji}
+                onChange={set('emoji')}
+                maxLength={2}
+                className="w-10 h-10 rounded-xl border border-[#d4e2d5] text-center text-xl outline-none focus:border-[#5b7c5e]"
+                placeholder="…"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className={lbl}>Name <span className="text-red-400">*</span></label>
+            <input
+              value={form.name}
+              onChange={set('name')}
+              required
+              autoFocus
+              placeholder="z.B. Pollie"
+              className={inp}
+            />
+          </div>
+
+          <div>
+            <label className={lbl}>Typ</label>
+            <select value={form.typ} onChange={set('typ')} className={inp}>
+              {TYPEN.map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-[#d4e2d5] text-sm text-[#6b7c6c] hover:bg-[#f5f8f5] transition-colors">
+              Abbrechen
+            </button>
+            <button type="submit" disabled={saving} className="flex-1 py-2.5 rounded-xl bg-[#5b7c5e] text-white text-sm font-medium hover:bg-[#4a6b4d] disabled:opacity-60 transition-colors">
+              {saving ? 'Speichern…' : 'Speichern'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function Spinner() {
+  return (
+    <div className="flex justify-center py-16">
+      <div className="w-7 h-7 border-4 border-[#5b7c5e] border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+}
+
+const lbl = 'block text-sm font-medium text-[#3d4f3e] mb-1.5'
+const inp = 'w-full px-4 py-2.5 rounded-xl border border-[#d4e2d5] bg-[#faf8f4] text-[#2d3b2e] text-sm outline-none focus:border-[#5b7c5e] focus:ring-2 focus:ring-[#5b7c5e]/20 transition-all'
