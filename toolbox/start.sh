@@ -1,11 +1,32 @@
 #!/bin/bash
-echo "=== Toolbox wird gestartet ==="
+set -e
 cd "$(dirname "$0")"
-mkdir -p data
-if [ ! -d "frontend/dist" ]; then
+
+# Python venv prüfen/erstellen
+if [ ! -d "venv" ]; then
+    echo "Erstelle Python-Umgebung..."
+    python3 -m venv venv
+fi
+source venv/bin/activate
+
+# Dependencies prüfen
+pip install -r requirements.txt -q
+
+# Frontend bauen wenn nötig
+if [ ! -f "frontend/dist/index.html" ]; then
     echo "Frontend wird gebaut..."
     cd frontend && npm install && npm run build && cd ..
 fi
-echo "Starte Server auf http://localhost:8000"
+
+# Daten-Ordner
+mkdir -p data
+
+echo ""
+echo "========================================"
+echo "  Toolbox läuft auf http://localhost:8000"
+echo "  Beenden: Ctrl+C"
+echo "========================================"
+echo ""
+
 xdg-open http://localhost:8000 2>/dev/null || open http://localhost:8000 2>/dev/null || true
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
