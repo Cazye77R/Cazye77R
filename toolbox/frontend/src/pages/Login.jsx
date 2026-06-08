@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useBranding } from '../context/BrandingContext'
 
 export default function Login() {
   const [username, setUsername] = useState('')
@@ -9,6 +10,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const { login } = useAuth()
   const navigate = useNavigate()
+  const { app_name } = useBranding()
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -32,7 +34,7 @@ export default function Login() {
         <div className="text-center mb-8 select-none">
           <div className="text-6xl mb-3">🧰</div>
           <h1 className="font-serif text-[2rem] leading-none text-[#2d3b2e] tracking-tight">
-            Toolbox
+            {app_name}
           </h1>
           <p className="text-[#7a9178] text-sm mt-2 font-sans">
             Melde dich an, um fortzufahren

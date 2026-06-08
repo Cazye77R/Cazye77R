@@ -17,6 +17,16 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class AppSettings(Base):
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True, index=True)
+    value = Column(Text)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+
 # Join table: kein eigenes Modell nötig, SQLAlchemy verwaltet die Rows
 # über die secondary-Relationship auf Eintrag.tiere automatisch.
 eintrag_tiere = Table(

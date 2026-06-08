@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Users, LogOut, X, BookOpen, KeyRound } from 'lucide-react'
+import { LayoutDashboard, Users, LogOut, X, BookOpen, KeyRound, Palette } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { useBranding } from '../context/BrandingContext'
 import { changePassword } from '../lib/api'
 import { useToast } from '../context/ToastContext'
 
@@ -14,6 +15,7 @@ export default function Layout() {
   const [showPwDialog, setShowPwDialog] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const { user, logout, isAdmin } = useAuth()
+  const { app_name } = useBranding()
   const navigate = useNavigate()
 
   function handleLogout() {
@@ -28,7 +30,7 @@ export default function Layout() {
       <aside className="hidden md:flex flex-col w-60 bg-white border-r border-[#e4ede4] sticky top-0 h-screen flex-shrink-0">
         <div className="flex items-center px-5 py-[18px] border-b border-[#f0f4f0]">
           <span className="text-[1.4rem] select-none mr-2.5">🧰</span>
-          <span className="font-serif text-[1.25rem] text-[#2d3b2e] tracking-tight leading-none">Toolbox</span>
+          <span className="font-serif text-[1.25rem] text-[#2d3b2e] tracking-tight leading-none">{app_name}</span>
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
@@ -41,6 +43,7 @@ export default function Layout() {
                 <p className="text-[10px] font-semibold text-[#b0c4b1] uppercase tracking-widest">Admin</p>
               </div>
               <SidebarLink to="/admin/users" icon={Users} label="Benutzer" />
+              <SidebarLink to="/admin/branding" icon={Palette} label="Branding" />
             </>
           )}
         </nav>
@@ -80,7 +83,7 @@ export default function Layout() {
         <header className="md:hidden flex items-center justify-between px-4 py-3 bg-white border-b border-[#e4ede4] sticky top-0 z-10">
           <div className="flex items-center gap-2">
             <span className="text-xl select-none">🧰</span>
-            <span className="font-serif text-lg text-[#2d3b2e] tracking-tight">Toolbox</span>
+            <span className="font-serif text-lg text-[#2d3b2e] tracking-tight">{app_name}</span>
           </div>
           <div className="relative">
             <button

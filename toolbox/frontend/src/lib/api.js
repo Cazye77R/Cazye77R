@@ -44,6 +44,11 @@ export const updateUser = (id, data) => apiFetch(`/api/users/${id}`, { method: '
 export const deleteUser = (id) => apiFetch(`/api/users/${id}`, { method: 'DELETE' })
 export const changePassword = (data) => apiFetch('/api/users/me/password', { method: 'PUT', body: JSON.stringify(data) })
 
+// ── Settings: Branding ────────────────────────────────────────────
+
+export const getBranding = () => apiFetch('/api/settings/branding')
+export const updateBranding = (data) => apiFetch('/api/settings/branding', { method: 'PUT', body: JSON.stringify(data) })
+
 // ── Reittagebuch: Tiere ───────────────────────────────────────────
 
 export const getTiere = () => apiFetch('/api/reittagebuch/tiere')
