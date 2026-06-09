@@ -14,7 +14,7 @@ pip install -r requirements.txt -q
 
 # Frontend bauen
 echo "Frontend wird gebaut..."
-cd frontend && npm install -q && npm run build && cd ..
+(cd frontend && npm install --prefer-offline -q && npm run build)
 
 # Daten-Ordner
 mkdir -p data
