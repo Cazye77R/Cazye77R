@@ -12,11 +12,9 @@ call venv\Scripts\activate
 REM Dependencies prüfen
 pip install -r requirements.txt -q
 
-REM Frontend bauen wenn nötig
-if not exist "frontend\dist\index.html" (
-    echo Frontend wird gebaut...
-    cd frontend && npm install && npm run build && cd ..
-)
+REM Frontend bauen
+echo Frontend wird gebaut...
+cd frontend && npm install -q && npm run build && cd ..
 
 REM Daten-Ordner
 if not exist "data" mkdir data

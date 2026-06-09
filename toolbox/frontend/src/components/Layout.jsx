@@ -1,22 +1,34 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, Users, LogOut, X, BookOpen, KeyRound, Palette } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useBranding } from '../context/BrandingContext'
-import { changePassword } from '../lib/api'
+import { changePassword, getMyModules } from '../lib/api'
 import { useToast } from '../context/ToastContext'
 
-const NAV_ITEMS = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', end: true },
-  { to: '/reittagebuch', icon: BookOpen, label: 'Hoftagebuch' },
-]
+const MODULE_ICONS = {
+  hoftagebuch: BookOpen,
+}
+
+const DASHBOARD_ITEM = { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', end: true }
 
 export default function Layout() {
   const [showPwDialog, setShowPwDialog] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [moduleNavItems, setModuleNavItems] = useState([])
   const { user, logout, isAdmin } = useAuth()
   const { app_name } = useBranding()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    getMyModules()
+      .then(mods => setModuleNavItems(
+        mods.map(m => ({ to: m.route, icon: MODULE_ICONS[m.key] ?? BookOpen, label: m.name }))
+      ))
+      .catch(() => {})
+  }, [])
+
+  const navItems = [DASHBOARD_ITEM, ...moduleNavItems]
 
   function handleLogout() {
     logout()
@@ -34,7 +46,7 @@ export default function Layout() {
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-          {NAV_ITEMS.map(item => (
+          {navItems.map(item => (
             <SidebarLink key={item.to} {...item} />
           ))}
           {isAdmin && (
@@ -130,7 +142,7 @@ export default function Layout() {
 
       {/* ── Mobile bottom navigation ── */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-[#e4ede4] z-30 flex">
-        {NAV_ITEMS.map(item => (
+        {navItems.map(item => (
           <BottomNavLink key={item.to} {...item} />
         ))}
         {isAdmin && <BottomNavLink to="/admin/users" icon={Users} label="Benutzer" />}

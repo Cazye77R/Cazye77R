@@ -12,11 +12,9 @@ source venv/bin/activate
 # Dependencies prüfen
 pip install -r requirements.txt -q
 
-# Frontend bauen wenn nötig
-if [ ! -f "frontend/dist/index.html" ]; then
-    echo "Frontend wird gebaut..."
-    cd frontend && npm install && npm run build && cd ..
-fi
+# Frontend bauen
+echo "Frontend wird gebaut..."
+cd frontend && npm install -q && npm run build && cd ..
 
 # Daten-Ordner
 mkdir -p data
