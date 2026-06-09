@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Plus, X } from 'lucide-react'
 import { getTiere, createTier, getEintrag, createEintrag, updateEintrag, getTierTypen, updateTierTypen } from '../../lib/api'
@@ -287,6 +287,13 @@ export default function EntryForm() {
   )
 }
 
+const EMOJI_GROUPS = [
+  { label: 'Pferde & Esel',   emojis: ['🐴', '🐎', '🦄', '🫏', '🏇'] },
+  { label: 'Bauernhof',       emojis: ['🐮', '🐂', '🐄', '🐷', '🐖', '🐑', '🐏', '🐐', '🐓', '🐔', '🐣', '🦆', '🦢', '🐇', '🐰'] },
+  { label: 'Hunde & Katzen',  emojis: ['🐕', '🐩', '🐈', '🐾'] },
+  { label: 'Wildtiere',       emojis: ['🦌', '🦙', '🦥', '🐢', '🦜', '🦉', '🐝'] },
+]
+
 // ── Inline "Neues Tier" Dialog ────────────────────────────────────
 
 function NewTierInline({ typen, onTypenChange, onCreated, onClose }) {
@@ -296,7 +303,18 @@ function NewTierInline({ typen, onTypenChange, onCreated, onClose }) {
   const [saving, setSaving] = useState(false)
   const [newTypInput, setNewTypInput] = useState('')
   const [addingTyp, setAddingTyp] = useState(false)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const emojiRef = useRef(null)
   const toast = useToast()
+
+  useEffect(() => {
+    if (!showEmojiPicker) return
+    function handler(e) {
+      if (emojiRef.current && !emojiRef.current.contains(e.target)) setShowEmojiPicker(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showEmojiPicker])
 
   async function handleCreate() {
     if (!name.trim()) return
@@ -328,17 +346,44 @@ function NewTierInline({ typen, onTypenChange, onCreated, onClose }) {
   return (
     <div className="flex flex-col gap-1.5 px-3 py-2 rounded-2xl border-2 border-[#5b7c5e] bg-white shadow-sm w-full sm:w-auto">
       <div className="flex items-center gap-2 flex-wrap">
-        <input
-          value={emoji}
-          onChange={e => setEmoji(e.target.value)}
-          className="w-8 text-center bg-transparent border-none outline-none text-base"
-          maxLength={2}
-          autoFocus
-        />
+        <div className="relative shrink-0" ref={emojiRef}>
+          <button
+            type="button"
+            onClick={() => setShowEmojiPicker(v => !v)}
+            className="w-8 h-8 text-lg flex items-center justify-center rounded-lg hover:bg-[#eef4ee] transition-colors select-none"
+            title="Emoji auswählen"
+          >
+            {emoji}
+          </button>
+          {showEmojiPicker && (
+            <div className="absolute left-0 top-9 z-50 bg-white rounded-xl shadow-xl border border-[#e4ede4] p-2 w-64">
+              {EMOJI_GROUPS.map(group => (
+                <div key={group.label} className="mb-2 last:mb-0">
+                  <p className="text-[9px] font-semibold text-[#a8baa9] uppercase tracking-wider mb-1">{group.label}</p>
+                  <div className="grid grid-cols-8 gap-0.5">
+                    {group.emojis.map(e => (
+                      <button
+                        key={e} type="button"
+                        onClick={() => { setEmoji(e); setShowEmojiPicker(false) }}
+                        className={[
+                          'w-7 h-7 rounded-md text-base flex items-center justify-center transition-all select-none',
+                          emoji === e ? 'bg-[#5b7c5e]' : 'hover:bg-[#eef4ee]',
+                        ].join(' ')}
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <input
           value={name}
           onChange={e => setName(e.target.value)}
           placeholder="Name"
+          autoFocus
           className="w-24 text-sm bg-transparent border-none outline-none text-[#2d3b2e] placeholder-[#c0cfc1]"
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreate() } }}
         />

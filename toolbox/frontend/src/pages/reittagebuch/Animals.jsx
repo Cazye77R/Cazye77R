@@ -258,6 +258,15 @@ function TierCard({ tier, einsaetze, onEdit, onDeactivate, onReactivate, inactiv
   )
 }
 
+// ── Emoji Groups ─────────────────────────────────────────────────
+
+const EMOJI_GROUPS = [
+  { label: 'Pferde & Esel',   emojis: ['🐴', '🐎', '🦄', '🫏', '🏇'] },
+  { label: 'Bauernhof',       emojis: ['🐮', '🐂', '🐄', '🐷', '🐖', '🐑', '🐏', '🐐', '🐓', '🐔', '🐣', '🦆', '🦢', '🐇', '🐰'] },
+  { label: 'Hunde & Katzen',  emojis: ['🐕', '🐩', '🐈', '🐾'] },
+  { label: 'Wildtiere',       emojis: ['🦌', '🦙', '🦥', '🐢', '🦜', '🦉', '🐝'] },
+]
+
 // ── Tier Modal ────────────────────────────────────────────────────
 
 function TierModal({ title, initial, typen, onTypenChange, onClose, onSubmit }) {
@@ -317,27 +326,38 @@ function TierModal({ title, initial, typen, onTypenChange, onClose, onSubmit }) 
 
           {/* Emoji picker */}
           <div>
-            <label className={lbl}>Emoji</label>
-            <div className="flex gap-2 flex-wrap">
-              {['🐴', '🐎', '🦄', '🫏', '🐂'].map(e => (
-                <button
-                  key={e} type="button"
-                  onClick={() => setForm(f => ({ ...f, emoji: e }))}
-                  className={[
-                    'w-10 h-10 rounded-xl text-xl flex items-center justify-center transition-all',
-                    form.emoji === e
-                      ? 'bg-[#5b7c5e] shadow-sm scale-110'
-                      : 'bg-[#f5f8f5] hover:bg-[#eef4ee]',
-                  ].join(' ')}
-                >
-                  {e}
-                </button>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-sm font-medium text-[#3d4f3e]">Emoji</label>
+              <span className="text-2xl leading-none select-none">{form.emoji}</span>
+            </div>
+            <div className="rounded-xl border border-[#d4e2d5] bg-[#faf8f4] p-2.5 max-h-44 overflow-y-auto">
+              {EMOJI_GROUPS.map(group => (
+                <div key={group.label} className="mb-2 last:mb-0">
+                  <p className="text-[10px] font-semibold text-[#a8baa9] uppercase tracking-wider mb-1 px-0.5">{group.label}</p>
+                  <div className="grid grid-cols-8 gap-0.5">
+                    {group.emojis.map(e => (
+                      <button
+                        key={e} type="button"
+                        onClick={() => setForm(f => ({ ...f, emoji: e }))}
+                        className={[
+                          'w-8 h-8 rounded-lg text-lg flex items-center justify-center transition-all select-none',
+                          form.emoji === e ? 'bg-[#5b7c5e]' : 'hover:bg-[#eef4ee]',
+                        ].join(' ')}
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <span className="text-xs text-[#7a9178]">Eigenes:</span>
               <input
                 value={form.emoji}
                 onChange={set('emoji')}
                 maxLength={2}
-                className="w-10 h-10 rounded-xl border border-[#d4e2d5] text-center text-xl outline-none focus:border-[#5b7c5e]"
+                className="w-10 h-8 rounded-lg border border-[#d4e2d5] text-center text-base outline-none focus:border-[#5b7c5e]"
                 placeholder="…"
               />
             </div>
