@@ -98,6 +98,12 @@ toolbox/
 | user_id | INTEGER FK | → users.id |
 | created_at / updated_at | DATETIME | |
 
+### user_module_access
+| Spalte | Typ | Bemerkung |
+|--------|-----|-----------|
+| user_id | INTEGER FK PK | → users.id |
+| module_key | VARCHAR PK | z.B. "hoftagebuch" |
+
 ### eintrag_tiere (Many-to-Many, kein eigenes Model)
 | eintrag_id FK → eintraege.id | tier_id FK → tiere.id |
 
@@ -116,6 +122,11 @@ toolbox/
 ### Settings (`/api/settings/`)
 - `GET /api/settings/branding` → Branding-Config (public, kein Auth)
 - `PUT /api/settings/branding` → Branding updaten (Admin)
+
+### Module (`/api/modules/`)
+- `GET /api/modules` → Module des aktuellen Users (auth)
+- `GET /api/modules/users/{id}` → Module-Keys eines Users (Admin)
+- `PUT /api/modules/users/{id}` → Module-Keys setzen (Admin)
 
 ### Reittagebuch (`/api/reittagebuch/`)
 - `GET/POST /tiere` | `PUT/DELETE /tiere/{id}` (DELETE = soft-delete)
@@ -174,10 +185,12 @@ toolbox/
 - [x] Phase 2.5: UX-Polish (Skeleton-Loader, Mobile Bottom-Nav, ErrorBoundary, Offline-Banner, Passwort-Ändern, Letzte-Aktivität-Widget)
 - [x] Phase 3: Branding-System (AppSettings, 4 Startup-Animations-Themes, Admin-Konfigurationsseite)
 - [x] Deployment-Scripts (start.bat/sh + dev.bat/sh mit venv-Management)
-- [ ] Phase 4: Cloud-Deployment (Cloudflare Pages + Supabase Postgres)
-- [ ] Weitere Tools (Druckkosten-Kalkulation, ...)
+- [x] Phase 4a: Modul-System (UserModuleAccess, /api/modules, dynamisches Dashboard, Admin-Modulverwaltung pro User)
+- [ ] Phase 4b: Cloud-Deployment (Cloudflare Pages + Supabase Postgres)
+- [ ] Weitere Tools (zukünftige Module)
 
 ## Letzte Änderungen
+- 2026-06-09: Modul-System: UserModuleAccess (DB), backend/modules.py, /api/modules GET+PUT, Dashboard dynamisch, "Hoftagebuch"-Umbenennung, Admin-Modulverwaltung in UserManagement
 - 2026-06-08: Projekt vollständig initialisiert (Phasen 1–3 abgeschlossen)
 - 2026-06-08: Branding-System: AppSettings-Model, /api/settings/branding, BrandingContext, StartupAnimation (4 Themes: hofblick/koppel/hufspur/stallgefluester), BrandingSettings-Adminseite
 - 2026-06-08: UX-Verbesserungen: Skeleton-Loader, Mobile Bottom-Nav, PasswordDialog, OfflineBanner, ErrorBoundary, Letzte-Aktivität-Dashboard-Widget, Mobile-Kartenansicht in Overview

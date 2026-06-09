@@ -49,6 +49,13 @@ class Tier(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class UserModuleAccess(Base):
+    __tablename__ = "user_module_access"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    module_key = Column(String, primary_key=True)
+
+
 class Eintrag(Base):
     __tablename__ = "eintraege"
 

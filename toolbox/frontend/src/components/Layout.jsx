@@ -8,7 +8,7 @@ import { useToast } from '../context/ToastContext'
 
 const NAV_ITEMS = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', end: true },
-  { to: '/reittagebuch', icon: BookOpen, label: 'Reittagebuch' },
+  { to: '/reittagebuch', icon: BookOpen, label: 'Hoftagebuch' },
 ]
 
 export default function Layout() {

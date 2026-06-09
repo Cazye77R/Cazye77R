@@ -14,7 +14,7 @@ export default function ReittagebuchLayout() {
       {/* Page header */}
       <div className="mb-1">
         <h1 className="font-serif text-[1.9rem] text-[#2d3b2e] leading-tight">
-          🐴 Reittagebuch
+          📖 Hoftagebuch
         </h1>
       </div>
 

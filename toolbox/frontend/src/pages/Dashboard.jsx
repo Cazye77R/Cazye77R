@@ -1,29 +1,19 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { getEintraege } from '../lib/api'
+import { getMyModules, getEintraege } from '../lib/api'
 import { ChevronRight, ArrowRight } from 'lucide-react'
-
-const TOOLS = [
-  {
-    emoji: '🐴',
-    title: 'Reittagebuch',
-    description: 'Einheiten dokumentieren & auswerten',
-    href: '/reittagebuch',
-    enabled: true,
-  },
-  {
-    emoji: '🖨️',
-    title: 'Druckkosten',
-    description: '3D-Druck Kalkulation',
-    href: '/druckkosten',
-    enabled: false,
-  },
-]
 
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const [modules, setModules] = useState([])
+
+  useEffect(() => {
+    getMyModules()
+      .then(setModules)
+      .catch(() => {})
+  }, [])
 
   return (
     <div className="max-w-4xl">
@@ -35,13 +25,15 @@ export default function Dashboard() {
         <p className="text-[#7a9178] mt-1.5 text-sm">Was möchtest du heute tun?</p>
       </div>
 
-      {/* Tool grid */}
+      {/* Module grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {TOOLS.map(tool => (
+        {modules.map(mod => (
           <ToolTile
-            key={tool.href}
-            {...tool}
-            onClick={() => tool.enabled && navigate(tool.href)}
+            key={mod.key}
+            emoji={mod.emoji}
+            title={mod.name}
+            description={mod.description}
+            onClick={() => navigate(mod.route)}
           />
         ))}
 
@@ -140,51 +132,20 @@ function ActivityRow({ entry }) {
   )
 }
 
-function ToolTile({ emoji, title, description, enabled, onClick }) {
+function ToolTile({ emoji, title, description, onClick }) {
   return (
     <button
       onClick={onClick}
-      disabled={!enabled}
-      className={[
-        'relative text-left rounded-2xl border p-6 min-h-[148px] w-full transition-all duration-150 group',
-        enabled
-          ? 'bg-white border-[#dceadd] hover:border-[#5b7c5e] hover:shadow-[0_4px_20px_rgba(91,124,94,0.14)] cursor-pointer'
-          : 'bg-[#fafafa] border-[#e8e8e8] cursor-not-allowed',
-      ].join(' ')}
+      className="relative text-left rounded-2xl border p-6 min-h-[148px] w-full transition-all duration-150 group bg-white border-[#dceadd] hover:border-[#5b7c5e] hover:shadow-[0_4px_20px_rgba(91,124,94,0.14)] cursor-pointer"
     >
-      {!enabled && (
-        <span className="absolute top-4 right-4 text-[10px] font-semibold bg-[#ececec] text-[#aaaaaa] px-2 py-0.5 rounded-full tracking-wide uppercase">
-          Kommt bald
-        </span>
-      )}
-
-      <div
-        className={[
-          'text-[2rem] mb-3 leading-none transition-transform duration-150',
-          !enabled ? 'grayscale opacity-30' : 'group-hover:scale-110',
-        ].join(' ')}
-      >
+      <div className="text-[2rem] mb-3 leading-none transition-transform duration-150 group-hover:scale-110">
         {emoji}
       </div>
-
-      <h3
-        className={[
-          'font-semibold text-base mb-1',
-          enabled ? 'text-[#2d3b2e]' : 'text-[#b0b0b0]',
-        ].join(' ')}
-      >
-        {title}
-      </h3>
-
-      <p className={['text-sm leading-snug', enabled ? 'text-[#7a9178]' : 'text-[#c8c8c8]'].join(' ')}>
-        {description}
-      </p>
-
-      {enabled && (
-        <div className="absolute bottom-5 right-5 flex items-center gap-0.5 text-xs font-medium text-[#5b7c5e] opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-          Öffnen <ChevronRight size={13} />
-        </div>
-      )}
+      <h3 className="font-semibold text-base mb-1 text-[#2d3b2e]">{title}</h3>
+      <p className="text-sm leading-snug text-[#7a9178]">{description}</p>
+      <div className="absolute bottom-5 right-5 flex items-center gap-0.5 text-xs font-medium text-[#5b7c5e] opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+        Öffnen <ChevronRight size={13} />
+      </div>
     </button>
   )
 }

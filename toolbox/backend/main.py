@@ -8,11 +8,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .database import Base, SessionLocal, engine
-from .models import User
+from .models import User, UserModuleAccess
 from .auth import get_password_hash
+from .modules import MODULES
 from .routers.users import auth_router, users_router
 from .routers.reittagebuch import router as reittagebuch_router
 from .routers.settings import router as settings_router
+from .routers.modules import router as modules_router
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
@@ -33,7 +35,20 @@ async def lifespan(app: FastAPI):
             )
             db.add(admin)
             db.commit()
+            db.refresh(admin)
             print("⚠️  Standard-Admin erstellt (admin/admin) — bitte Passwort ändern!")
+
+        # Ensure every user has access to all modules (idempotent seed)
+        all_users = db.query(User).all()
+        for user in all_users:
+            for key in MODULES:
+                exists = db.query(UserModuleAccess).filter(
+                    UserModuleAccess.user_id == user.id,
+                    UserModuleAccess.module_key == key,
+                ).first()
+                if not exists:
+                    db.add(UserModuleAccess(user_id=user.id, module_key=key))
+        db.commit()
     finally:
         db.close()
     yield
@@ -56,6 +71,7 @@ app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(reittagebuch_router)
 app.include_router(settings_router)
+app.include_router(modules_router)
 
 # Serve React frontend static assets (production)
 if (FRONTEND_DIST / "assets").exists():

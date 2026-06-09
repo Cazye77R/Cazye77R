@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Plus, Pencil, Trash2, Shield, ShieldOff, X } from 'lucide-react'
-import { getUsers, createUser, updateUser, deleteUser } from '../../lib/api'
+import { getUsers, createUser, updateUser, deleteUser, getUserModules, setUserModules } from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
+
+const ALL_MODULES = [
+  { key: 'hoftagebuch', name: 'Hoftagebuch', emoji: '📖' },
+]
 
 export default function UserManagement() {
   const { user: me } = useAuth()
@@ -25,8 +29,9 @@ export default function UserManagement() {
     setShowCreate(false)
   }
 
-  async function handleEdit(form) {
+  async function handleEdit(form, moduleKeys) {
     const updated = await updateUser(editingUser.id, form)
+    await setUserModules(editingUser.id, moduleKeys)
     setUsers(prev => prev.map(u => u.id === updated.id ? updated : u))
     setEditingUser(null)
   }
@@ -290,17 +295,30 @@ function EditModal({ user, onClose, onSubmit }) {
     is_active: user.is_active,
     is_admin: user.is_admin,
   })
+  const [moduleKeys, setModuleKeys] = useState([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  useEffect(() => {
+    getUserModules(user.id)
+      .then(setModuleKeys)
+      .catch(() => {})
+  }, [user.id])
+
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
+
+  function toggleModule(key) {
+    setModuleKeys(prev =>
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+    )
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      await onSubmit({ ...form, email: form.email || null })
+      await onSubmit({ ...form, email: form.email || null }, moduleKeys)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -321,6 +339,22 @@ function EditModal({ user, onClose, onSubmit }) {
         <div className="space-y-2.5">
           <Toggle label="Aktiv" checked={form.is_active} onChange={set('is_active')} />
           <Toggle label="Admin-Rechte" checked={form.is_admin} onChange={set('is_admin')} />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-[#3d4f3e] mb-2">Module</p>
+          <div className="space-y-2 rounded-xl border border-[#e4ede4] p-3">
+            {ALL_MODULES.map(mod => (
+              <label key={mod.key} className="flex items-center gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={moduleKeys.includes(mod.key)}
+                  onChange={() => toggleModule(mod.key)}
+                  className="w-4 h-4 rounded border-[#d4e2d5] accent-[#5b7c5e]"
+                />
+                <span className="text-sm text-[#3d4f3e]">{mod.emoji} {mod.name}</span>
+              </label>
+            ))}
+          </div>
         </div>
         <div className="flex gap-3 pt-2">
           <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-[#d4e2d5] text-sm text-[#6b7c6c] hover:bg-[#f5f8f5] transition-colors">

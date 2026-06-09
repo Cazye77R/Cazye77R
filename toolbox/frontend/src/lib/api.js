@@ -49,6 +49,12 @@ export const changePassword = (data) => apiFetch('/api/users/me/password', { met
 export const getBranding = () => apiFetch('/api/settings/branding')
 export const updateBranding = (data) => apiFetch('/api/settings/branding', { method: 'PUT', body: JSON.stringify(data) })
 
+// ── Module ────────────────────────────────────────────────────────
+
+export const getMyModules = () => apiFetch('/api/modules')
+export const getUserModules = (id) => apiFetch(`/api/modules/users/${id}`)
+export const setUserModules = (id, keys) => apiFetch(`/api/modules/users/${id}`, { method: 'PUT', body: JSON.stringify({ module_keys: keys }) })
+
 // ── Reittagebuch: Tiere ───────────────────────────────────────────
 
 export const getTiere = () => apiFetch('/api/reittagebuch/tiere')

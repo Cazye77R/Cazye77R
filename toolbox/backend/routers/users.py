@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .. import models
+from ..modules import MODULES
 from ..auth import (
     create_access_token,
     get_current_admin,
@@ -151,6 +152,9 @@ def create_user(
         is_admin=body.is_admin,
     )
     db.add(user)
+    db.flush()
+    for key in MODULES:
+        db.add(models.UserModuleAccess(user_id=user.id, module_key=key))
     db.commit()
     db.refresh(user)
     return user
