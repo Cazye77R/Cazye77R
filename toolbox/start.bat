@@ -1,5 +1,6 @@
 @echo off
-title Toolbox
+title Toolbox — Debug
+echo on
 cd /d "%~dp0"
 
 REM Python venv prüfen/erstellen
@@ -30,3 +31,6 @@ echo.
 REM Browser nach 4 Sekunden im Hintergrund oeffnen (nach Serverstart)
 start /B powershell -WindowStyle Hidden -Command "Start-Sleep 4; Start-Process 'http://localhost:8000'"
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+echo.
+echo *** Server beendet oder Fehler aufgetreten ***
+pause
