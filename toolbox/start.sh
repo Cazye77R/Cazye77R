@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 cd "$(dirname "$0")"
 
 # Python venv prüfen/erstellen
@@ -12,9 +11,13 @@ source venv/bin/activate
 # Dependencies prüfen
 pip install -r requirements.txt -q
 
-# Frontend bauen
-echo "Frontend wird gebaut..."
-(cd frontend && npm install --prefer-offline -q && npm run build)
+# Frontend bauen (optional - dist ist bereits vorkompiliert im ZIP enthalten)
+if command -v npm &>/dev/null; then
+    echo "Frontend wird gebaut..."
+    (cd frontend && npm install --prefer-offline -q && npm run build)
+else
+    echo "npm nicht gefunden - verwende vorkompilierten Build."
+fi
 
 # Daten-Ordner
 mkdir -p data
