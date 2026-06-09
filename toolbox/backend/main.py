@@ -1,0 +1,102 @@
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from sqlalchemy import text
+from .database import Base, SessionLocal, engine
+from .models import User, UserModuleAccess
+from .auth import get_password_hash
+from .modules import MODULES
+from .routers.users import auth_router, users_router
+from .routers.reittagebuch import router as reittagebuch_router
+from .routers.settings import router as settings_router
+from .routers.modules import router as modules_router
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    # Idempotent column migrations for SQLite
+    with engine.connect() as conn:
+        for stmt in [
+            "ALTER TABLE eintraege ADD COLUMN zeiten TEXT",
+        ]:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                pass  # column already exists
+    db = SessionLocal()
+    try:
+        if db.query(User).count() == 0:
+            admin = User(
+                username="admin",
+                display_name="Administrator",
+                hashed_password=get_password_hash("admin"),
+                is_active=True,
+                is_admin=True,
+            )
+            db.add(admin)
+            db.commit()
+            db.refresh(admin)
+            print("⚠️  Standard-Admin erstellt (admin/admin) — bitte Passwort ändern!")
+
+        # Ensure every user has access to all modules (idempotent seed)
+        all_users = db.query(User).all()
+        for user in all_users:
+            for key in MODULES:
+                exists = db.query(UserModuleAccess).filter(
+                    UserModuleAccess.user_id == user.id,
+                    UserModuleAccess.module_key == key,
+                ).first()
+                if not exists:
+                    db.add(UserModuleAccess(user_id=user.id, module_key=key))
+        db.commit()
+    finally:
+        db.close()
+    yield
+
+
+app = FastAPI(title="Toolbox", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",  # Vite dev server
+        "http://localhost:8000",  # Production same-origin
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth_router)
+app.include_router(users_router)
+app.include_router(reittagebuch_router)
+app.include_router(settings_router)
+app.include_router(modules_router)
+
+# Serve React frontend static assets (production)
+if (FRONTEND_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_react(full_path: str):
+    # Serve specific static files if they exist (favicon, manifest, etc.)
+    candidate = FRONTEND_DIST / full_path
+    if candidate.exists() and candidate.is_file():
+        return FileResponse(candidate)
+    # Fallback to index.html for React Router (SPA)
+    index = FRONTEND_DIST / "index.html"
+    if index.exists():
+        return FileResponse(index)
+    return {"detail": "Frontend not built. Run: cd frontend && npm run build"}
