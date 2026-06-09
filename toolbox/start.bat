@@ -27,5 +27,7 @@ echo   Toolbox laeuft auf http://localhost:8000
 echo   Beenden: Ctrl+C
 echo ========================================
 echo.
+echo Warte auf Server...
+timeout /t 3 /nobreak > nul
 start http://localhost:8000
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
