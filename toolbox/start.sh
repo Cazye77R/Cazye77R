@@ -28,7 +28,6 @@ echo "  Beenden: Ctrl+C"
 echo "========================================"
 echo ""
 
-echo "Warte auf Server..."
-sleep 3
-xdg-open http://localhost:8000 2>/dev/null || open http://localhost:8000 2>/dev/null || true
+# Browser nach 4 Sekunden im Hintergrund oeffnen (nach Serverstart)
+(sleep 4 && (xdg-open http://localhost:8000 2>/dev/null || open http://localhost:8000 2>/dev/null || true)) &
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
