@@ -61,6 +61,7 @@ class Eintrag(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     datum = Column(Date, index=True)
+    zeiten = Column(Text, nullable=True)  # JSON: [{"von":"10:00","bis":"12:15"}]
     aktivitaet = Column(Text)
     besonderheiten = Column(Text, nullable=True)
     anpassungen = Column(Text, nullable=True)

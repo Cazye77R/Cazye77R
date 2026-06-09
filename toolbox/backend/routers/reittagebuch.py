@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session, selectinload
 
 from ..auth import get_current_admin, get_current_user
@@ -16,6 +16,11 @@ router = APIRouter(prefix="/api/reittagebuch", tags=["reittagebuch"])
 
 
 # ── Schemas ──────────────────────────────────────────────────────
+
+class ZeitSlot(BaseModel):
+    von: str
+    bis: str
+
 
 class TierCreate(BaseModel):
     name: str
@@ -47,6 +52,7 @@ class EintragUserOut(BaseModel):
 
 class EintragCreate(BaseModel):
     datum: date
+    zeiten: Optional[list[ZeitSlot]] = None
     aktivitaet: str
     besonderheiten: Optional[str] = None
     anpassungen: Optional[str] = None
@@ -58,6 +64,7 @@ class EintragCreate(BaseModel):
 class EintragOut(BaseModel):
     id: int
     datum: date
+    zeiten: Optional[list[ZeitSlot]] = None
     aktivitaet: str
     besonderheiten: Optional[str]
     anpassungen: Optional[str]
@@ -67,6 +74,14 @@ class EintragOut(BaseModel):
     user: Optional[EintragUserOut] = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator('zeiten', mode='before')
+    @classmethod
+    def parse_zeiten(cls, v):
+        if isinstance(v, str):
+            return json.loads(v) if v else None
+        return v
+
     model_config = {"from_attributes": True}
 
 
@@ -283,6 +298,7 @@ def create_eintrag(
     eintrag = Eintrag(
         user_id=current_user.id,
         datum=body.datum,
+        zeiten=json.dumps([z.model_dump() for z in body.zeiten]) if body.zeiten else None,
         aktivitaet=body.aktivitaet,
         besonderheiten=body.besonderheiten,
         anpassungen=body.anpassungen,
@@ -314,6 +330,7 @@ def update_eintrag(
     tiere = _resolve_tiere(body.tier_ids, db)
 
     eintrag.datum = body.datum
+    eintrag.zeiten = json.dumps([z.model_dump() for z in body.zeiten]) if body.zeiten else None
     eintrag.aktivitaet = body.aktivitaet
     eintrag.besonderheiten = body.besonderheiten
     eintrag.anpassungen = body.anpassungen
@@ -418,7 +435,7 @@ def export_xlsx(
     ws = wb.active
     ws.title = "Hoftagebuch"
 
-    headers = ["Datum", "Tiere", "Aktivität", "Kinder", "Jugendliche", "Besonderheiten", "Anpassungen", "Erstellt von"]
+    headers = ["Datum", "Zeiten", "Tiere", "Aktivität", "Kinder", "Jugendliche", "Besonderheiten", "Anpassungen", "Erstellt von"]
     ws.append(headers)
 
     header_fill = PatternFill(start_color="5B7C5E", end_color="5B7C5E", fill_type="solid")
@@ -429,8 +446,11 @@ def export_xlsx(
 
     for e in eintraege:
         tiere_str = ", ".join(f"{t.emoji} {t.name}" for t in e.tiere) if e.tiere else "—"
+        zeiten_raw = json.loads(e.zeiten) if e.zeiten else []
+        zeiten_str = ", ".join(f"{z['von']}–{z['bis']}" for z in zeiten_raw) if zeiten_raw else ""
         ws.append([
             e.datum,
+            zeiten_str,
             tiere_str,
             e.aktivitaet,
             e.anzahl_kinder,
@@ -444,7 +464,7 @@ def export_xlsx(
         for cell in row:
             cell.number_format = "DD.MM.YYYY"
 
-    for i, width in enumerate([13, 22, 45, 9, 14, 38, 38, 20], start=1):
+    for i, width in enumerate([13, 18, 22, 45, 9, 14, 38, 38, 20], start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
 
     ws.freeze_panes = "A2"

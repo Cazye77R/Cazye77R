@@ -18,6 +18,7 @@ const EMPTY_FORM = {
 export default function EntryForm() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [selectedIds, setSelectedIds] = useState([])
+  const [zeiten, setZeiten] = useState([])
   const [tiere, setTiere] = useState([])
   const [typen, setTypen] = useState([])
   const [showNewTier, setShowNewTier] = useState(false)
@@ -49,6 +50,7 @@ export default function EntryForm() {
           anzahl_jugendliche: e.anzahl_jugendliche,
         })
         setSelectedIds(e.tiere.map(t => t.id))
+        setZeiten(e.zeiten ?? [])
       })
       .catch(() => toast('Eintrag nicht gefunden', 'error'))
       .finally(() => setLoading(false))
@@ -77,6 +79,7 @@ export default function EntryForm() {
         anzahl_kinder: Number(form.anzahl_kinder),
         anzahl_jugendliche: Number(form.anzahl_jugendliche),
         tier_ids: selectedIds,
+        zeiten: zeiten.filter(z => z.von || z.bis),
       }
       if (editId) {
         await updateEintrag(editId, payload)
@@ -87,6 +90,7 @@ export default function EntryForm() {
         toast('Eintrag gespeichert ✓')
         setForm({ ...EMPTY_FORM, datum: today() })
         setSelectedIds([])
+        setZeiten([])
       }
     } catch (err) {
       toast(err.message, 'error')
@@ -124,6 +128,44 @@ export default function EntryForm() {
           className={inputCls}
         />
       </Field>
+
+      {/* Zeiten */}
+      <div>
+        <label className={labelCls}>Zeiten</label>
+        <div className="space-y-2 mt-1.5">
+          {zeiten.map((z, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input
+                type="time"
+                value={z.von}
+                onChange={e => setZeiten(prev => prev.map((s, idx) => idx === i ? { ...s, von: e.target.value } : s))}
+                className="px-3 py-2 rounded-xl border border-[#d4e2d5] bg-[#faf8f4] text-sm text-[#2d3b2e] outline-none focus:border-[#5b7c5e] focus:ring-2 focus:ring-[#5b7c5e]/20 transition-all"
+              />
+              <span className="text-[#a8baa9] text-sm">–</span>
+              <input
+                type="time"
+                value={z.bis}
+                onChange={e => setZeiten(prev => prev.map((s, idx) => idx === i ? { ...s, bis: e.target.value } : s))}
+                className="px-3 py-2 rounded-xl border border-[#d4e2d5] bg-[#faf8f4] text-sm text-[#2d3b2e] outline-none focus:border-[#5b7c5e] focus:ring-2 focus:ring-[#5b7c5e]/20 transition-all"
+              />
+              <button
+                type="button"
+                onClick={() => setZeiten(prev => prev.filter((_, idx) => idx !== i))}
+                className="p-1.5 rounded-lg text-[#c0cfc1] hover:text-red-500 hover:bg-red-50 transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => setZeiten(prev => [...prev, { von: '', bis: '' }])}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border-2 border-dashed border-[#c8d8c9] text-[#7a9178] hover:border-[#5b7c5e] hover:text-[#5b7c5e] transition-colors"
+          >
+            <Plus size={13} /> Zeitraum hinzufügen
+          </button>
+        </div>
+      </div>
 
       {/* Tier-Auswahl */}
       <div>
@@ -234,7 +276,7 @@ export default function EntryForm() {
         {!editId && (
           <button
             type="button"
-            onClick={() => { setForm({ ...EMPTY_FORM, datum: today() }); setSelectedIds([]) }}
+            onClick={() => { setForm({ ...EMPTY_FORM, datum: today() }); setSelectedIds([]); setZeiten([]) }}
             className="px-4 py-2.5 rounded-xl border border-[#d4e2d5] text-sm text-[#7a9178] hover:bg-[#f5f8f5] transition-colors"
           >
             Zurücksetzen

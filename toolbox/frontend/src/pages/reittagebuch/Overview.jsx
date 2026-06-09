@@ -133,8 +133,11 @@ export default function Overview() {
                 <tbody className="divide-y divide-[#f0f4f0]">
                   {eintraege.map(e => (
                     <tr key={e.id} className="hover:bg-[#fdfaf8] transition-colors align-top">
-                      <td className="px-4 py-3 text-[#2d3b2e] font-medium whitespace-nowrap">
-                        {fmt(e.datum)}
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <p className="text-[#2d3b2e] font-medium">{fmt(e.datum)}</p>
+                        {e.zeiten?.map((z, i) => (
+                          <span key={i} className="block text-xs text-[#7a9178] tabular-nums">{z.von}–{z.bis}</span>
+                        ))}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">
@@ -210,6 +213,13 @@ function MobileCard({ entry, onEdit, onDelete }) {
           <span className="text-sm font-medium text-[#2d3b2e]">{fmt(entry.datum)}</span>
           {entry.user && (
             <span className="ml-2 text-xs text-[#a8baa9]">{entry.user.display_name}</span>
+          )}
+          {entry.zeiten?.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-0.5">
+              {entry.zeiten.map((z, i) => (
+                <span key={i} className="text-xs text-[#7a9178] tabular-nums bg-[#f0f6f0] px-1.5 py-0.5 rounded-md">{z.von}–{z.bis}</span>
+              ))}
+            </div>
           )}
         </div>
         <div className="flex gap-1">

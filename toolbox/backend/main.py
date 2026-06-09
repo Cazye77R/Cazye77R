@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from sqlalchemy import text
 from .database import Base, SessionLocal, engine
 from .models import User, UserModuleAccess
 from .auth import get_password_hash
@@ -23,6 +24,16 @@ FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    # Idempotent column migrations for SQLite
+    with engine.connect() as conn:
+        for stmt in [
+            "ALTER TABLE eintraege ADD COLUMN zeiten TEXT",
+        ]:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                pass  # column already exists
     db = SessionLocal()
     try:
         if db.query(User).count() == 0:
