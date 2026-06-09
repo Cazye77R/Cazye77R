@@ -55,6 +55,11 @@ export const getMyModules = () => apiFetch('/api/modules')
 export const getUserModules = (id) => apiFetch(`/api/modules/users/${id}`)
 export const setUserModules = (id, keys) => apiFetch(`/api/modules/users/${id}`, { method: 'PUT', body: JSON.stringify({ module_keys: keys }) })
 
+// ── Reittagebuch: Tiertypen ──────────────────────────────────────
+
+export const getTierTypen = () => apiFetch('/api/reittagebuch/tiertypen')
+export const updateTierTypen = (typen) => apiFetch('/api/reittagebuch/tiertypen', { method: 'PUT', body: JSON.stringify({ typen }) })
+
 // ── Reittagebuch: Tiere ───────────────────────────────────────────
 
 export const getTiere = () => apiFetch('/api/reittagebuch/tiere')

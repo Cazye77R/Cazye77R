@@ -123,7 +123,7 @@ export default function Overview() {
               <table className="w-full text-sm min-w-[700px]">
                 <thead>
                   <tr className="bg-[#f5f8f5] border-b border-[#e8ede8]">
-                    {['Datum', 'Tiere', 'Aktivität', 'Kinder', 'Jugendliche', 'Besonderheiten', ''].map(h => (
+                    {['Datum', 'Tiere', 'Aktivität', 'Kinder', 'Jugendliche', 'Besonderheiten', 'Von', ''].map(h => (
                       <th key={h} className="text-left px-4 py-3 text-[10px] font-semibold text-[#7a9178] uppercase tracking-widest whitespace-nowrap">
                         {h}
                       </th>
@@ -160,6 +160,9 @@ export default function Overview() {
                       </td>
                       <td className="px-4 py-3 text-[#7a9178] max-w-[160px]">
                         <p className="line-clamp-2 text-xs">{e.besonderheiten || '—'}</p>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-[#a8baa9] whitespace-nowrap">
+                        {e.user?.display_name ?? '—'}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1 justify-end">
@@ -203,7 +206,12 @@ function MobileCard({ entry, onEdit, onDelete }) {
   return (
     <div className="bg-white rounded-2xl border border-[#e4ede4] p-4">
       <div className="flex items-start justify-between gap-2 mb-2">
-        <span className="text-sm font-medium text-[#2d3b2e]">{fmt(entry.datum)}</span>
+        <div>
+          <span className="text-sm font-medium text-[#2d3b2e]">{fmt(entry.datum)}</span>
+          {entry.user && (
+            <span className="ml-2 text-xs text-[#a8baa9]">{entry.user.display_name}</span>
+          )}
+        </div>
         <div className="flex gap-1">
           <button
             onClick={onEdit}

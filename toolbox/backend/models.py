@@ -72,3 +72,4 @@ class Eintrag(Base):
 
     # SQLAlchemy verwaltet eintrag_tiere-Rows automatisch beim Setzen dieser Liste
     tiere = relationship("Tier", secondary=eintrag_tiere)
+    user = relationship("User", foreign_keys=[user_id])

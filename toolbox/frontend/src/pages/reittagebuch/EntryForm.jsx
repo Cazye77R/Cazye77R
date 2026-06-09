@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Plus, X } from 'lucide-react'
-import { getTiere, createTier, getEintrag, createEintrag, updateEintrag } from '../../lib/api'
+import { getTiere, createTier, getEintrag, createEintrag, updateEintrag, getTierTypen } from '../../lib/api'
 import { useToast } from '../../context/ToastContext'
 
 const today = () => new Date().toISOString().split('T')[0]
@@ -19,6 +19,7 @@ export default function EntryForm() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [selectedIds, setSelectedIds] = useState([])
   const [tiere, setTiere] = useState([])
+  const [typen, setTypen] = useState([])
   const [showNewTier, setShowNewTier] = useState(false)
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -27,9 +28,10 @@ export default function EntryForm() {
   const [searchParams] = useSearchParams()
   const editId = searchParams.get('id')
 
-  // Load tiere
+  // Load tiere + typen
   useEffect(() => {
     getTiere().then(setTiere).catch(() => {})
+    getTierTypen().then(setTypen).catch(() => {})
   }, [])
 
   // Edit mode: load entry
@@ -147,6 +149,7 @@ export default function EntryForm() {
           {/* "+ Neues Tier" chip */}
           {showNewTier ? (
             <NewTierInline
+              typen={typen}
               onCreated={tier => {
                 setTiere(prev => [...prev, tier])
                 setSelectedIds(prev => [...prev, tier.id])
@@ -243,9 +246,9 @@ export default function EntryForm() {
 
 // ── Inline "Neues Tier" Dialog ────────────────────────────────────
 
-function NewTierInline({ onCreated, onClose }) {
+function NewTierInline({ typen, onCreated, onClose }) {
   const [name, setName] = useState('')
-  const [typ, setTyp] = useState('Pferd')
+  const [typ, setTyp] = useState(typen[0] ?? 'Pferd')
   const [emoji, setEmoji] = useState('🐴')
   const [saving, setSaving] = useState(false)
   const toast = useToast()
@@ -284,7 +287,7 @@ function NewTierInline({ onCreated, onClose }) {
         onChange={e => setTyp(e.target.value)}
         className="text-xs text-[#7a9178] bg-transparent border-none outline-none cursor-pointer"
       >
-        {['Pferd', 'Pony', 'Esel', 'Maultier'].map(o => <option key={o}>{o}</option>)}
+        {typen.map(o => <option key={o}>{o}</option>)}
       </select>
       <button
         type="button"

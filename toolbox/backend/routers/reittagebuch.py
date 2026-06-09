@@ -1,4 +1,5 @@
 import io
+import json
 from datetime import date, datetime
 from typing import Optional
 
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..auth import get_current_admin, get_current_user
 from ..database import get_db
-from ..models import Eintrag, Tier, User, eintrag_tiere
+from ..models import AppSettings, Eintrag, Tier, User, eintrag_tiere
 
 router = APIRouter(prefix="/api/reittagebuch", tags=["reittagebuch"])
 
@@ -39,6 +40,11 @@ class TierOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class EintragUserOut(BaseModel):
+    display_name: str
+    model_config = {"from_attributes": True}
+
+
 class EintragCreate(BaseModel):
     datum: date
     aktivitaet: str
@@ -58,6 +64,7 @@ class EintragOut(BaseModel):
     anzahl_kinder: int
     anzahl_jugendliche: int
     tiere: list[TierOut]
+    user: Optional[EintragUserOut] = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
@@ -91,21 +98,64 @@ class StatsOut(BaseModel):
     wochen_verlauf: list[WocheVerlauf]
 
 
+class TierTypenUpdate(BaseModel):
+    typen: list[str]
+
+
+# ── Tier-Typen ───────────────────────────────────────────────────
+
+TIER_TYPEN_KEY = "tier_typen"
+TIER_TYPEN_DEFAULT = ["Pferd", "Pony", "Esel", "Maultier"]
+
+
+def _get_tiertypen(db: Session) -> list[str]:
+    row = db.query(AppSettings).filter(AppSettings.key == TIER_TYPEN_KEY).first()
+    return json.loads(row.value) if row else TIER_TYPEN_DEFAULT
+
+
+@router.get("/tiertypen", response_model=list[str])
+def get_tiertypen(
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return _get_tiertypen(db)
+
+
+@router.put("/tiertypen", response_model=list[str])
+def update_tiertypen(
+    body: TierTypenUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    cleaned = list(dict.fromkeys(t.strip() for t in body.typen if t.strip()))
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="Mindestens ein Tiertyp erforderlich")
+    serialized = json.dumps(cleaned)
+    row = db.query(AppSettings).filter(AppSettings.key == TIER_TYPEN_KEY).first()
+    if row is None:
+        row = AppSettings(key=TIER_TYPEN_KEY, value=serialized, updated_by=current_user.id)
+        db.add(row)
+    else:
+        row.value = serialized
+        row.updated_by = current_user.id
+        row.updated_at = datetime.utcnow()
+    db.commit()
+    return cleaned
+
+
 # ── Helpers ──────────────────────────────────────────────────────
 
-def _resolve_tiere(user_id: int, tier_ids: list[int], db: Session) -> list[Tier]:
-    """Gibt Tier-Objekte zurück, validiert Ownership. Leere Liste = kein Tier."""
+def _resolve_tiere(tier_ids: list[int], db: Session) -> list[Tier]:
     if not tier_ids:
         return []
     unique_ids = list(set(tier_ids))
-    tiere = db.query(Tier).filter(Tier.id.in_(unique_ids), Tier.user_id == user_id).all()
+    tiere = db.query(Tier).filter(Tier.id.in_(unique_ids)).all()
     if len(tiere) != len(unique_ids):
         raise HTTPException(status_code=400, detail="Ein oder mehrere Tiere nicht gefunden")
     return tiere
 
 
 def _eintraege_query(
-    user_id: int,
     von: Optional[date],
     bis: Optional[date],
     tier_id: Optional[int],
@@ -113,8 +163,7 @@ def _eintraege_query(
 ):
     q = (
         db.query(Eintrag)
-        .options(selectinload(Eintrag.tiere))
-        .filter(Eintrag.user_id == user_id)
+        .options(selectinload(Eintrag.tiere), selectinload(Eintrag.user))
     )
     if von:
         q = q.filter(Eintrag.datum >= von)
@@ -126,10 +175,9 @@ def _eintraege_query(
 
 
 def _reload(eintrag_id: int, db: Session) -> Eintrag:
-    """Lädt Eintrag mit Tieren für die Response."""
     return (
         db.query(Eintrag)
-        .options(selectinload(Eintrag.tiere))
+        .options(selectinload(Eintrag.tiere), selectinload(Eintrag.user))
         .filter(Eintrag.id == eintrag_id)
         .first()
     )
@@ -139,12 +187,11 @@ def _reload(eintrag_id: int, db: Session) -> Eintrag:
 
 @router.get("/tiere", response_model=list[TierOut])
 def list_tiere(
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     return (
         db.query(Tier)
-        .filter(Tier.user_id == current_user.id)
         .order_by(Tier.aktiv.desc(), Tier.name)
         .all()
     )
@@ -167,10 +214,10 @@ def create_tier(
 def update_tier(
     tier_id: int,
     body: TierUpdate,
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    tier = db.query(Tier).filter(Tier.id == tier_id, Tier.user_id == current_user.id).first()
+    tier = db.query(Tier).filter(Tier.id == tier_id).first()
     if not tier:
         raise HTTPException(status_code=404, detail="Tier nicht gefunden")
     for field, value in body.model_dump(exclude_none=True).items():
@@ -183,11 +230,10 @@ def update_tier(
 @router.delete("/tiere/{tier_id}", status_code=status.HTTP_204_NO_CONTENT)
 def deactivate_tier(
     tier_id: int,
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Soft-delete: setzt aktiv=False statt zu löschen, damit historische Einträge erhalten bleiben."""
-    tier = db.query(Tier).filter(Tier.id == tier_id, Tier.user_id == current_user.id).first()
+    tier = db.query(Tier).filter(Tier.id == tier_id).first()
     if not tier:
         raise HTTPException(status_code=404, detail="Tier nicht gefunden")
     tier.aktiv = False
@@ -203,11 +249,11 @@ def list_eintraege(
     tier_id: Optional[int] = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     return (
-        _eintraege_query(current_user.id, von, bis, tier_id, db)
+        _eintraege_query(von, bis, tier_id, db)
         .order_by(Eintrag.datum.desc(), Eintrag.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -218,11 +264,11 @@ def list_eintraege(
 @router.get("/eintraege/{eintrag_id}", response_model=EintragOut)
 def get_eintrag(
     eintrag_id: int,
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     eintrag = _reload(eintrag_id, db)
-    if not eintrag or eintrag.user_id != current_user.id:
+    if not eintrag:
         raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
     return eintrag
 
@@ -233,7 +279,7 @@ def create_eintrag(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    tiere = _resolve_tiere(current_user.id, body.tier_ids, db)
+    tiere = _resolve_tiere(body.tier_ids, db)
     eintrag = Eintrag(
         user_id=current_user.id,
         datum=body.datum,
@@ -253,19 +299,19 @@ def create_eintrag(
 def update_eintrag(
     eintrag_id: int,
     body: EintragCreate,
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     eintrag = (
         db.query(Eintrag)
         .options(selectinload(Eintrag.tiere))
-        .filter(Eintrag.id == eintrag_id, Eintrag.user_id == current_user.id)
+        .filter(Eintrag.id == eintrag_id)
         .first()
     )
     if not eintrag:
         raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
 
-    tiere = _resolve_tiere(current_user.id, body.tier_ids, db)
+    tiere = _resolve_tiere(body.tier_ids, db)
 
     eintrag.datum = body.datum
     eintrag.aktivitaet = body.aktivitaet
@@ -283,14 +329,10 @@ def update_eintrag(
 @router.delete("/eintraege/{eintrag_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_eintrag(
     eintrag_id: int,
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    eintrag = (
-        db.query(Eintrag)
-        .filter(Eintrag.id == eintrag_id, Eintrag.user_id == current_user.id)
-        .first()
-    )
+    eintrag = db.query(Eintrag).filter(Eintrag.id == eintrag_id).first()
     if not eintrag:
         raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
     db.delete(eintrag)
@@ -303,16 +345,15 @@ def delete_eintrag(
 def get_stats(
     von: Optional[date] = None,
     bis: Optional[date] = None,
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    eintraege = _eintraege_query(current_user.id, von, bis, None, db).all()
+    eintraege = _eintraege_query(von, bis, None, db).all()
 
     gesamt_kinder = sum(e.anzahl_kinder for e in eintraege)
     gesamt_jugendliche = sum(e.anzahl_jugendliche for e in eintraege)
     gesamt_einheiten = len(eintraege)
 
-    # Wochendurchschnitt über die tatsächliche Zeitspanne
     if eintraege:
         d_min = von or min(e.datum for e in eintraege)
         d_max = bis or max(e.datum for e in eintraege)
@@ -326,7 +367,6 @@ def get_stats(
         gesamt=round(gesamt_einheiten / num_weeks, 1),
     )
 
-    # Einsätze pro Tier (absteigende Häufigkeit)
     tier_counts: dict[int, dict] = {}
     for e in eintraege:
         for t in e.tiere:
@@ -335,7 +375,6 @@ def get_stats(
             tier_counts[t.id]["anzahl"] += 1
     tiere_einsaetze = sorted(tier_counts.values(), key=lambda x: x["anzahl"], reverse=True)
 
-    # Verlauf pro Kalenderwoche (aufsteigend sortiert)
     wochen: dict[tuple, dict] = {}
     for e in eintraege:
         year, kw, _ = e.datum.isocalendar()
@@ -362,7 +401,7 @@ def get_stats(
 def export_xlsx(
     von: Optional[date] = None,
     bis: Optional[date] = None,
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     from openpyxl import Workbook
@@ -370,26 +409,24 @@ def export_xlsx(
     from openpyxl.utils import get_column_letter
 
     eintraege = (
-        _eintraege_query(current_user.id, von, bis, None, db)
+        _eintraege_query(von, bis, None, db)
         .order_by(Eintrag.datum.asc())
         .all()
     )
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "Reittagebuch"
+    ws.title = "Hoftagebuch"
 
-    headers = ["Datum", "Tiere", "Aktivität", "Kinder", "Jugendliche", "Besonderheiten", "Anpassungen"]
+    headers = ["Datum", "Tiere", "Aktivität", "Kinder", "Jugendliche", "Besonderheiten", "Anpassungen", "Erstellt von"]
     ws.append(headers)
 
-    # Kopfzeile formatieren
     header_fill = PatternFill(start_color="5B7C5E", end_color="5B7C5E", fill_type="solid")
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = header_fill
         cell.alignment = Alignment(vertical="center", wrap_text=False)
 
-    # Datenzeilen
     for e in eintraege:
         tiere_str = ", ".join(f"{t.emoji} {t.name}" for t in e.tiere) if e.tiere else "—"
         ws.append([
@@ -400,18 +437,16 @@ def export_xlsx(
             e.anzahl_jugendliche,
             e.besonderheiten or "",
             e.anpassungen or "",
+            e.user.display_name if e.user else "",
         ])
 
-    # Datum-Spalte formatieren
     for row in ws.iter_rows(min_row=2, min_col=1, max_col=1):
         for cell in row:
             cell.number_format = "DD.MM.YYYY"
 
-    # Spaltenbreiten
-    for i, width in enumerate([13, 22, 45, 9, 14, 38, 38], start=1):
+    for i, width in enumerate([13, 22, 45, 9, 14, 38, 38, 20], start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
 
-    # Kopfzeile einfrieren
     ws.freeze_panes = "A2"
 
     buf = io.BytesIO()
@@ -424,7 +459,7 @@ def export_xlsx(
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="reittagebuch_{von_str}_{bis_str}.xlsx"'},
+        headers={"Content-Disposition": f'attachment; filename="hoftagebuch_{von_str}_{bis_str}.xlsx"'},
     )
 
 
@@ -432,7 +467,6 @@ def export_xlsx(
 
 @router.get("/backup")
 def download_backup(_: User = Depends(get_current_admin)):
-    """Lädt die SQLite-Datenbank als Backup herunter (nur Admin)."""
     from pathlib import Path
     db_path = Path(__file__).resolve().parent.parent.parent / "data" / "toolbox.db"
     if not db_path.exists():

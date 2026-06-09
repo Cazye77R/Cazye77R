@@ -1,23 +1,23 @@
 import { useEffect, useState } from 'react'
 import { Plus, X } from 'lucide-react'
-import { getTiere, createTier, updateTier, deleteTier, getStats } from '../../lib/api'
+import { getTiere, createTier, updateTier, deleteTier, getStats, getTierTypen, updateTierTypen } from '../../lib/api'
 import { useToast } from '../../context/ToastContext'
 import { SkeletonCards } from '../../components/Skeleton'
 
-const TYPEN = ['Pferd', 'Pony', 'Esel', 'Maultier']
-
 export default function Animals() {
   const [tiere, setTiere] = useState([])
-  const [einsaetze, setEinsaetze] = useState({})   // { tier_id: anzahl }
+  const [typen, setTypen] = useState([])
+  const [einsaetze, setEinsaetze] = useState({})
   const [loading, setLoading] = useState(true)
   const [editingTier, setEditingTier] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
   const toast = useToast()
 
   useEffect(() => {
-    Promise.all([getTiere(), getStats()])
-      .then(([t, s]) => {
+    Promise.all([getTiere(), getStats(), getTierTypen()])
+      .then(([t, s, tp]) => {
         setTiere(t)
+        setTypen(tp)
         const map = {}
         s.tiere_einsaetze.forEach(e => { map[e.tier_id] = e.anzahl })
         setEinsaetze(map)
@@ -71,7 +71,6 @@ export default function Animals() {
           />
         ))}
 
-        {/* "Neues Tier" card */}
         <button
           onClick={() => setShowCreate(true)}
           className="rounded-2xl border-2 border-dashed border-[#c8d8c9] p-5 flex flex-col items-center justify-center gap-2 text-[#7a9178] hover:border-[#5b7c5e] hover:text-[#5b7c5e] transition-colors min-h-[140px] cursor-pointer"
@@ -87,7 +86,7 @@ export default function Animals() {
           <h3 className="text-xs font-semibold text-[#a8baa9] uppercase tracking-widest mb-3">
             Inaktiv
           </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
             {inactive.map(t => (
               <TierCard
                 key={t.id}
@@ -102,10 +101,14 @@ export default function Animals() {
         </div>
       )}
 
+      {/* Tier type management */}
+      <TierTypenManager typen={typen} onChange={setTypen} />
+
       {/* Modals */}
       {showCreate && (
         <TierModal
           title="Neues Tier"
+          typen={typen}
           onClose={() => setShowCreate(false)}
           onSubmit={handleCreate}
         />
@@ -114,10 +117,88 @@ export default function Animals() {
         <TierModal
           title={`${editingTier.emoji} ${editingTier.name} bearbeiten`}
           initial={editingTier}
+          typen={typen}
           onClose={() => setEditingTier(null)}
           onSubmit={handleEdit}
         />
       )}
+    </div>
+  )
+}
+
+// ── Tier Type Manager ─────────────────────────────────────────────
+
+function TierTypenManager({ typen, onChange }) {
+  const [input, setInput] = useState('')
+  const [saving, setSaving] = useState(false)
+  const toast = useToast()
+
+  async function addTyp() {
+    const t = input.trim()
+    if (!t || typen.includes(t)) return
+    const next = [...typen, t]
+    setSaving(true)
+    try {
+      const saved = await updateTierTypen(next)
+      onChange(saved)
+      setInput('')
+    } catch (err) {
+      toast(err.message, 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function removeTyp(typ) {
+    if (typen.length <= 1) {
+      toast('Mindestens ein Tiertyp muss bestehen bleiben', 'error')
+      return
+    }
+    try {
+      const saved = await updateTierTypen(typen.filter(t => t !== typ))
+      onChange(saved)
+    } catch (err) {
+      toast(err.message, 'error')
+    }
+  }
+
+  return (
+    <div className="mt-4">
+      <h3 className="text-xs font-semibold text-[#a8baa9] uppercase tracking-widest mb-3">
+        Tiertypen
+      </h3>
+      <div className="bg-white rounded-2xl border border-[#e4ede4] p-4">
+        <div className="flex flex-wrap gap-2 mb-3">
+          {typen.map(typ => (
+            <span key={typ} className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium bg-[#eef4ee] text-[#4a6b4d]">
+              {typ}
+              <button
+                onClick={() => removeTyp(typ)}
+                className="ml-0.5 text-[#7a9178] hover:text-red-500 transition-colors"
+                title={`${typ} entfernen`}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTyp() } }}
+            placeholder="Neuer Typ…"
+            className="flex-1 px-3 py-1.5 rounded-xl border border-[#d4e2d5] bg-[#faf8f4] text-sm text-[#2d3b2e] outline-none focus:border-[#5b7c5e] focus:ring-2 focus:ring-[#5b7c5e]/20 transition-all"
+          />
+          <button
+            onClick={addTyp}
+            disabled={saving || !input.trim()}
+            className="px-3 py-1.5 rounded-xl bg-[#5b7c5e] text-white text-sm font-medium hover:bg-[#4a6b4d] disabled:opacity-50 transition-colors flex items-center"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -132,7 +213,6 @@ function TierCard({ tier, einsaetze, onEdit, onDeactivate, onReactivate, inactiv
         ? 'bg-[#fafafa] border-[#e8e8e8] opacity-60'
         : 'bg-white border-[#e4ede4] hover:border-[#5b7c5e] hover:shadow-[0_4px_16px_rgba(91,124,94,0.10)]',
     ].join(' ')}>
-      {/* Emoji */}
       <div className="text-4xl leading-none select-none">
         {inactive ? <span className="grayscale">{tier.emoji}</span> : tier.emoji}
       </div>
@@ -145,7 +225,6 @@ function TierCard({ tier, einsaetze, onEdit, onDeactivate, onReactivate, inactiv
         </p>
       </div>
 
-      {/* Actions */}
       <div className="flex gap-1.5">
         {!inactive && (
           <button
@@ -179,15 +258,15 @@ function TierCard({ tier, einsaetze, onEdit, onDeactivate, onReactivate, inactiv
 
 // ── Tier Modal ────────────────────────────────────────────────────
 
-function TierModal({ title, initial, onClose, onSubmit }) {
+function TierModal({ title, initial, typen, onClose, onSubmit }) {
+  const defaultTyp = typen[0] ?? 'Pferd'
   const [form, setForm] = useState({
     name: initial?.name ?? '',
-    typ: initial?.typ ?? 'Pferd',
+    typ: initial?.typ ?? defaultTyp,
     emoji: initial?.emoji ?? '🐴',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const toast = useToast()
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
 
@@ -260,7 +339,7 @@ function TierModal({ title, initial, onClose, onSubmit }) {
           <div>
             <label className={lbl}>Typ</label>
             <select value={form.typ} onChange={set('typ')} className={inp}>
-              {TYPEN.map(t => <option key={t}>{t}</option>)}
+              {typen.map(t => <option key={t}>{t}</option>)}
             </select>
           </div>
 
