@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Plus, X } from 'lucide-react'
-import { getTiere, createTier, getEintrag, createEintrag, updateEintrag, getTierTypen } from '../../lib/api'
+import { getTiere, createTier, getEintrag, createEintrag, updateEintrag, getTierTypen, updateTierTypen } from '../../lib/api'
 import { useToast } from '../../context/ToastContext'
 
 const today = () => new Date().toISOString().split('T')[0]
@@ -150,6 +150,7 @@ export default function EntryForm() {
           {showNewTier ? (
             <NewTierInline
               typen={typen}
+              onTypenChange={setTypen}
               onCreated={tier => {
                 setTiere(prev => [...prev, tier])
                 setSelectedIds(prev => [...prev, tier.id])
@@ -246,11 +247,13 @@ export default function EntryForm() {
 
 // ── Inline "Neues Tier" Dialog ────────────────────────────────────
 
-function NewTierInline({ typen, onCreated, onClose }) {
+function NewTierInline({ typen, onTypenChange, onCreated, onClose }) {
   const [name, setName] = useState('')
   const [typ, setTyp] = useState(typen[0] ?? 'Pferd')
   const [emoji, setEmoji] = useState('🐴')
   const [saving, setSaving] = useState(false)
+  const [newTypInput, setNewTypInput] = useState('')
+  const [addingTyp, setAddingTyp] = useState(false)
   const toast = useToast()
 
   async function handleCreate() {
@@ -266,40 +269,68 @@ function NewTierInline({ typen, onCreated, onClose }) {
     }
   }
 
+  async function handleAddTyp() {
+    const t = newTypInput.trim()
+    if (!t || typen.includes(t)) { setNewTypInput(''); setAddingTyp(false); return }
+    try {
+      const saved = await updateTierTypen([...typen, t])
+      onTypenChange(saved)
+      setTyp(t)
+      setNewTypInput('')
+      setAddingTyp(false)
+    } catch (err) {
+      toast(err.message, 'error')
+    }
+  }
+
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 rounded-2xl border-2 border-[#5b7c5e] bg-white shadow-sm flex-wrap">
-      <input
-        value={emoji}
-        onChange={e => setEmoji(e.target.value)}
-        className="w-8 text-center bg-transparent border-none outline-none text-base"
-        maxLength={2}
-        autoFocus
-      />
-      <input
-        value={name}
-        onChange={e => setName(e.target.value)}
-        placeholder="Name"
-        className="w-20 text-sm bg-transparent border-none outline-none text-[#2d3b2e] placeholder-[#c0cfc1]"
-        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreate() } }}
-      />
-      <select
-        value={typ}
-        onChange={e => setTyp(e.target.value)}
-        className="text-xs text-[#7a9178] bg-transparent border-none outline-none cursor-pointer"
-      >
-        {typen.map(o => <option key={o}>{o}</option>)}
-      </select>
-      <button
-        type="button"
-        onClick={handleCreate}
-        disabled={saving || !name.trim()}
-        className="text-xs text-white bg-[#5b7c5e] px-2 py-0.5 rounded-full hover:bg-[#4a6b4d] disabled:opacity-50 transition-colors"
-      >
-        {saving ? '…' : 'OK'}
-      </button>
-      <button type="button" onClick={onClose} className="text-[#c0cfc1] hover:text-[#7a9178]">
-        <X size={13} />
-      </button>
+    <div className="flex flex-col gap-1.5 px-3 py-2 rounded-2xl border-2 border-[#5b7c5e] bg-white shadow-sm w-full sm:w-auto">
+      <div className="flex items-center gap-2 flex-wrap">
+        <input
+          value={emoji}
+          onChange={e => setEmoji(e.target.value)}
+          className="w-8 text-center bg-transparent border-none outline-none text-base"
+          maxLength={2}
+          autoFocus
+        />
+        <input
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="Name"
+          className="w-24 text-sm bg-transparent border-none outline-none text-[#2d3b2e] placeholder-[#c0cfc1]"
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreate() } }}
+        />
+        {addingTyp ? (
+          <input
+            value={newTypInput}
+            onChange={e => setNewTypInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddTyp() } if (e.key === 'Escape') { setAddingTyp(false); setNewTypInput('') } }}
+            placeholder="Neuer Typ…"
+            autoFocus
+            className="w-24 text-xs text-[#2d3b2e] bg-transparent border-b border-[#5b7c5e] outline-none"
+          />
+        ) : (
+          <select
+            value={typ}
+            onChange={e => setTyp(e.target.value)}
+            className="text-xs text-[#7a9178] bg-transparent border-none outline-none cursor-pointer"
+          >
+            {typen.map(o => <option key={o}>{o}</option>)}
+          </select>
+        )}
+        {addingTyp ? (
+          <>
+            <button type="button" onClick={handleAddTyp} disabled={!newTypInput.trim()} className="text-xs text-white bg-[#5b7c5e] px-2 py-0.5 rounded-full hover:bg-[#4a6b4d] disabled:opacity-50 transition-colors">OK</button>
+            <button type="button" onClick={() => { setAddingTyp(false); setNewTypInput('') }} className="text-[#c0cfc1] hover:text-[#7a9178]"><X size={12} /></button>
+          </>
+        ) : (
+          <>
+            <button type="button" onClick={() => setAddingTyp(true)} className="text-[10px] text-[#a8baa9] hover:text-[#5b7c5e] transition-colors flex items-center gap-0.5"><Plus size={10} />Typ</button>
+            <button type="button" onClick={handleCreate} disabled={saving || !name.trim()} className="text-xs text-white bg-[#5b7c5e] px-2 py-0.5 rounded-full hover:bg-[#4a6b4d] disabled:opacity-50 transition-colors">{saving ? '…' : 'OK'}</button>
+            <button type="button" onClick={onClose} className="text-[#c0cfc1] hover:text-[#7a9178]"><X size={13} /></button>
+          </>
+        )}
+      </div>
     </div>
   )
 }

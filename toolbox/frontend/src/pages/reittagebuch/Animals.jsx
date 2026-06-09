@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, X } from 'lucide-react'
+import { Plus, X, ChevronDown } from 'lucide-react'
 import { getTiere, createTier, updateTier, deleteTier, getStats, getTierTypen, updateTierTypen } from '../../lib/api'
 import { useToast } from '../../context/ToastContext'
 import { SkeletonCards } from '../../components/Skeleton'
@@ -109,6 +109,7 @@ export default function Animals() {
         <TierModal
           title="Neues Tier"
           typen={typen}
+          onTypenChange={setTypen}
           onClose={() => setShowCreate(false)}
           onSubmit={handleCreate}
         />
@@ -118,6 +119,7 @@ export default function Animals() {
           title={`${editingTier.emoji} ${editingTier.name} bearbeiten`}
           initial={editingTier}
           typen={typen}
+          onTypenChange={setTypen}
           onClose={() => setEditingTier(null)}
           onSubmit={handleEdit}
         />
@@ -258,7 +260,7 @@ function TierCard({ tier, einsaetze, onEdit, onDeactivate, onReactivate, inactiv
 
 // ── Tier Modal ────────────────────────────────────────────────────
 
-function TierModal({ title, initial, typen, onClose, onSubmit }) {
+function TierModal({ title, initial, typen, onTypenChange, onClose, onSubmit }) {
   const defaultTyp = typen[0] ?? 'Pferd'
   const [form, setForm] = useState({
     name: initial?.name ?? '',
@@ -267,8 +269,25 @@ function TierModal({ title, initial, typen, onClose, onSubmit }) {
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [newTypInput, setNewTypInput] = useState('')
+  const [addingTyp, setAddingTyp] = useState(false)
+  const toast = useToast()
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  async function handleAddTyp() {
+    const t = newTypInput.trim()
+    if (!t || typen.includes(t)) { setNewTypInput(''); setAddingTyp(false); return }
+    try {
+      const saved = await updateTierTypen([...typen, t])
+      onTypenChange(saved)
+      setForm(f => ({ ...f, typ: t }))
+      setNewTypInput('')
+      setAddingTyp(false)
+    } catch (err) {
+      toast(err.message, 'error')
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -341,6 +360,28 @@ function TierModal({ title, initial, typen, onClose, onSubmit }) {
             <select value={form.typ} onChange={set('typ')} className={inp}>
               {typen.map(t => <option key={t}>{t}</option>)}
             </select>
+            {addingTyp ? (
+              <div className="flex gap-1.5 mt-1.5">
+                <input
+                  value={newTypInput}
+                  onChange={e => setNewTypInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddTyp() } if (e.key === 'Escape') { setAddingTyp(false); setNewTypInput('') } }}
+                  placeholder="Neuer Typ…"
+                  autoFocus
+                  className="flex-1 px-3 py-1.5 rounded-xl border border-[#d4e2d5] bg-[#faf8f4] text-sm text-[#2d3b2e] outline-none focus:border-[#5b7c5e] focus:ring-2 focus:ring-[#5b7c5e]/20 transition-all"
+                />
+                <button type="button" onClick={handleAddTyp} disabled={!newTypInput.trim()} className="px-3 py-1.5 rounded-xl bg-[#5b7c5e] text-white text-xs font-medium hover:bg-[#4a6b4d] disabled:opacity-50 transition-colors">
+                  OK
+                </button>
+                <button type="button" onClick={() => { setAddingTyp(false); setNewTypInput('') }} className="px-2 py-1.5 rounded-xl text-[#a8baa9] hover:text-[#5b7c5e] transition-colors">
+                  <X size={13} />
+                </button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setAddingTyp(true)} className="mt-1.5 text-xs text-[#7a9178] hover:text-[#5b7c5e] transition-colors flex items-center gap-1">
+                <Plus size={11} /> Neuen Typ hinzufügen
+              </button>
+            )}
           </div>
 
           <div className="flex gap-3 pt-1">
