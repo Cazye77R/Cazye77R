@@ -105,7 +105,7 @@ async function downloadBlob(url, filename) {
 export const downloadExport = (params = {}) =>
   downloadBlob(
     `/api/reittagebuch/export${buildQs(params)}`,
-    `reittagebuch_${params.von || 'alle'}_${params.bis || 'alle'}.xlsx`,
+    `hoftagebuch_${params.von || 'alle'}_${params.bis || 'alle'}.xlsx`,
   )
 
 export const downloadBackup = () =>
