@@ -1040,7 +1040,13 @@
 
       chartCostLine = new Chart(ctxLine, {
         type: "line",
-        data: { labels: [], datasets: [{ label: "Gesamtkosten (€)", data: [], tension: 0.3, borderColor: "#2f7dff", backgroundColor: "rgba(47,125,255,0.15)", fill: true }] },
+        data: {
+          labels: [],
+          datasets: [
+            { label: "Gesamtkosten (€)", data: [], tension: 0.3, borderColor: "#2f7dff", backgroundColor: "rgba(47,125,255,0.15)", fill: true, order: 1 },
+            { label: "Ø Durchschnitt",   data: [], borderColor: "rgba(255,255,255,0.3)", borderDash: [5,4], borderWidth: 1.5, pointRadius: 0, fill: false, order: 2 }
+          ]
+        },
         options: {
           plugins: { legend: { display: false } },
           scales: { y: { beginAtZero: true } }
@@ -1072,8 +1078,14 @@
       const netzCosts  = rows.map(r => r.kostenNetz);
       const totalCosts = rows.map(r => r.kostenGesamt);
 
+      const avg     = totalCosts.length > 0
+        ? totalCosts.reduce((a, b) => a + b, 0) / totalCosts.length
+        : 0;
+      const avgLine = totalCosts.map(() => avg);
+
       chartCostLine.data.labels           = labels;
       chartCostLine.data.datasets[0].data = totalCosts;
+      chartCostLine.data.datasets[1].data = avgLine;
       chartCostLine.update();
 
       chartCostStack.data.labels              = labels;
