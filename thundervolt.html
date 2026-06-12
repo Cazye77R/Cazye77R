@@ -336,6 +336,43 @@
       transition: opacity 0.28s ease;
     }
 
+    /* Jahresbericht-Kacheln */
+    .year-report-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0,1fr));
+      gap: 8px;
+    }
+
+    @media(max-width: 700px) {
+      .year-report-grid {
+        grid-template-columns: repeat(2, minmax(0,1fr));
+      }
+    }
+
+    .yr-tile {
+      background: #1a1d2e;
+      border-radius: 10px;
+      padding: 8px 10px;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .yr-tile-label {
+      font-size: 0.72rem;
+      color: var(--text-soft);
+      margin-bottom: 3px;
+    }
+
+    .yr-tile-value {
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .yr-tile-hint {
+      font-size: 0.68rem;
+      color: var(--text-soft);
+      margin-top: 2px;
+    }
+
     /* Versteckter File-Input für Import */
     #importInput {
       display: none;
@@ -486,6 +523,8 @@
         </div>
 
         <div id="yearButtons" role="group" aria-label="Jahresfilter"></div>
+
+        <div id="yearReport" style="display:none; margin-bottom:10px;"></div>
 
         <table id="dataTable" aria-label="Monatsübersicht"></table>
       </div>
@@ -845,6 +884,41 @@
       return rows;
     }
 
+    // ─── Jahresbericht-Kacheln ────────────────────────────────────────────
+    function updateYearReport(rows) {
+      const box = document.getElementById("yearReport");
+      if (filterYear === "all" || rows.length === 0) {
+        box.style.display = "none";
+        return;
+      }
+      const fmt = (n, d) => n.toFixed(d).replace(".", ",");
+
+      const totalKosten   = rows.reduce((s, r) => s + r.kostenGesamt, 0);
+      const totalVerbrauch= rows.reduce((s, r) => s + r.g, 0);
+      const avgShare      = rows.reduce((s, r) => s + r.share, 0) / rows.length;
+      const maxR = rows.reduce((a, b) => a.kostenGesamt > b.kostenGesamt ? a : b);
+      const minR = rows.reduce((a, b) => a.kostenGesamt < b.kostenGesamt ? a : b);
+
+      const tiles = [
+        { label: "Jahreskosten gesamt",   value: fmt(totalKosten, 2) + " €", hint: rows.length + " Monate erfasst" },
+        { label: "Jahresverbrauch",        value: fmt(totalVerbrauch, 0) + " kWh", hint: "Ø " + fmt(totalVerbrauch / rows.length, 0) + " kWh/Monat" },
+        { label: "Ø Solaranteil",          value: fmt(avgShare, 1) + " %", hint: "Aller erfassten Monate" },
+        { label: "Teuerster Monat",        value: monthNames[maxR.month], hint: fmt(maxR.kostenGesamt, 2) + " €" },
+      ];
+
+      box.innerHTML = "";
+      const grid = document.createElement("div");
+      grid.className = "year-report-grid";
+      tiles.forEach(t => {
+        const tile = document.createElement("div");
+        tile.className = "yr-tile";
+        tile.innerHTML = `<div class="yr-tile-label">${t.label}</div><div class="yr-tile-value">${t.value}</div><div class="yr-tile-hint">${t.hint}</div>`;
+        grid.appendChild(tile);
+      });
+      box.appendChild(grid);
+      box.style.display = "block";
+    }
+
     // ─── Tabelle aufbauen (createElement statt innerHTML) ────────────────────
     function buildTable() {
       const table = document.getElementById("dataTable");
@@ -984,6 +1058,7 @@
     function updateAll() {
       initYearButtons();
       const rows = buildTable();
+      updateYearReport(rows);
       updateCharts(rows);
     }
 
