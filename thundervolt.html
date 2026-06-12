@@ -166,10 +166,23 @@
       margin-bottom: 6px;
     }
 
+    .metrics-2x2 {
+      grid-template-columns: repeat(2, minmax(0,1fr));
+    }
+
     @media(max-width: 600px) {
-      .metrics {
+      .metrics, .metrics-2x2 {
         grid-template-columns: minmax(0,1fr);
       }
+    }
+
+    .metric-green {
+      border-color: rgba(46,213,115,0.25);
+      background: rgba(46,213,115,0.07);
+    }
+
+    .metric-green .metric-value {
+      color: #2ed573;
     }
 
     .metric {
@@ -383,7 +396,7 @@
           </div>
         </div>
 
-        <div class="metrics" aria-live="polite">
+        <div class="metrics metrics-2x2" aria-live="polite">
           <div class="metric">
             <div class="metric-label">Solaranteil</div>
             <div class="metric-value" id="previewSolarShare">–</div>
@@ -398,6 +411,11 @@
             <div class="metric-label">CO₂ Netz</div>
             <div class="metric-value" id="previewCO2">–</div>
             <div class="metric-hint">Netzanteil · CO₂-Faktor</div>
+          </div>
+          <div class="metric metric-green">
+            <div class="metric-label">CO₂ gespart</div>
+            <div class="metric-value" id="previewCO2Save">–</div>
+            <div class="metric-hint">Solaranteil · CO₂-Faktor</div>
           </div>
         </div>
 
@@ -691,6 +709,9 @@
         v.g > 0 ? fmt(v.kostenGesamt, 2) + " €" : "–";
       document.getElementById("previewCO2").textContent =
         v.g > 0 ? fmt(v.co2Netz, 1) + " kg" : "–";
+      const co2Save = v.s * settings.co2Factor;
+      document.getElementById("previewCO2Save").textContent =
+        v.g > 0 ? fmt(co2Save, 1) + " kg" : "–";
     }
 
     // ─── Monat speichern / löschen ────────────────────────────────────────────
