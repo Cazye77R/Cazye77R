@@ -5,7 +5,7 @@ The reference date is last_accessed if set, otherwise updated_at.
 """
 import logging
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -19,7 +19,7 @@ _MIN_IMPORTANCE = 0.05
 
 
 def _utcnow() -> datetime:
-    return datetime.utcnow()
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _days_since(dt: datetime) -> float:

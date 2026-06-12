@@ -13,6 +13,7 @@ from elephant.memory.markdown_store import (
 )
 from elephant.memory.schemas import Memory
 from elephant.memory.vector_store import delete_embedded, embed_memory, search_similar
+from elephant.utils.retry import OllamaError, ollama_retry
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +54,8 @@ def find_consolidation_candidates(
             try:
                 other = load_memory(other_fp)
                 candidates.append((memory, other))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Could not load candidate %s: %s", other_fp, exc)
 
     return candidates
 
@@ -76,10 +77,13 @@ def consolidate_memories(
     )
     prompt = MERGE_PROMPT.format(n=len(memories), entries=entries)
 
-    resp = requests.post(
-        f"{settings.ollama_url.rstrip('/')}/api/chat",
-        json={"model": llm_model, "messages": [{"role": "user", "content": prompt}], "stream": False},
-        timeout=180,
+    resp = ollama_retry(
+        lambda m=llm_model, p=prompt: requests.post(
+            f"{settings.ollama_url.rstrip('/')}/api/chat",
+            json={"model": m, "messages": [{"role": "user", "content": p}], "stream": False},
+            timeout=180,
+        ),
+        label="consolidate",
     )
     resp.raise_for_status()
     merged_content = resp.json()["message"]["content"]

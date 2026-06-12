@@ -1,6 +1,8 @@
 import datetime
 import logging
+import threading
 from contextlib import asynccontextmanager
+from datetime import timezone
 from pathlib import Path
 from typing import Optional
 
@@ -36,6 +38,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def _utcnow() -> datetime.datetime:
+    return datetime.datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 # ---------------------------------------------------------------------------
 # Module-level singletons
 # Pre-set in tests to bypass the lifespan initialiser.
@@ -43,6 +50,9 @@ logger = logging.getLogger(__name__)
 
 _engine: Optional[ChatEngine] = None
 _sessions: dict[str, ConversationHistory] = {}
+_sessions_lock = threading.Lock()
+
+MAX_SESSIONS = 200
 
 
 @asynccontextmanager
@@ -87,6 +97,19 @@ class ChatRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Security helpers
+# ---------------------------------------------------------------------------
+
+def _safe_path(raw: str) -> Path:
+    """Resolve *raw* relative to memory_path and reject any traversal attempt."""
+    base = settings.memory_path.resolve()
+    p = (base / raw).resolve()
+    if not str(p).startswith(str(base)):
+        raise HTTPException(status_code=400, detail="Invalid filepath")
+    return p
+
+
+# ---------------------------------------------------------------------------
 # Background helpers
 # ---------------------------------------------------------------------------
 
@@ -99,7 +122,7 @@ def _auto_extract(conversation: list[dict], session_id: str) -> None:
         if n:
             logger.info(
                 "[%s] Auto-extraction session=%s: %d memories saved",
-                datetime.datetime.utcnow().isoformat(),
+                _utcnow().isoformat(),
                 session_id,
                 n,
             )
@@ -118,7 +141,7 @@ def _close_session_bg(conversation: list[dict], session_id: str) -> None:
         # 2 — Persist conversation summary in conversations/
         hist = ConversationHistory.from_messages(conversation)
         summary_text = hist.export_summary()
-        ts = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        ts = _utcnow().strftime("%Y%m%d_%H%M%S")
         path = save_memory(
             category="conversations",
             title=f"session_{session_id}_{ts}",
@@ -130,7 +153,7 @@ def _close_session_bg(conversation: list[dict], session_id: str) -> None:
 
         logger.info(
             "[%s] Session %s closed — %d facts + summary saved",
-            datetime.datetime.utcnow().isoformat(),
+            _utcnow().isoformat(),
             session_id,
             n,
         )
@@ -178,18 +201,22 @@ def text_search(q: str):
 
 @app.patch("/memories/{filepath:path}")
 def patch_memory(filepath: str, req: UpdateRequest):
-    p = Path(filepath)
+    p = _safe_path(filepath)
     if not p.exists():
         raise HTTPException(status_code=404, detail="Memory not found")
     memory = update_memory(p, req.content, req.tags, req.importance)
+    if _engine and _engine.collection:
+        embed_memory(p, collection=_engine.collection)
     return {"filepath": str(memory.filepath), "metadata": memory.metadata.model_dump()}
 
 
 @app.delete("/memories/{filepath:path}", status_code=204)
 def remove_memory(filepath: str):
-    p = Path(filepath)
+    p = _safe_path(filepath)
     if not p.exists():
         raise HTTPException(status_code=404, detail="Memory not found")
+    if _engine and _engine.collection:
+        delete_embedded(p, collection=_engine.collection)
     delete_memory(p)
     logger.info("Memory deleted: %s", filepath)
 
@@ -200,7 +227,7 @@ def remove_memory(filepath: str):
 
 @app.post("/memories/embed")
 def embed_memory_endpoint(req: EmbedRequest):
-    p = Path(req.filepath)
+    p = _safe_path(req.filepath)
     if not p.exists():
         raise HTTPException(status_code=404, detail="Memory file not found")
     n = embed_memory(p)
@@ -226,7 +253,7 @@ def semantic_search(
 
 @app.delete("/memories/embedded/{filepath:path}", status_code=204)
 def remove_embedded(filepath: str):
-    delete_embedded(Path(filepath))
+    delete_embedded(_safe_path(filepath))
 
 
 # ---------------------------------------------------------------------------
@@ -238,21 +265,26 @@ def chat_endpoint(req: ChatRequest, background_tasks: BackgroundTasks):
     if _engine is None:
         raise HTTPException(status_code=503, detail="Chat engine not initialised")
 
-    if req.session_id not in _sessions:
-        _sessions[req.session_id] = ConversationHistory()
+    with _sessions_lock:
+        if req.session_id not in _sessions:
+            if len(_sessions) >= MAX_SESSIONS:
+                _sessions.pop(next(iter(_sessions)))
+            _sessions[req.session_id] = ConversationHistory()
+        history = _sessions[req.session_id]
 
-    history = _sessions[req.session_id]
     response_text, sources = _engine.chat(
         req.message,
         conversation_history=history.messages(),
         model=req.model,
     )
 
-    history.add("user", req.message)
-    history.add("assistant", response_text)
+    with _sessions_lock:
+        history.add("user", req.message)
+        history.add("assistant", response_text)
+        msg_count = len(history.messages())
 
     # Auto-extract after >= 4 messages (>= 2 full turns)
-    if len(history.messages()) >= 4:
+    if msg_count >= 4:
         background_tasks.add_task(
             _auto_extract,
             history.messages(),  # snapshot (messages() returns a copy)
@@ -280,10 +312,11 @@ def chat_endpoint(req: ChatRequest, background_tasks: BackgroundTasks):
 @app.post("/sessions/{session_id}/close")
 def close_session(session_id: str, background_tasks: BackgroundTasks):
     """Trigger final memory extraction and conversation summary, then remove session."""
-    if session_id not in _sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+    with _sessions_lock:
+        if session_id not in _sessions:
+            raise HTTPException(status_code=404, detail="Session not found")
+        history = _sessions.pop(session_id)
 
-    history = _sessions.pop(session_id)
     conversation = history.messages()
 
     if conversation and _engine is not None:
@@ -295,12 +328,15 @@ def close_session(session_id: str, background_tasks: BackgroundTasks):
 
 @app.get("/sessions/{session_id}/summary")
 def session_summary(session_id: str):
-    if session_id not in _sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-    summary = _sessions[session_id].export_summary()
+    with _sessions_lock:
+        if session_id not in _sessions:
+            raise HTTPException(status_code=404, detail="Session not found")
+        history = _sessions[session_id]
+    summary = history.export_summary()
     return {"session_id": session_id, "summary": summary}
 
 
 @app.delete("/sessions/{session_id}", status_code=204)
 def delete_session(session_id: str):
-    _sessions.pop(session_id, None)
+    with _sessions_lock:
+        _sessions.pop(session_id, None)

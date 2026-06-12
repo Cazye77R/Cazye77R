@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -8,6 +8,10 @@ from elephant.config import settings
 from elephant.memory.schemas import Memory, MemoryMetadata
 
 CATEGORIES = {"general", "projects", "conversations"}
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _category_path(category: str) -> Path:
@@ -27,7 +31,7 @@ def save_memory(
     tags: list[str],
     importance: float = 0.5,
 ) -> Path:
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     post = frontmatter.Post(
         content,
         title=title,
@@ -39,6 +43,9 @@ def save_memory(
     )
     dest = _category_path(category) / f"{_slug(title)}.md"
     dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        ts = _utcnow().strftime("%Y%m%d_%H%M%S_%f")
+        dest = dest.with_stem(f"{dest.stem}_{ts}")
     dest.write_text(frontmatter.dumps(post), encoding="utf-8")
     return dest
 
@@ -55,8 +62,8 @@ def load_memory(filepath: Path | str) -> Memory:
         title=post.get("title", filepath.stem),
         tags=post.get("tags", []),
         importance=post.get("importance", 0.5),
-        created_at=post.get("created_at", datetime.utcnow()),
-        updated_at=post.get("updated_at", datetime.utcnow()),
+        created_at=post.get("created_at", _utcnow()),
+        updated_at=post.get("updated_at", _utcnow()),
         last_accessed=raw_last_accessed,
     )
     category = filepath.parent.name if filepath.parent.name in CATEGORIES else None
@@ -95,7 +102,7 @@ def touch_memory(filepath: "Path | str") -> None:
     """Update last_accessed timestamp without changing updated_at."""
     filepath = Path(filepath)
     post = frontmatter.loads(filepath.read_text(encoding="utf-8"))
-    post["last_accessed"] = datetime.utcnow().isoformat()
+    post["last_accessed"] = _utcnow().isoformat()
     filepath.write_text(frontmatter.dumps(post), encoding="utf-8")
 
 
@@ -114,7 +121,7 @@ def update_memory(
         post["tags"] = tags
     if importance is not None:
         post["importance"] = importance
-    post["updated_at"] = datetime.utcnow().isoformat()
+    post["updated_at"] = _utcnow().isoformat()
 
     filepath.write_text(frontmatter.dumps(post), encoding="utf-8")
     return load_memory(filepath)
