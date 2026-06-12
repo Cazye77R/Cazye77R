@@ -672,12 +672,11 @@
       return { g, s, np, sp, gp, netz, kostenSolar, kostenNetz, kostenGesamt, co2Netz };
     }
 
-    function updatePreview() {
+    function updatePreview(warnOnOverflow = false) {
       const rawSolar  = parseFloat(document.getElementById("solar").value)  || 0;
       const rawGesamt = parseFloat(document.getElementById("gesamt").value) || 0;
 
-      // Warnung im Preview anzeigen, ohne den Wert zu überschreiben
-      if (rawSolar > rawGesamt && rawGesamt > 0) {
+      if (warnOnOverflow && rawSolar > rawGesamt && rawGesamt > 0) {
         showToast("Solar darf nicht größer als Gesamt sein");
       }
 
@@ -955,7 +954,10 @@
       loadEditMonthIntoInputs();
 
       ["gesamt","solar","netzpreis","solarpreis","grundpreis"].forEach(id => {
-        document.getElementById(id).addEventListener("input", updatePreview);
+        document.getElementById(id).addEventListener("input", () => updatePreview(false));
+      });
+      ["gesamt","solar"].forEach(id => {
+        document.getElementById(id).addEventListener("blur", () => updatePreview(true));
       });
 
       document.getElementById("yearSelect").addEventListener("change", e => {
