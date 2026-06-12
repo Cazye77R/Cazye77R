@@ -784,17 +784,17 @@
     }
 
     // ─── Zeilen berechnen ────────────────────────────────────────────────────
-    function calcRow(y, m, d) {
-      const g   = d.gesamt || 0;
-      const s   = Math.min(d.solar || 0, g);
-      const np  = d.netzpreis  ?? settings.netzpreisDefault;
-      const sp  = d.solarpreis ?? settings.solarpreisDefault;
-      const gp  = d.grundpreis ?? settings.grundpreisDefault;
+    function calcRow(y, m, d, multiYear) {
+      const g    = d.gesamt || 0;
+      const s    = Math.min(d.solar || 0, g);
+      const np   = d.netzpreis  ?? settings.netzpreisDefault;
+      const sp   = d.solarpreis ?? settings.solarpreisDefault;
+      const gp   = d.grundpreis ?? settings.grundpreisDefault;
       const netz = Math.max(0, g - s);
       return {
-        label:       filterYear === "all" ? y + "-" + monthNames[m] : monthNames[m],
-        year:        y,
-        month:       m,
+        label:        multiYear ? y + "-" + monthNames[m] : monthNames[m],
+        year:         y,
+        month:        m,
         g, s, netz, np, sp, gp,
         kostenSolar:  s    * sp,
         kostenNetz:   netz * np + gp,
@@ -805,15 +805,15 @@
     }
 
     function buildRows() {
-      const rows   = [];
-      const years  = filterYear === "all"
+      const multiYear = filterYear === "all";
+      const years     = multiYear
         ? Object.keys(data).map(y => parseInt(y, 10)).sort((a, b) => a - b)
         : [filterYear];
-
+      const rows = [];
       years.forEach(y => {
         const yearData = data[y] || {};
         for (let m = 0; m < 12; m++) {
-          if (yearData[m]) rows.push(calcRow(y, m, yearData[m]));
+          if (yearData[m]) rows.push(calcRow(y, m, yearData[m], multiYear));
         }
       });
       return rows;
