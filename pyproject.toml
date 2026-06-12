@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "elephant"
+version = "0.4.0"
+description = "Personal memory system with RAG, automatic fact extraction, and decay"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    "python-frontmatter>=1.1.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.2.0",
+    "chromadb>=0.5.0",
+    "requests>=2.31.0",
+    "streamlit>=1.35.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.25.0",
+]
+
+[project.scripts]
+elephant = "elephant.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["elephant*"]
