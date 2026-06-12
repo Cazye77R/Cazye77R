@@ -833,57 +833,58 @@
       const rows  = buildRows();
       const fmt   = (n, d) => n.toFixed(d).replace(".", ",");
 
-      // Jahressummen
-      const yearTotals = {};
-
-      rows.forEach(r => {
+      const appendSummaryRow = (y, t) => {
         const cost =
-          costMode === "solar" ? r.kostenSolar :
-          costMode === "netz"  ? r.kostenNetz  :
-          r.kostenGesamt;
-
-        if (!yearTotals[r.year]) yearTotals[r.year] = { g: 0, kostenSolar: 0, kostenNetz: 0, kostenGesamt: 0, co2Netz: 0 };
-        yearTotals[r.year].g            += r.g;
-        yearTotals[r.year].kostenSolar  += r.kostenSolar;
-        yearTotals[r.year].kostenNetz   += r.kostenNetz;
-        yearTotals[r.year].kostenGesamt += r.kostenGesamt;
-        yearTotals[r.year].co2Netz      += r.co2Netz;
-
-        const tr   = document.createElement("tr");
-        const vals = [r.label, fmt(r.g, 1), fmt(r.share, 1) + " %", fmt(cost, 2), fmt(r.co2Netz, 1)];
-        vals.forEach(v => {
+          costMode === "solar" ? t.kostenSolar :
+          costMode === "netz"  ? t.kostenNetz  :
+          t.kostenGesamt;
+        const tr = document.createElement("tr");
+        tr.className = "year-summary";
+        ["Σ " + y, fmt(t.g, 1), "–", fmt(cost, 2), fmt(t.co2Netz, 1)].forEach(v => {
           const td = document.createElement("td");
           td.textContent = v;
           tr.appendChild(td);
         });
         tbody.appendChild(tr);
+      };
+
+      let currentYear = null;
+      let yearAcc     = null;
+
+      rows.forEach((r, idx) => {
+        const cost =
+          costMode === "solar" ? r.kostenSolar :
+          costMode === "netz"  ? r.kostenNetz  :
+          r.kostenGesamt;
+
+        if (filterYear === "all" && r.year !== currentYear) {
+          if (currentYear !== null) appendSummaryRow(currentYear, yearAcc);
+          currentYear = r.year;
+          yearAcc = { g: 0, kostenSolar: 0, kostenNetz: 0, kostenGesamt: 0, co2Netz: 0 };
+        }
+
+        if (yearAcc) {
+          yearAcc.g            += r.g;
+          yearAcc.kostenSolar  += r.kostenSolar;
+          yearAcc.kostenNetz   += r.kostenNetz;
+          yearAcc.kostenGesamt += r.kostenGesamt;
+          yearAcc.co2Netz      += r.co2Netz;
+        }
+
+        const tr = document.createElement("tr");
+        const shareCell = fmt(r.share, 1) + " %";
+        [r.label, fmt(r.g, 1), shareCell, fmt(cost, 2), fmt(r.co2Netz, 1)].forEach((v, ci) => {
+          const td = document.createElement("td");
+          td.textContent = v;
+          if (ci === 2) {
+            td.dataset.share = r.share >= 50 ? "high" : r.share >= 20 ? "mid" : "low";
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
       });
 
-      // Jahressummen-Zeilen (nur in "Alle"-Ansicht sinnvoll)
-      if (filterYear === "all") {
-        Object.keys(yearTotals).sort().forEach(y => {
-          const t    = yearTotals[y];
-          const cost =
-            costMode === "solar" ? t.kostenSolar :
-            costMode === "netz"  ? t.kostenNetz  :
-            t.kostenGesamt;
-          const tr   = document.createElement("tr");
-          tr.className = "year-summary";
-          const vals = [
-            "Σ " + y,
-            fmt(t.g, 1),
-            "–",
-            fmt(cost, 2),
-            fmt(t.co2Netz, 1)
-          ];
-          vals.forEach(v => {
-            const td = document.createElement("td");
-            td.textContent = v;
-            tr.appendChild(td);
-          });
-          tbody.appendChild(tr);
-        });
-      }
+      if (filterYear === "all" && currentYear !== null) appendSummaryRow(currentYear, yearAcc);
 
       table.appendChild(tbody);
       return rows;
