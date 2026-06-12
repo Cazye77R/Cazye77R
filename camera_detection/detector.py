@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 _yolo_model_cache: dict[str, object] = {}
 _mp_pose = None
 _mp_drawing = None
-_mp_drawing_styles = None
 
 
 def _load_yolo(model_size: str):
@@ -29,13 +28,12 @@ def _load_yolo(model_size: str):
 
 
 def _get_mp_pose():
-    global _mp_pose, _mp_drawing, _mp_drawing_styles
+    global _mp_pose, _mp_drawing
     if _mp_pose is None:
         import mediapipe as mp
         _mp_pose = mp.solutions.pose
         _mp_drawing = mp.solutions.drawing_utils
-        _mp_drawing_styles = mp.solutions.drawing_styles
-    return _mp_pose, _mp_drawing, _mp_drawing_styles
+    return _mp_pose, _mp_drawing
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +85,7 @@ class CameraDetector:
 
         # Lazy-load models
         self._yolo = None
+        self._loaded_model_size: str = ""
         self._pose_solution = None
 
         # FPS tracking
@@ -161,9 +160,13 @@ class CameraDetector:
 
         # Load YOLO lazily and run inference — held together under _model_lock
         # so a concurrent update_settings() cannot null out self._yolo mid-inference.
+        # _loaded_model_size guards against a TOCTOU window where update_settings()
+        # clears _yolo after model_size was snapshotted above, causing detect() to
+        # reload the old model into _yolo (which would then persist indefinitely).
         with self._model_lock:
-            if self._yolo is None:
+            if self._yolo is None or self._loaded_model_size != model_size:
                 self._yolo = _load_yolo(model_size)
+                self._loaded_model_size = model_size
             detections = self._run_yolo(frame, mode, confidence)
 
         annotated = frame.copy()
@@ -265,7 +268,7 @@ class CameraDetector:
             )
 
     def _run_pose(self, frame: np.ndarray, person_detections: list[Detection]) -> np.ndarray:
-        mp_pose, mp_drawing, mp_drawing_styles = _get_mp_pose()
+        mp_pose, mp_drawing = _get_mp_pose()
 
         if self._pose_solution is None:
             self._pose_solution = mp_pose.Pose(
