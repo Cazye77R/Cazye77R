@@ -49,6 +49,7 @@ export default function EventLog({ entries = [] }) {
             <div
               key={entries.length - WINDOW + i}
               className={`event-entry${isFresh ? ' event-entry--fresh' : ''}`}
+              data-type={e.type}
             >
               <span className="event-icon" aria-hidden="true">
                 {TYPE_ICONS[e.type] ?? '·'}

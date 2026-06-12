@@ -77,7 +77,8 @@ export const CabinetBox = memo(function CabinetBox({ gx, gy, open = false }) {
   const bw = 28, bh = 44, bd = 10; // width, height, depth
 
   return (
-    <g transform={`translate(${x}, ${y})`}>
+    <g transform={`translate(${x}, ${y})`}
+       style={open ? { filter: 'drop-shadow(0 0 6px #4fc3f780)' } : undefined}>
       {/* ── Glow halo (blue, visible when open) ── */}
       {open && (
         <ellipse
@@ -385,11 +386,11 @@ export const MeetingTable = memo(function MeetingTable({ gx, gy, meetingActive =
       {/* Top face (isometric) */}
       <polygon
         points="-32,-12  64,-12  64,12  -32,12"
-        fill="#bcaaa4" stroke="#8d6e63" strokeWidth={0.8}
+        fill={meetingActive ? '#d6c8c0' : '#bcaaa4'} stroke="#8d6e63" strokeWidth={0.5}
       />
       {/* Front face */}
       <rect x={-32} y={8} width={96} height={14} rx={1}
-            fill="#a1887f" stroke="#8d6e63" strokeWidth={0.8} />
+            fill={meetingActive ? '#b8a9a2' : '#a1887f'} stroke="#8d6e63" strokeWidth={0.5} />
 
       {/* Table legs */}
       {[[-26,20],[52,20]].map(([lx,ly]) => (
