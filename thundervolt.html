@@ -753,6 +753,11 @@
 
       const yearsWithData = Object.keys(data).map(Number).sort((a, b) => a - b);
 
+      if (filterYear !== "all" && !yearsWithData.includes(filterYear)) {
+        filterYear = "all";
+        localStorage.setItem(STORAGE_FILTER, "all");
+      }
+
       const allBtn        = document.createElement("button");
       allBtn.textContent  = "Alle";
       allBtn.className    = "year-btn" + (filterYear === "all" ? " active" : "");
