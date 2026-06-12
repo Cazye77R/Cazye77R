@@ -585,7 +585,8 @@
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement("a");
       a.href     = url;
-      a.download = "thundervolt_daten.json";
+      const ts   = new Date().toISOString().slice(0, 10);
+      a.download = `thundervolt_daten_${ts}.json`;
       a.click();
       URL.revokeObjectURL(url);
     }
@@ -890,6 +891,16 @@
       });
 
       if (filterYear === "all" && currentYear !== null) appendSummaryRow(currentYear, yearAcc);
+
+      if (rows.length === 0) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 5;
+        td.textContent = "Noch keine Daten vorhanden – bitte Monat erfassen und speichern.";
+        td.style.cssText = "text-align:center; padding:16px 8px; color:var(--text-soft); font-style:italic;";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+      }
 
       table.appendChild(tbody);
       return rows;
