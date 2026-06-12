@@ -654,11 +654,14 @@
 
     // ─── Eingabewerte lesen (kein DOM-Seiteneffekt) ───────────────────────────
     function getCurrentInputs() {
-      const g  = parseFloat(document.getElementById("gesamt").value)    || 0;
-      const s  = Math.min(parseFloat(document.getElementById("solar").value) || 0, g);
-      const np = parseFloat(document.getElementById("netzpreis").value)  || settings.netzpreisDefault;
-      const sp = parseFloat(document.getElementById("solarpreis").value) || settings.solarpreisDefault;
-      const gp = parseFloat(document.getElementById("grundpreis").value) || settings.grundpreisDefault;
+      const g     = parseFloat(document.getElementById("gesamt").value) || 0;
+      const s     = Math.min(parseFloat(document.getElementById("solar").value) || 0, g);
+      const npRaw = parseFloat(document.getElementById("netzpreis").value);
+      const spRaw = parseFloat(document.getElementById("solarpreis").value);
+      const gpRaw = parseFloat(document.getElementById("grundpreis").value);
+      const np    = isNaN(npRaw) ? settings.netzpreisDefault  : npRaw;
+      const sp    = isNaN(spRaw) ? settings.solarpreisDefault : spRaw;
+      const gp    = isNaN(gpRaw) ? settings.grundpreisDefault : gpRaw;
 
       const netz         = Math.max(0, g - s);
       const kostenSolar  = s    * sp;
