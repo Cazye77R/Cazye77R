@@ -1,0 +1,41 @@
+{
+  "collections": {
+    "jobs": {
+      "description": "Laufende und abgeschlossene Druckauftraege",
+      "singleton": false,
+      "fields": {
+        "name": {
+          "type": "string",
+          "required": true,
+          "description": "Name des Druckauftrags"
+        },
+        "status": {
+          "type": "string",
+          "default": "queued",
+          "description": "queued|printing|done|failed"
+        },
+        "has_commercial_filament": {
+          "type": "boolean",
+          "default": false,
+          "description": "Ob kommerzielles Filament verwendet wird"
+        },
+        "duration_hours": {
+          "type": "number",
+          "default": 0,
+          "description": "Geschaetzte Druckzeit in Stunden"
+        }
+      }
+    },
+    "settings": {
+      "description": "Globale Einstellungen des Tools",
+      "singleton": true,
+      "fields": {
+        "printer_name": {
+          "type": "string",
+          "default": "Unbenannt",
+          "description": "Name des Druckers"
+        }
+      }
+    }
+  }
+}

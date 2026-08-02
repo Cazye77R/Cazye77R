@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ToolHub</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --text: #e8eaf0;
+    --text-muted: #8b8fa3;
+    --border: #2e3247;
+    --accent: #4a9eff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2.5rem 1.5rem 1.5rem;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    max-width: 1100px;
+    margin: 0 auto 2.5rem;
+    text-align: center;
+  }
+  header h1 {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 2.5rem;
+    letter-spacing: 0.05em;
+    margin: 0;
+    color: var(--text);
+  }
+  header p {
+    color: var(--text-muted);
+    margin: 0.5rem 0 0;
+    font-size: 1rem;
+  }
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.25rem;
+  }
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 600px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+  .tile {
+    position: relative;
+    display: block;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--tile-color, var(--accent));
+    border-radius: 10px;
+    padding: 1.5rem;
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  }
+  .tile:hover {
+    transform: translateY(-4px);
+    border-color: var(--tile-color, var(--accent));
+    box-shadow: 0 8px 24px -8px var(--tile-color, var(--accent));
+  }
+  .tile .icon {
+    font-size: 2.5rem;
+    line-height: 1;
+    margin-bottom: 0.75rem;
+  }
+  .tile .name {
+    font-weight: 700;
+    font-size: 1.1rem;
+    margin-bottom: 0.4rem;
+    padding-right: 1.5rem;
+  }
+  .tile .description {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    line-height: 1.4;
+  }
+  .info-btn {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-style: italic;
+    font-family: Georgia, "Times New Roman", serif;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .info-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 1.5rem;
+  }
+  .modal-overlay.open {
+    display: flex;
+  }
+  .modal-box {
+    position: relative;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.75rem;
+    max-width: 420px;
+    width: 100%;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  .modal-box h3 {
+    margin: 0 0 0.25rem;
+    padding-right: 1.5rem;
+  }
+  .modal-close {
+    position: absolute;
+    top: 0.9rem;
+    right: 0.9rem;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .modal-close:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .modal-body .muted {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin: 0.25rem 0;
+  }
+  .modal-body .collection-list {
+    list-style: none;
+    padding: 0;
+    margin: 1rem 0 0;
+  }
+  .modal-body .collection-list li {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem;
+    margin-bottom: 0.6rem;
+  }
+  .modal-body .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 0 0.35rem;
+    margin-left: 0.3rem;
+  }
+  .empty {
+    text-align: center;
+    padding: 3rem 1.5rem;
+    background: var(--card);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    color: var(--text-muted);
+  }
+  .empty h2 {
+    color: var(--text);
+    margin-top: 0;
+  }
+  .empty code {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.15rem 0.4rem;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    color: var(--accent);
+  }
+  .empty pre {
+    text-align: left;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+    overflow-x: auto;
+    max-width: 480px;
+    margin: 1rem auto 0;
+    color: var(--text);
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.85rem;
+  }
+  footer {
+    max-width: 1100px;
+    margin: 2.5rem auto 0;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>ToolHub</h1>
+  <p>Lokale Tool-Sammlung</p>
+</header>
+<main>
+  <div id="grid" class="grid"></div>
+  <div id="empty" class="empty" style="display:none;">
+    <h2>Keine Tools gefunden</h2>
+    <p>Lege einen Ordner unter <code>/tools/</code> an und füge eine <code>manifest.json</code> hinzu:</p>
+    <pre>/tools/mein-tool/
+  manifest.json
+  index.html</pre>
+    <pre>{
+  "name": "Mein Tool",
+  "icon": "🛠️",
+  "color": "#4a9eff",
+  "description": "Kurze Beschreibung"
+}</pre>
+  </div>
+</main>
+<footer id="footer"></footer>
+
+<div id="modalOverlay" class="modal-overlay">
+  <div class="modal-box">
+    <button id="modalClose" class="modal-close" type="button" aria-label="Schließen">×</button>
+    <h3 id="modalTitle"></h3>
+    <div id="modalBody" class="modal-body"></div>
+  </div>
+</div>
+
+<script>
+let toolsById = {};
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function buildModalBody(tool) {
+  const datamodel = tool.datamodel;
+  const collections = datamodel && datamodel.collections ? datamodel.collections : null;
+  const names = collections ? Object.keys(collections) : [];
+
+  if (!names.length) {
+    return `<p class="muted">Kein Datenmodell definiert</p>`;
+  }
+
+  const items = names.map(name => {
+    const col = collections[name] || {};
+    const fieldCount = col.fields ? Object.keys(col.fields).length : 0;
+    const singletonBadge = col.singleton ? '<span class="badge">singleton</span>' : "";
+    return `
+      <li>
+        <strong>${escapeHtml(name)}</strong>${singletonBadge}
+        <div class="muted">${escapeHtml(col.description || "Keine Beschreibung")}</div>
+        <div class="muted">${fieldCount} Feld${fieldCount === 1 ? "" : "er"}</div>
+      </li>
+    `;
+  }).join("");
+
+  return `
+    <p class="muted">${names.length} Collection${names.length === 1 ? "" : "en"}</p>
+    <ul class="collection-list">${items}</ul>
+  `;
+}
+
+function openModal(tool) {
+  document.getElementById("modalTitle").textContent = tool.name || tool.id;
+  document.getElementById("modalBody").innerHTML = buildModalBody(tool);
+  document.getElementById("modalOverlay").classList.add("open");
+}
+
+function closeModal() {
+  document.getElementById("modalOverlay").classList.remove("open");
+}
+
+function setupModal() {
+  const overlay = document.getElementById("modalOverlay");
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) closeModal();
+  });
+  document.getElementById("modalClose").addEventListener("click", closeModal);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeModal();
+  });
+}
+
+async function loadTools() {
+  const grid = document.getElementById("grid");
+  const empty = document.getElementById("empty");
+  const footer = document.getElementById("footer");
+
+  let tools = [];
+  try {
+    const res = await fetch("/api/tools");
+    tools = await res.json();
+  } catch (err) {
+    footer.textContent = "Fehler beim Laden der Tools.";
+    empty.style.display = "block";
+    return;
+  }
+
+  if (!Array.isArray(tools) || tools.length === 0) {
+    empty.style.display = "block";
+    footer.textContent = "0 Tools geladen – " + new Date().toLocaleString("de-DE");
+    return;
+  }
+
+  toolsById = {};
+  tools.forEach(tool => { toolsById[tool.id] = tool; });
+
+  grid.innerHTML = tools.map(tool => `
+    <a class="tile" style="--tile-color: ${escapeHtml(tool.color || '#4a9eff')}" href="/tools/${encodeURIComponent(tool.id)}/index.html">
+      <button class="info-btn" type="button" data-tool-id="${escapeHtml(tool.id)}" aria-label="Info zu ${escapeHtml(tool.name || tool.id)}">i</button>
+      <div class="icon">${tool.icon || "\u{1F527}"}</div>
+      <div class="name">${escapeHtml(tool.name || tool.id)}</div>
+      <div class="description">${escapeHtml(tool.description || "")}</div>
+    </a>
+  `).join("");
+
+  grid.querySelectorAll(".info-btn").forEach(btn => {
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const tool = toolsById[btn.dataset.toolId];
+      if (tool) openModal(tool);
+    });
+  });
+
+  footer.textContent = tools.length + " Tools geladen – " + new Date().toLocaleString("de-DE");
+}
+
+setupModal();
+loadTools();
+</script>
+</body>
+</html>
