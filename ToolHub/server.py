@@ -87,6 +87,56 @@ def build_filters(query_params: dict) -> tuple[list, list]:
 
 
 # ---------------------------------------------------------------------------
+# Datamodel (optional per-tool schema)
+# ---------------------------------------------------------------------------
+
+
+def get_datamodel_path(tool_id: str) -> Path:
+    return TOOLS_DIR / tool_id / "datamodel.json"
+
+
+def load_datamodel(tool_id: str) -> dict | None:
+    path = get_datamodel_path(tool_id)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def get_collection_schema(tool_id: str, collection: str) -> dict | None:
+    datamodel = load_datamodel(tool_id)
+    if not datamodel:
+        return None
+    return datamodel.get("collections", {}).get(collection)
+
+
+def apply_defaults(doc: dict, schema: dict | None) -> dict:
+    if not schema:
+        return doc
+    for field_name, field_def in schema.get("fields", {}).items():
+        if field_name not in doc and "default" in field_def:
+            doc[field_name] = field_def["default"]
+    return doc
+
+
+def check_required_fields(tool_id: str, collection: str, body: dict) -> None:
+    schema = get_collection_schema(tool_id, collection)
+    if not schema:
+        return
+    missing = [
+        name
+        for name, field_def in schema.get("fields", {}).items()
+        if field_def.get("required") and name not in body
+    ]
+    if missing:
+        raise HTTPException(
+            400, f"Missing required field(s): {', '.join(missing)}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Tool discovery
 # ---------------------------------------------------------------------------
 
@@ -111,6 +161,7 @@ def list_tools():
                 "icon": manifest.get("icon", "\U0001f527"),
                 "color": manifest.get("color", "#4a9eff"),
                 "description": manifest.get("description", ""),
+                "datamodel": load_datamodel(entry.name),
             }
         )
     return tools
@@ -214,6 +265,15 @@ def reset_db(tool_id: str, confirm: bool = False):
     return {"success": True, "tool_id": tool_id, "reset": True}
 
 
+@app.get("/api/store/{tool_id}/_schema")
+def get_schema(tool_id: str):
+    validate_name(tool_id, "tool_id")
+    datamodel = load_datamodel(tool_id)
+    if datamodel is None:
+        raise HTTPException(404, f"No datamodel.json found for tool '{tool_id}'")
+    return datamodel
+
+
 # ---------------------------------------------------------------------------
 # Collection-level literal routes (must precede {doc_id})
 # ---------------------------------------------------------------------------
@@ -313,7 +373,8 @@ def list_documents(tool_id: str, collection: str, request: Request):
                 sql += f" ORDER BY json_extract(data, '$.{sort}') {direction_sql}"
 
         rows = conn.execute(sql, values).fetchall()
-        return [row_to_doc(r) for r in rows]
+        schema = get_collection_schema(tool_id, collection)
+        return [apply_defaults(row_to_doc(r), schema) for r in rows]
     finally:
         conn.close()
 
@@ -322,6 +383,7 @@ def list_documents(tool_id: str, collection: str, request: Request):
 def create_document(tool_id: str, collection: str, body: dict = Body(...)):
     validate_name(tool_id, "tool_id")
     validate_name(collection, "collection")
+    check_required_fields(tool_id, collection, body)
     conn = get_connection(tool_id)
     try:
         ensure_table(conn, collection)
@@ -362,7 +424,8 @@ def get_document(tool_id: str, collection: str, doc_id: str):
         ).fetchone()
         if row is None:
             raise HTTPException(404, f"Document '{doc_id}' not found")
-        return row_to_doc(row)
+        schema = get_collection_schema(tool_id, collection)
+        return apply_defaults(row_to_doc(row), schema)
     finally:
         conn.close()
 
