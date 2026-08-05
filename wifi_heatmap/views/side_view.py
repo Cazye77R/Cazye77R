@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPen
 from PySide6.QtWidgets import QToolTip, QWidget
 
 from models.floor import Floor
@@ -88,9 +88,6 @@ class SideView(QWidget):
         Works independently of the widget's current on-screen size; uses the
         widget width as the render width (minimum 400 px).
         """
-        from PySide6.QtGui import QImage, QPainter
-        from PySide6.QtCore import QPoint
-
         n       = max(len(self._floors), 1)
         rw      = max(self.width(), 400)
         rh      = n * _STRIP_HEIGHT

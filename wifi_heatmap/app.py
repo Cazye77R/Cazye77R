@@ -996,10 +996,10 @@ class MainWindow(QMainWindow):
         # ── Render ────────────────────────────────────────────────
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
         try:
-            self._canvas_widget._scene.clearSelection()
+            self._canvas_widget.scene().clearSelection()
             source_rect = self._canvas_widget.get_render_rect()
             ProjectExporter.export_png(
-                self._canvas_widget._scene,
+                self._canvas_widget.scene(),
                 source_rect,
                 floor,
                 path,
@@ -1034,13 +1034,14 @@ class MainWindow(QMainWindow):
 
             # Render each floor to a QImage
             floor_images: list[tuple] = []
-            for floor in self._project.floors:
+            for idx, floor in enumerate(self._project.floors):
+                self._floor_tab_bar.set_current_index(idx)
                 self._canvas_widget.set_active_floor(floor)
                 QApplication.processEvents()   # allow scene to settle
-                self._canvas_widget._scene.clearSelection()
+                self._canvas_widget.scene().clearSelection()
                 source_rect = self._canvas_widget.get_render_rect()
                 img = ProjectExporter.render_floor_image(
-                    self._canvas_widget._scene,
+                    self._canvas_widget.scene(),
                     source_rect,
                     floor,
                     self._min_dbm,

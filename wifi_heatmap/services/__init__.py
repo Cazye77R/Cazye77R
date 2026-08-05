@@ -7,9 +7,9 @@ except ImportError:
     interpolate_measurements = None  # type: ignore[assignment]
 
 try:
-    from services.exporter import Exporter
+    from services.exporter import ProjectExporter
 except ImportError:
-    Exporter = None  # type: ignore[assignment]
+    ProjectExporter = None  # type: ignore[assignment]
 
 __all__ = [
     "WifiScanner",
@@ -18,5 +18,5 @@ __all__ = [
     "WifiError",
     "HeatmapGenerator",
     "interpolate_measurements",
-    "Exporter",
+    "ProjectExporter",
 ]
