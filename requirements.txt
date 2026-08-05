@@ -1,10 +1,11 @@
-# Versions are pinned with ~= (compatible release) to allow patch updates
-# within the same minor series while preventing breaking changes from major
-# or minor version bumps. This matters because:
-#   - streamlit and streamlit-webrtc have coupled internal APIs
-#   - ultralytics model file formats change between minor versions
-#   - mediapipe C++ bindings are ABI-sensitive across minor releases
-#   - av (PyAV) wraps FFmpeg and can break on minor bumps
+# Version pinning uses ~= (compatible release). Note what that actually means:
+# a two-component spec like ~=1.37 expands to ">=1.37, <2.0" — patch AND minor
+# updates are allowed, only major bumps are blocked. Blocking minor bumps would
+# require a three-component spec (~=1.37.0 → ">=1.37.0, <1.38").
+#
+# Two-component specs are deliberate here: we want minor updates (st.fragment,
+# used for the live stats, arrived in a Streamlit minor release), while still
+# being protected against major-version API breaks.
 
 pandas>=2.0
 numpy>=1.24
@@ -12,11 +13,18 @@ torch>=2.0
 plotly>=5.20
 
 # Core UI
-streamlit~=1.35
+# streamlit >= 1.37 is required: camera_detection/app.py uses st.fragment().
+streamlit~=1.37
 
 # Camera detection & tracking
-opencv-python-headless~=4.9
 ultralytics~=8.2
 mediapipe~=0.10
 streamlit-webrtc~=0.47
 av~=12.0
+
+# NOTE on OpenCV: cv2 is intentionally NOT pinned here. It arrives transitively
+# (ultralytics -> opencv-python, mediapipe -> opencv-contrib-python). Adding a
+# third distribution such as opencv-python-headless makes all of them install
+# into the same cv2 namespace directory and overwrite each other.
+# On a headless server install opencv-contrib-python-headless explicitly after
+# this file — it satisfies both transitive requirements with a single package.

@@ -30,6 +30,28 @@ MODE_MAP: dict[str, str] = {
     "Beides": "both",
 }
 
+RESOLUTIONS: dict[str, tuple[int, int]] = {
+    "640 × 480 — schnell": (640, 480),
+    "1280 × 720 — ausgewogen": (1280, 720),
+    "1920 × 1080 — hohe Details": (1920, 1080),
+}
+
+# COCO class names in class-id order; the index IS the id YOLO reports.
+COCO_CLASSES: list[str] = [
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck",
+    "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench",
+    "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra",
+    "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+    "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove",
+    "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup",
+    "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
+    "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
+    "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse",
+    "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink",
+    "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
+    "hair drier", "toothbrush",
+]
+
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
@@ -70,37 +92,42 @@ _DEFAULTS: dict[str, object] = {
     "show_pose": True,
     "model_size": "yolov8n",
     "confidence": 0.50,
+    "class_names": [],
+    "resolution_label": "1280 × 720 — ausgewogen",
+    "max_pose_persons": 4,
 }
 for _key, _val in _DEFAULTS.items():
     if _key not in st.session_state:
         st.session_state[_key] = _val
 
 # ---------------------------------------------------------------------------
-# Shared detector instance (created once per session)
+# Per-session detector.
+#
+# NOT st.cache_resource: that cache is process-global, so every browser tab
+# would share one detector and fight over its settings. The YOLO *weights* are
+# still shared process-wide via detector._yolo_model_cache, which is safe
+# because the weights themselves are stateless.
 # ---------------------------------------------------------------------------
-@st.cache_resource
-def get_detector() -> CameraDetector:
-    return CameraDetector()
+if "detector" not in st.session_state:
+    try:
+        st.session_state.detector = CameraDetector()
+        logger.info("CameraDetector initialisiert")
+    except ImportError as exc:
+        st.error(
+            f"**Fehlende Abhängigkeit:** {exc}\n\n"
+            "Bitte alle Pakete installieren:\n"
+            "```\n./start.sh --setup\n```"
+        )
+        st.stop()
+    except Exception as exc:
+        st.error(
+            f"**Die App konnte nicht gestartet werden.**\n\n{exc}\n\n"
+            "Stelle sicher, dass alle Pakete installiert sind:\n"
+            "```\n./start.sh --setup\n```"
+        )
+        st.stop()
 
-
-try:
-    detector = get_detector()
-    logger.info("CameraDetector initialisiert (Modell: %s)", detector.model_size)
-except ImportError as exc:
-    st.error(
-        f"**Fehlende Abhängigkeit:** {exc}\n\n"
-        "Bitte alle Pakete installieren:\n"
-        "```\npip install opencv-python-headless ultralytics mediapipe "
-        "streamlit-webrtc av\n```"
-    )
-    st.stop()
-except Exception as exc:
-    st.error(
-        f"**Die App konnte nicht gestartet werden.**\n\n{exc}\n\n"
-        "Stelle sicher, dass folgende Pakete korrekt installiert sind: "
-        "`opencv-python-headless`, `ultralytics`, `mediapipe`, `streamlit-webrtc`, `av`."
-    )
-    st.stop()
+detector: CameraDetector = st.session_state.detector
 
 # ---------------------------------------------------------------------------
 # Sidebar — settings
@@ -115,6 +142,14 @@ with st.sidebar:
         key="mode_label",
     )
     mode = MODE_MAP[mode_label]
+
+    class_names = st.multiselect(
+        "Klassenfilter",
+        options=COCO_CLASSES,
+        key="class_names",
+        help="Leer = alle Klassen des gewählten Modus.",
+    )
+    selected_classes = [COCO_CLASSES.index(name) for name in class_names]
 
     st.markdown("---")
     st.subheader("Anzeige")
@@ -131,8 +166,17 @@ with st.sidebar:
     if pose_disabled:
         show_pose = False
 
+    max_pose_persons = st.slider(
+        "Max. Personen für Skeleton",
+        min_value=1,
+        max_value=10,
+        key="max_pose_persons",
+        disabled=pose_disabled or not show_pose,
+        help="Jede Person kostet einen eigenen MediaPipe-Durchlauf pro Frame.",
+    )
+
     st.markdown("---")
-    st.subheader("Modell")
+    st.subheader("Modell & Kamera")
     model_size = st.selectbox(
         "Modellgröße",
         options=["yolov8n", "yolov8s", "yolov8m"],
@@ -143,6 +187,14 @@ with st.sidebar:
             "yolov8m": "YOLOv8m — genau",
         }[x],
     )
+    resolution_label = st.selectbox(
+        "Kamera-Auflösung",
+        options=list(RESOLUTIONS.keys()),
+        key="resolution_label",
+        help="Wird beim nächsten Kamerastart angewendet.",
+    )
+    cam_width, cam_height = RESOLUTIONS[resolution_label]
+
     confidence = st.slider(
         "Konfidenzschwelle",
         min_value=0.1,
@@ -160,6 +212,8 @@ with st.sidebar:
         show_labels=show_labels,
         show_pose=show_pose,
         confidence=confidence,
+        selected_classes=selected_classes,
+        max_pose_persons=max_pose_persons,
     )
 
     st.markdown("---")
@@ -176,19 +230,32 @@ st.caption(
     "Wähle links den Modus, schalte Rahmen/Beschriftung ein oder aus und starte die Kamera."
 )
 
-# Stats placeholder — updated by VideoProcessor via session state
-stats_placeholder = st.empty()
+# Preload weights on the main thread. Doing this lazily inside the video worker
+# would stall the stream — the first run has to download the weights file.
+try:
+    with st.spinner(f"Lade Modell {model_size} …"):
+        detector.ensure_model_loaded()
+except Exception as exc:
+    st.error(f"**Modell konnte nicht geladen werden.**\n\n{exc}")
+    st.stop()
 
 # ---------------------------------------------------------------------------
 # WebRTC Video Processor
 # ---------------------------------------------------------------------------
 
 class VideoProcessor(VideoProcessorBase):
-    """Processes each video frame through the shared CameraDetector."""
+    """Processes each video frame through the session's CameraDetector."""
 
-    def __init__(self) -> None:
+    def __init__(self, detector: CameraDetector) -> None:
+        self._detector = detector
         self._stats_lock = threading.Lock()
-        self.latest_stats: dict = {"fps": 0.0, "person_count": 0, "object_count": 0}
+        self.latest_stats: dict = {
+            "fps": 0.0,
+            "person_count": 0,
+            "object_count": 0,
+            "dropped": 0,
+        }
+        self._dropped = 0
 
     def get_stats(self) -> dict:
         with self._stats_lock:
@@ -197,13 +264,14 @@ class VideoProcessor(VideoProcessorBase):
     def recv_queued(self, frames: list[av.VideoFrame]) -> list[av.VideoFrame]:
         # Discard all but the newest frame to avoid queue buildup when
         # YOLO inference is slower than the incoming camera framerate.
+        self._dropped += len(frames) - 1
         frame = frames[-1]
         try:
             img = frame.to_ndarray(format="bgr24")
-            annotated, stats = detector.detect(img)
+            annotated, stats = self._detector.detect(img)
 
             with self._stats_lock:
-                self.latest_stats = stats
+                self.latest_stats = {**stats, "dropped": self._dropped}
 
             return [av.VideoFrame.from_ndarray(annotated, format="bgr24")]
         except Exception:
@@ -217,31 +285,52 @@ class VideoProcessor(VideoProcessorBase):
 ctx = webrtc_streamer(
     key="camera-detection",
     mode=WebRtcMode.SENDRECV,
-    video_processor_factory=VideoProcessor,
-    media_stream_constraints={"video": True, "audio": False},
+    video_processor_factory=lambda: VideoProcessor(detector),
+    media_stream_constraints={
+        "video": {
+            "width": {"ideal": cam_width},
+            "height": {"ideal": cam_height},
+            "frameRate": {"ideal": 30},
+        },
+        "audio": False,
+    },
     async_processing=True,
     rtc_configuration={
         "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
     },
 )
 
+
 # ---------------------------------------------------------------------------
 # Live stats display
+#
+# Rendered inside a fragment so it refreshes on its own timer. A plain block
+# would only repaint on a full script rerun, i.e. when the user touches a
+# widget — leaving the numbers frozen while the stream runs.
 # ---------------------------------------------------------------------------
-if ctx.state.playing and ctx.video_processor:
-    stats = ctx.video_processor.get_stats()
+@st.fragment(run_every=1.0)
+def render_stats() -> None:
+    if ctx.state.playing and ctx.video_processor:
+        stats = ctx.video_processor.get_stats()
 
-    with stats_placeholder.container():
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("FPS", stats.get("fps", 0))
         with col2:
             st.metric("Personen", stats.get("person_count", 0))
         with col3:
             st.metric("Objekte", stats.get("object_count", 0))
-else:
-    with stats_placeholder.container():
+        with col4:
+            st.metric(
+                "Verworfene Frames",
+                stats.get("dropped", 0),
+                help="Übersprungene Kamerabilder, wenn die Erkennung nicht hinterherkommt.",
+            )
+    else:
         st.info("Kamera starten, um die Erkennung zu aktivieren.")
+
+
+render_stats()
 
 # ---------------------------------------------------------------------------
 # Legend
