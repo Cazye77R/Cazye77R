@@ -20,6 +20,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.metrics import balanced_accuracy_score
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_sample_weight
@@ -38,6 +39,27 @@ logger.debug(f"Module loaded: {__name__}")
 
 # Methoden ohne "Auto (KI wählt)"
 _METHODS = [m for m in ANALYSIS_METHODS if m != "Auto (KI wählt)"]
+
+# Repo-Root als Anker für alle Persistenz-Pfade (unabhängig vom CWD)
+_ROOT_DIR = Path(os.path.dirname(os.path.dirname(__file__)))
+
+
+def _safe_ticker(ticker: str) -> str:
+    """
+    Sanitisiert einen Ticker für die Verwendung als Dateiname.
+    Pfad-Separatoren und Sonderzeichen werden ersetzt, führende Punkte
+    entfernt (kein Traversal wie '../../x', keine versteckten Dateien).
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9.^=-]", "_", ticker.upper()).lstrip(".")
+    return cleaned or "_"
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    """Schreibt JSON atomar (tmp + os.replace) – kein Datenverlust bei Crash."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w") as f:
+        json.dump(payload, f, indent=2, default=str)
+    os.replace(tmp, path)
 
 
 # ===========================================================================
@@ -61,11 +83,12 @@ class BanditBase(ABC):
 
 class UCB1Bandit(BanditBase):
     """
-    Standard-UCB1 (Upper Confidence Bound 1).
+    Standard-UCB1 (Upper Confidence Bound 1), kanonische Form:
 
-    score(m) = accuracy(m) + sqrt(c * ln(total+1) / count(m))
+    score(m) = accuracy(m) + c * sqrt(ln(total+1) / count(m))
 
-    Alle historischen Rewards werden gleich gewichtet – gut für
+    c = sqrt(2) ≈ 1.414 ist der theoretische Standardwert. Alle
+    historischen Rewards werden gleich gewichtet – gut für
     stationäre Reward-Verteilungen.
     """
 
@@ -87,7 +110,7 @@ class UCB1Bandit(BanditBase):
         for m in methods:
             acc = method_scores.get(m, 0.5)
             n   = max(1, counts.get(m, 1))
-            ucb = acc + math.sqrt(self.c * math.log(total + 1) / n)
+            ucb = acc + self.c * math.sqrt(math.log(total + 1) / n)
             if ucb > best_score:
                 best_score, best_method = ucb, m
         return best_method
@@ -410,6 +433,7 @@ class StockTrainer:
     CANDLE_WINDOW     = 60      # Kerzen im LLM-Kontext
     MAX_INSIGHTS      = 15      # Maximale gespeicherte Insights
     TABLE_ROWS        = 20      # Detailzeilen in der Kerzen-Tabelle
+    NEUTRAL_BAND_PCT  = 0.25    # |Änderung| unterhalb → Ist-Richtung NEUTRAL
 
     def __init__(self, base_dir: str | None = None) -> None:
         root = Path(os.path.dirname(os.path.dirname(__file__)))
@@ -421,7 +445,7 @@ class StockTrainer:
     # ------------------------------------------------------------------
 
     def _state_path(self, symbol: str) -> Path:
-        return self._state_dir / f"{symbol.upper()}.json"
+        return self._state_dir / f"{_safe_ticker(symbol)}.json"
 
     def _default_state(self, symbol: str) -> dict:
         return {
@@ -446,8 +470,12 @@ class StockTrainer:
         path = self._state_path(symbol)
         if not path.exists():
             return self._default_state(symbol)
-        with open(path) as f:
-            state = json.load(f)
+        try:
+            with open(path) as f:
+                state = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning(f"Trainingszustand {path.name} unlesbar ({exc}) – Neustart mit Defaults.")
+            return self._default_state(symbol)
         # Schema-Migration: fehlende Schlüssel ergänzen
         defaults = self._default_state(symbol)
         for key, val in defaults.items():
@@ -458,9 +486,7 @@ class StockTrainer:
         return state
 
     def _save_state(self, state: dict) -> None:
-        path = self._state_path(state["symbol"])
-        with open(path, "w") as f:
-            json.dump(state, f, indent=2, default=str)
+        _atomic_write_json(self._state_path(state["symbol"]), state)
 
     def list_trained(self) -> list[str]:
         return [p.stem for p in self._state_dir.glob("*.json")]
@@ -503,12 +529,21 @@ class StockTrainer:
                 f"Zu wenige Datenpunkte: {len(df)} (mind. 30)", symbol, method
             )
 
-        # --- Backtest-Setup: letzter Balken als Validierung ---
-        train_df   = df.iloc[:-1]       # alles bis auf letzte Kerze
-        close_prev = float(df["Close"].iloc[-2])
-        close_now  = float(df["Close"].iloc[-1])
-        actual_dir = "UP" if close_now > close_prev else "DOWN"
+        # --- Backtest-Setup: zufälliger Validierungs-Cutoff ---
+        # Ein fester Cutoff am letzten Balken würde in jedem Zyklus denselben
+        # Tag bewerten – N Zyklen wären dann N Wiederholungen EINER Beobachtung.
+        rng = np.random.default_rng()
+        k   = int(rng.integers(max(20, int(len(df) * 0.6)), len(df)))
+        train_df   = df.iloc[:k]        # LLM sieht nur Daten vor dem Validierungs-Bar
+        close_prev = float(df["Close"].iloc[k - 1])
+        close_now  = float(df["Close"].iloc[k])
         actual_chg = (close_now - close_prev) / close_prev * 100
+        # Dead-Band: kleine Bewegungen zählen als NEUTRAL – sonst kann eine
+        # korrekte NEUTRAL-Vorhersage nie als Treffer gewertet werden
+        if abs(actual_chg) < self.NEUTRAL_BAND_PCT:
+            actual_dir = "NEUTRAL"
+        else:
+            actual_dir = "UP" if close_now > close_prev else "DOWN"
 
         # --- LLM-Anfrage ---
         if not is_llm_ready():
@@ -1033,19 +1068,28 @@ def _normalize_parsed(data: dict) -> dict:
 # ===========================================================================
 
 def _state_path(ticker: str) -> Path:
-    path = Path(TRAINING_STATE_DIR)
+    path = _ROOT_DIR / TRAINING_STATE_DIR
     path.mkdir(parents=True, exist_ok=True)
-    return path / f"{ticker.upper()}.json"
+    return path / f"{_safe_ticker(ticker)}.json"
 
 
 def _model_path(ticker: str) -> Path:
-    path = Path(TRAINING_STATE_DIR)
+    path = _ROOT_DIR / TRAINING_STATE_DIR
     path.mkdir(parents=True, exist_ok=True)
-    return path / f"{ticker.upper()}_model.joblib"
+    return path / f"{_safe_ticker(ticker)}_model.joblib"
 
 
-def _legacy_pkl_path(ticker: str) -> Path:
-    return Path(TRAINING_STATE_DIR) / f"{ticker.upper()}_model.pkl"
+def _model_hash_path(ticker: str) -> Path:
+    return _model_path(ticker).with_suffix(".joblib.sha256")
+
+
+def _file_sha256(path: Path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def load_state(ticker: str) -> dict:
@@ -1055,10 +1099,8 @@ def load_state(ticker: str) -> dict:
 
 
 def save_state(ticker: str, state: dict) -> None:
-    """Persistiert den Zustand als JSON."""
-    p = _state_path(ticker)
-    with open(p, "w") as f:
-        json.dump(state, f, indent=2, default=str)
+    """Persistiert den Zustand als JSON (atomar)."""
+    _atomic_write_json(_state_path(ticker), state)
 
 
 def list_trained_stocks() -> list[str]:
@@ -1141,7 +1183,7 @@ def build_labels(
 def train(ticker: str, df: pd.DataFrame, horizon: int = 5) -> dict:
     """
     Trainiert ein GradientBoosting-Modell für einen Ticker.
-    Persistiert Modell (pkl) + State (json).
+    Persistiert Modell (joblib + SHA256) + State (json).
     Returns aktualisierter State-Dict.
     """
     state    = load_state(ticker)
@@ -1156,16 +1198,26 @@ def train(ticker: str, df: pd.DataFrame, horizon: int = 5) -> dict:
         raise ValueError(
             f"Zu wenige Datenpunkte für Training: {len(X)} (mind. 60 nötig)"
         )
+    if len(np.unique(y)) < 2:
+        raise ValueError(
+            "Labels enthalten nur eine Klasse – Training nicht sinnvoll "
+            "(z. B. durchgehend steigende/fallende Periode)."
+        )
 
     # TimeSeriesSplit: kein zufälliges Sampling, strenge zeitliche Reihenfolge.
     # Jeder Fold: Scaler nur auf Train-Slice fitten (kein Data Leakage).
     tscv       = TimeSeriesSplit(n_splits=5)
     cv_scores  = []
-    model, scaler = None, None
 
     for fold_train_idx, fold_test_idx in tscv.split(X):
+        # Embargo: die letzten `horizon` Trainingszeilen tragen Forward-Labels
+        # aus dem Test-Fenster – ohne Purge leckt Zukunftsinformation
+        if len(fold_train_idx) > horizon:
+            fold_train_idx = fold_train_idx[:-horizon]
         X_tr, X_te = X[fold_train_idx], X[fold_test_idx]
         y_tr, y_te = y[fold_train_idx], y[fold_test_idx]
+        if len(np.unique(y_tr)) < 2:
+            continue
 
         sc = StandardScaler()
         X_tr_s = sc.fit_transform(X_tr)   # fit NUR auf Train
@@ -1176,16 +1228,29 @@ def train(ticker: str, df: pd.DataFrame, horizon: int = 5) -> dict:
         clf = GradientBoostingClassifier(n_estimators=100, max_depth=3, random_state=42)
         clf.fit(X_tr_s, y_tr, sample_weight=sw)
 
-        cv_scores.append(float(clf.score(X_te_s, y_te)))
-        model, scaler = clf, sc  # letzter Fold = aktuellstes Training
+        # Balanced Accuracy: plain Accuracy belohnt bei unausgeglichenen
+        # Klassen schon den Mehrheits-Rater
+        cv_scores.append(float(balanced_accuracy_score(y_te, clf.predict(X_te_s))))
 
+    if not cv_scores:
+        raise ValueError("Kein CV-Fold mit beiden Klassen – Training abgebrochen.")
     accuracy = float(np.mean(cv_scores))
+
+    # Finaler Refit auf ALLEN Daten – das persistierte Modell soll auch die
+    # jüngste Historie kennen; cv_scores bleiben die Out-of-Sample-Schätzung
+    scaler = StandardScaler()
+    X_all  = scaler.fit_transform(X)
+    sw_all = compute_sample_weight("balanced", y)
+    model  = GradientBoostingClassifier(n_estimators=100, max_depth=3, random_state=42)
+    model.fit(X_all, y, sample_weight=sw_all)
 
     joblib.dump(
         {"model": model, "scaler": scaler, "feature_names": list(features.columns)},
         _model_path(ticker),
         compress=3,
     )
+    # Prüfsumme für sichere Verifikation beim Laden (siehe load_model)
+    _model_hash_path(ticker).write_text(_file_sha256(_model_path(ticker)))
 
     # State aktualisieren (neues + Legacy-Schema)
     state["symbol"]           = ticker.upper()
@@ -1218,27 +1283,28 @@ def load_model(ticker: str) -> Optional[dict]:
     """
     Lädt gespeichertes sklearn-Modell + Scaler.
 
-    Migration: Falls nur eine alte .pkl-Datei existiert, wird sie einmalig
-    mit pickle geladen, als .joblib gespeichert und die .pkl-Datei gelöscht.
-    Gibt None zurück wenn kein Modell existiert.
+    joblib deserialisiert beliebigen Code – deshalb wird die Datei nur
+    geladen, wenn die beim Training geschriebene SHA256-Prüfsumme passt.
+    Gibt None zurück wenn kein (verifizierbares) Modell existiert.
     """
-    import pickle  # lokaler Import – nur für Migrations-Pfad benötigt
+    p = _model_path(ticker)
+    if not p.exists():
+        return None
 
-    p     = _model_path(ticker)
-    p_old = _legacy_pkl_path(ticker)
-
-    if p.exists():
-        return joblib.load(p)
-
-    if p_old.exists():
+    hp = _model_hash_path(ticker)
+    if not hp.exists():
         logger.warning(
-            f"Migriere Legacy-Modell {p_old.name} → {p.name} (pickle → joblib)."
+            f"Modell {p.name} ohne Prüfsummen-Datei – wird nicht geladen. "
+            f"Bitte neu trainieren."
         )
-        with open(p_old, "rb") as fh:
-            payload = pickle.load(fh)  # noqa: S301 – einmalige Migration bekannter Dateien
-        joblib.dump(payload, p, compress=3)
-        p_old.unlink()
-        logger.info(f"Migration abgeschlossen. Alte Datei {p_old.name} gelöscht.")
-        return payload
+        return None
+    expected = hp.read_text().strip()
+    actual   = _file_sha256(p)
+    if actual != expected:
+        logger.error(
+            f"Prüfsummen-Mismatch für {p.name} (erwartet {expected[:12]}…, "
+            f"ist {actual[:12]}…) – Datei manipuliert oder beschädigt, wird nicht geladen."
+        )
+        return None
 
-    return None
+    return joblib.load(p)
