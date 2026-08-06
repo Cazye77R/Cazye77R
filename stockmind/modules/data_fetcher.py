@@ -6,6 +6,7 @@ technischen Indikatoren (ta-Bibliothek) und lokalem 24h-Cache.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -148,7 +149,13 @@ def search_stocks(query: str) -> list[dict]:
             if c["symbol"] not in seen:
                 results.append(c)
 
-    return [r for r in results if "error" not in r] or results
+    # Fehler-Dicts nie als Treffer zurückgeben – sie sähen in der UI wie
+    # ein Suchergebnis aus. Fehler nur loggen, Aufrufer sieht "keine Treffer".
+    clean = [r for r in results if "error" not in r]
+    for r in results:
+        if "error" in r:
+            logger.warning(f"Ticker-Suche '{query}': {r['error']}")
+    return clean
 
 
 def _yahoo_search(query: str) -> list[dict]:
@@ -225,7 +232,7 @@ def _search_crypto_static(query: str) -> list[dict]:
     return matches
 
 
-# Rückwärtskompatibilität für ui_components.py
+# Rückwärtskompatibilität
 def search_ticker(query: str) -> list[dict]:
     """Alias für search_stocks() (Rückwärtskompatibilität)."""
     return search_stocks(query)
@@ -277,7 +284,7 @@ def get_wkn_symbol(wkn: str) -> str:
         "677650": "FRE.DE",      # Fresenius SE
         "578560": "FME.DE",      # Fresenius Medical Care
         "543900": "HEN3.DE",     # Henkel Vz.
-        "604700": "INF.DE",      # Infineon — eigentlich IFX.DE
+        "604700": "IFX.DE",      # Infineon (alte WKN)
         "623100": "IFX.DE",      # Infineon
         "648300": "LIN.DE",      # Linde
         "555480": "SIE.DE",      # Siemens
@@ -420,7 +427,8 @@ def fetch_ohlcv(
         DataFrame mit OHLCV + Indikatoren.
         Bei Fehler: leeres DataFrame mit df.attrs["error"] gesetzt – kein Crash.
     """
-    symbol = symbol.strip().upper()
+    symbol    = symbol.strip().upper()
+    requested = symbol   # Original-Anfrage – für den Cache-Key nach Fallbacks
 
     # Cache prüfen
     cached = _load_cache(symbol, period, interval)
@@ -496,8 +504,12 @@ def fetch_ohlcv(
     # Tatsächlich verwendeten Ticker speichern (nach möglichem .DE-Fallback)
     df.attrs["symbol"] = symbol
 
-    # Cachen
-    _save_cache(symbol, period, interval, df)
+    # Unter dem AUFGERUFENEN Symbol cachen – sonst läuft z. B. "BMW" bei
+    # jedem Aufruf erneut durch die komplette Fallback-Kette. Zusätzlich
+    # unter dem aufgelösten Symbol, damit auch direkte Anfragen treffen.
+    _save_cache(requested, period, interval, df)
+    if symbol != requested:
+        _save_cache(symbol, period, interval, df)
 
     return df
 
@@ -760,25 +772,53 @@ def _cache_path(symbol: str, period: str, interval: str) -> Path:
     return cache_dir / f"{key}.parquet"
 
 
+def _cache_ttl_s(interval: str) -> int:
+    """TTL abhängig vom Intervall – Intraday-Daten dürfen nicht 24h alt sein."""
+    if interval in ("1m", "5m", "15m", "30m", "1h"):
+        return min(_CACHE_TTL_S, 3600)
+    return _CACHE_TTL_S
+
+
 def _load_cache(symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
     """Lädt gecachte Daten wenn vorhanden und nicht abgelaufen."""
     path = _cache_path(symbol, period, interval)
     if not path.exists():
         return None
-    if time.time() - path.stat().st_mtime > _CACHE_TTL_S:
+    if time.time() - path.stat().st_mtime > _cache_ttl_s(interval):
         return None     # Abgelaufen – nicht löschen, wird beim nächsten Fetch überschrieben
     try:
-        return pd.read_parquet(path)
+        df = pd.read_parquet(path)
     except Exception as _exc:
-        logger.debug(f"Cache-Datei korrupt oder unlesbar ({path.name}): {_exc}")
+        # Korrupte Datei löschen – sonst bleibt sie dauerhaft unlesbar liegen
+        logger.warning(f"Cache-Datei korrupt ({path.name}): {_exc} – wird gelöscht.")
+        try:
+            path.unlink()
+        except OSError:
+            pass
         return None
+    # attrs überleben Parquet nicht → aus Sidecar-Metadaten wiederherstellen
+    meta_path = path.with_suffix(".meta.json")
+    if meta_path.exists():
+        try:
+            with open(meta_path) as fh:
+                df.attrs["symbol"] = json.load(fh).get("symbol", symbol)
+        except (OSError, json.JSONDecodeError):
+            df.attrs["symbol"] = symbol
+    else:
+        df.attrs["symbol"] = symbol
+    return df
 
 
 def _save_cache(symbol: str, period: str, interval: str, df: pd.DataFrame) -> None:
-    """Persistiert einen DataFrame als Cache-Eintrag."""
+    """Persistiert einen DataFrame als Cache-Eintrag (atomar, mit Metadaten)."""
     path = _cache_path(symbol, period, interval)
+    tmp  = path.with_suffix(".parquet.tmp")
     try:
-        df.to_parquet(path, compression="snappy")
+        df.to_parquet(tmp, compression="snappy")
+        os.replace(tmp, path)
+        # Aufgelöstes Symbol (nach .DE-Fallback) als Sidecar sichern
+        with open(path.with_suffix(".meta.json"), "w") as fh:
+            json.dump({"symbol": df.attrs.get("symbol", symbol)}, fh)
     except Exception as _exc:
         logger.warning(f"Cache-Schreiben fehlgeschlagen ({path.name}): {_exc}")
 
