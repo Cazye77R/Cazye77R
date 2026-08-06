@@ -1,5 +1,5 @@
 """
-StockMind – Tests für Modell-Persistenz (joblib round-trip + .pkl-Migration).
+StockMind – Tests für Modell-Persistenz (joblib round-trip + sichere Verifikation).
 
 Alle Tests laufen offline in einem temporären Verzeichnis.
 """
@@ -114,95 +114,99 @@ class TestJoblibRoundTrip:
 
 
 # ---------------------------------------------------------------------------
-# Migration: .pkl → .joblib
+# Sicheres Modell-Laden: SHA256-Verifikation, kein Pickle-Pfad mehr
 # ---------------------------------------------------------------------------
 
-class TestPickleMigration:
+class TestSecureModelLoading:
     """
-    Testet die Migrations-Logik in load_model():
-    alte .pkl-Datei → einmalig laden → als .joblib speichern → .pkl löschen.
+    load_model() lädt joblib-Dateien nur noch mit gültiger SHA256-Prüfsumme.
+    Der frühere pickle-Migrationspfad wurde entfernt (RCE-Vektor: pickle
+    deserialisiert beliebigen Code aus manipulierbaren Dateien).
     """
 
-    def _write_legacy_pkl(self, path: Path) -> dict:
-        """Schreibt eine Legacy-.pkl-Datei wie die alte trainer.py es tat."""
+    def _dump_with_hash(self, trainer_mod, ticker: str) -> dict:
         payload = _make_payload()
-        with open(path, "wb") as fh:
-            pickle.dump(payload, fh)
+        p = trainer_mod._model_path(ticker)
+        joblib.dump(payload, p, compress=3)
+        trainer_mod._model_hash_path(ticker).write_text(
+            trainer_mod._file_sha256(p)
+        )
         return payload
 
-    def test_migration_creates_joblib(self, tmp_path, monkeypatch):
-        """Nach Migration muss .joblib existieren."""
-        import modules.trainer as trainer_mod
-        # TRAINING_STATE_DIR wird in trainer.py als Modul-Name importiert
-        monkeypatch.setattr(trainer_mod, "TRAINING_STATE_DIR", str(tmp_path))
-
-        ticker = "MIGRATE"
-        pkl_path = tmp_path / f"{ticker}_model.pkl"
-        self._write_legacy_pkl(pkl_path)
-
-        result = trainer_mod.load_model(ticker)
-        joblib_path = tmp_path / f"{ticker}_model.joblib"
-
-        assert joblib_path.exists(), ".joblib-Datei muss nach Migration vorhanden sein"
-        assert result is not None
-
-    def test_migration_deletes_pkl(self, tmp_path, monkeypatch):
-        """Nach Migration muss alte .pkl-Datei gelöscht sein."""
+    def test_legacy_pkl_is_ignored(self, tmp_path, monkeypatch):
+        """Eine alte .pkl-Datei darf weder geladen noch angefasst werden."""
         import modules.trainer as trainer_mod
         monkeypatch.setattr(trainer_mod, "TRAINING_STATE_DIR", str(tmp_path))
 
-        ticker = "DELPKL"
+        ticker = "LEGACY"
         pkl_path = tmp_path / f"{ticker}_model.pkl"
-        self._write_legacy_pkl(pkl_path)
+        with open(pkl_path, "wb") as fh:
+            pickle.dump(_make_payload(), fh)
 
-        trainer_mod.load_model(ticker)
+        assert trainer_mod.load_model(ticker) is None
+        assert pkl_path.exists(), ".pkl darf nicht gelöscht/migriert werden"
+        assert not (tmp_path / f"{ticker}_model.joblib").exists()
 
-        assert not pkl_path.exists(), ".pkl-Datei muss nach Migration gelöscht sein"
-
-    def test_migration_predictions_intact(self, tmp_path, monkeypatch):
-        """Migriertes Modell muss dieselben Vorhersagen liefern wie Original."""
+    def test_joblib_without_hash_is_rejected(self, tmp_path, monkeypatch):
+        """joblib ohne Prüfsummen-Datei → None (nicht vertrauenswürdig)."""
         import modules.trainer as trainer_mod
         monkeypatch.setattr(trainer_mod, "TRAINING_STATE_DIR", str(tmp_path))
 
-        ticker = "PREDTEST"
-        pkl_path = tmp_path / f"{ticker}_model.pkl"
-        original = self._write_legacy_pkl(pkl_path)
+        ticker = "NOHASH"
+        joblib.dump(_make_payload(), trainer_mod._model_path(ticker), compress=3)
 
-        migrated = trainer_mod.load_model(ticker)
-        assert migrated is not None
+        assert trainer_mod.load_model(ticker) is None
+
+    def test_joblib_with_valid_hash_loads(self, tmp_path, monkeypatch):
+        """joblib mit passender Prüfsumme lädt und liefert intakte Vorhersagen."""
+        import modules.trainer as trainer_mod
+        monkeypatch.setattr(trainer_mod, "TRAINING_STATE_DIR", str(tmp_path))
+
+        ticker = "VALID"
+        original = self._dump_with_hash(trainer_mod, ticker)
+
+        loaded = trainer_mod.load_model(ticker)
+        assert loaded is not None
+        assert loaded["feature_names"] == original["feature_names"]
 
         rng = np.random.default_rng(99)
         X_test = rng.normal(size=(30, 5)).astype(np.float32)
         np.testing.assert_array_equal(
             _predict(original, X_test),
-            _predict(migrated, X_test),
+            _predict(loaded, X_test),
         )
 
+    def test_tampered_joblib_is_rejected(self, tmp_path, monkeypatch):
+        """Nachträglich veränderte joblib-Datei → Prüfsummen-Mismatch → None."""
+        import modules.trainer as trainer_mod
+        monkeypatch.setattr(trainer_mod, "TRAINING_STATE_DIR", str(tmp_path))
+
+        ticker = "TAMPERED"
+        self._dump_with_hash(trainer_mod, ticker)
+        with open(trainer_mod._model_path(ticker), "ab") as fh:
+            fh.write(b"malicious")
+
+        assert trainer_mod.load_model(ticker) is None
+
     def test_no_model_returns_none(self, tmp_path, monkeypatch):
-        """Wenn weder .joblib noch .pkl existiert, muss None zurückkommen."""
+        """Wenn kein Modell existiert, muss None zurückkommen."""
         import modules.trainer as trainer_mod
         monkeypatch.setattr(trainer_mod, "TRAINING_STATE_DIR", str(tmp_path))
 
         assert trainer_mod.load_model("NONEXISTENT") is None
 
-    def test_joblib_preferred_over_pkl(self, tmp_path, monkeypatch):
-        """Wenn beide Dateien existieren, wird .joblib bevorzugt (kein Migration-Log)."""
+    def test_train_writes_hash_file(self, tmp_path, monkeypatch):
+        """Der von train() genutzte Dump-Pfad erzeugt eine .sha256-Datei."""
         import modules.trainer as trainer_mod
         monkeypatch.setattr(trainer_mod, "TRAINING_STATE_DIR", str(tmp_path))
 
-        ticker = "BOTH"
-        payload_jl = _make_payload()
-        joblib.dump(payload_jl, tmp_path / f"{ticker}_model.joblib", compress=3)
-        # kaputtes .pkl daneben — darf nicht angefasst werden
-        (tmp_path / f"{ticker}_model.pkl").write_bytes(b"garbage")
-
-        result = trainer_mod.load_model(ticker)
-        assert result is not None
-        assert result["feature_names"] == payload_jl["feature_names"]
+        ticker = "HASHED"
+        self._dump_with_hash(trainer_mod, ticker)
+        assert trainer_mod._model_hash_path(ticker).exists()
 
 
 # ---------------------------------------------------------------------------
-# trainer._model_path Extension
+# trainer._model_path Extension & Ticker-Sanitisierung
 # ---------------------------------------------------------------------------
 
 class TestModelPath:
@@ -212,8 +216,11 @@ class TestModelPath:
         p = trainer_mod._model_path("AAPL")
         assert p.suffix == ".joblib"
 
-    def test_legacy_path_extension_is_pkl(self, tmp_path, monkeypatch):
+    def test_ticker_path_traversal_is_neutralized(self, tmp_path, monkeypatch):
+        """Ticker mit Pfad-Separatoren dürfen das State-Verzeichnis nicht verlassen."""
         import modules.trainer as trainer_mod
         monkeypatch.setattr(trainer_mod, "TRAINING_STATE_DIR", str(tmp_path))
-        p = trainer_mod._legacy_pkl_path("AAPL")
-        assert p.suffix == ".pkl"
+        p = trainer_mod._model_path("../../etc/passwd")
+        assert p.parent == tmp_path
+        assert ".." not in p.name.split("_")[0].replace(".", "")
+        assert "/" not in p.name and "\\" not in p.name
