@@ -5,7 +5,7 @@ REM
 REM  Einfach doppelklicken. Beim ersten Start werden die benoetigten
 REM  Pakete nach Rueckfrage in eine eigene Umgebung (.venv) installiert.
 REM
-REM  Benoetigt Python 3.9 - 3.12. Neuere Versionen (3.13, 3.14) gehen
+REM  Benoetigt Python 3.10 - 3.12. Neuere Versionen (3.13, 3.14) gehen
 REM  NICHT: fuer sie gibt es kein fertiges mediapipe-Paket, und ein Bau
 REM  aus dem Quelltext ist auf Windows nicht praktikabel.
 REM
@@ -17,8 +17,9 @@ setlocal enabledelayedexpansion
 title Kamera-Erkennung
 cd /d "%~dp0"
 
-REM Von mediapipe gesetzte Grenzen: >= 3.9 und < 3.13
-set "VERSION_TEST=import sys; sys.exit(0 if (3,9) <= sys.version_info < (3,13) else 1)"
+REM Obergrenze < 3.13 von mediapipe, Untergrenze >= 3.10 von streamlit /
+REM streamlit-webrtc / aiortc (alle deklarieren requires_python >= 3.10).
+set "VERSION_TEST=import sys; sys.exit(0 if (3,10) <= sys.version_info < (3,13) else 1)"
 
 echo.
 echo  ============================================
@@ -34,7 +35,7 @@ set "PY="
 
 REM Gezielt nach unterstuetzten Versionen fragen. Der py-Launcher waehlt
 REM damit die richtige, auch wenn zusaetzlich ein zu neues Python da ist.
-for %%V in (3.12 3.11 3.10 3.9) do (
+for %%V in (3.12 3.11 3.10) do (
     if not defined PY (
         py -%%V -c "%VERSION_TEST%" >nul 2>&1
         if not errorlevel 1 set "PY=py -%%V"
@@ -87,20 +88,24 @@ REM ---- Sind alle Pakete da? ----------------------------------------
 if errorlevel 1 goto :installation
 goto :starten
 
-REM ---- Erstinstallation (mit Rueckfrage) ---------------------------
+REM ---- Installation / Aktualisierung (mit Rueckfrage) --------------
 :installation
-echo  Die benoetigten Pakete sind noch nicht installiert.
+if exist "%VENV_PY%" (
+    echo  Es fehlen Pakete oder sie sind nicht auf dem passenden Stand.
+    echo  Die vorhandene Umgebung .venv wird aktualisiert.
+) else (
+    echo  Die benoetigten Pakete sind noch nicht installiert.
+    echo  Die Installation erfolgt isoliert im Unterordner .venv und
+    echo  laesst deine System-Python-Installation unveraendert.
+)
 echo.
-echo  Es werden ca. 2-3 GB heruntergeladen (torch, ultralytics,
+echo  Es werden bis zu ca. 2-3 GB heruntergeladen (torch, ultralytics,
 echo  mediapipe, streamlit ...). Das dauert je nach Verbindung
 echo  einige Minuten.
 echo.
-echo  Die Installation erfolgt isoliert im Unterordner .venv und
-echo  laesst deine System-Python-Installation unveraendert.
-echo.
 
 set "ANTWORT="
-set /p "ANTWORT=Jetzt installieren? [J/n] "
+set /p "ANTWORT=Jetzt fortfahren? [J/n] "
 if /i "!ANTWORT!"=="n"    goto :abbruch
 if /i "!ANTWORT!"=="nein" goto :abbruch
 
@@ -117,11 +122,20 @@ echo  ==^> Aktualisiere pip
 
 echo.
 echo  ==^> Installiere Pakete
+REM --upgrade, damit ein bereits vorhandener, zu alter Paketstand aktiv
+REM hochgezogen wird statt stehen zu bleiben.
 REM --only-binary fuer die kompilierten Pakete: fehlt ein fertiges Wheel,
 REM bricht pip sofort verstaendlich ab, statt einen aussichtslosen
 REM Compiler-Lauf zu starten (genau das erzeugte die MSVC-Fehlermeldung).
-"%VENV_PY%" -m pip install --only-binary=av,mediapipe,torch,opencv-contrib-python -r requirements.txt
+"%VENV_PY%" -m pip install --upgrade --only-binary=av,mediapipe,torch,opencv-contrib-python -r requirements.txt
 if errorlevel 1 goto :install_fehler
+
+REM Nach der Installation gegenpruefen. Ohne diesen Schritt wuerde ein
+REM unvollstaendiger Paketstand erst als roher Python-Traceback auffallen.
+echo.
+echo  ==^> Pruefe Installation
+"%VENV_PY%" -c "import streamlit, streamlit_webrtc, av, cv2, ultralytics, mediapipe" 2>&1
+if errorlevel 1 goto :pruefung_fehler
 
 echo.
 echo  ==^> Installation abgeschlossen
@@ -237,6 +251,20 @@ echo.
 echo  Moegliche Ursachen:
 echo    - kein Schreibrecht in diesem Ordner
 echo    - Python-Installation unvollstaendig ^(venv-Modul fehlt^)
+echo.
+pause
+exit /b 1
+
+:pruefung_fehler
+echo.
+echo  FEHLER: Die Installation lief durch, aber ein Paket laesst sich
+echo  nicht laden. Die Meldung oberhalb nennt das betroffene Modul.
+echo.
+echo  Das deutet auf einen widerspruechlichen Paketstand hin. Am
+echo  zuverlaessigsten hilft ein sauberer Neuaufbau:
+echo.
+echo    1. Den Ordner .venv in diesem Verzeichnis loeschen
+echo    2. Diese Datei erneut doppelklicken
 echo.
 pause
 exit /b 1

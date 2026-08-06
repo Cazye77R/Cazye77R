@@ -36,20 +36,23 @@ if [[ "$do_update" -eq 1 ]]; then
     git pull origin "$BRANCH"
 fi
 
-# Python-Version prüfen, bevor irgendetwas installiert wird. mediapipe wird
-# für Python 3.13+ nicht als fertiges Paket angeboten; ohne diese Prüfung
-# versucht pip einen Build aus dem Quelltext, der mit einer irreführenden
-# Compiler-Fehlermeldung abbricht.
-if ! "$PYTHON" -c 'import sys; sys.exit(0 if (3,9) <= sys.version_info < (3,13) else 1)' 2>/dev/null; then
+# Python-Version prüfen, bevor irgendetwas installiert wird.
+#   Obergrenze < 3.13: mediapipe wird dafür nicht als fertiges Paket
+#     angeboten; ohne diese Prüfung versucht pip einen Build aus dem
+#     Quelltext, der mit einer irreführenden Compiler-Meldung abbricht.
+#   Untergrenze >= 3.10: streamlit, streamlit-webrtc und aiortc
+#     deklarieren alle requires_python >= 3.10.
+if ! "$PYTHON" -c 'import sys; sys.exit(0 if (3,10) <= sys.version_info < (3,13) else 1)' 2>/dev/null; then
     version="$("$PYTHON" -c 'import sys; print(sys.version.split()[0])' 2>/dev/null || echo 'nicht gefunden')"
     cat >&2 <<EOF
 FEHLER: Python-Version wird nicht unterstützt.
 
   Gefunden:  $version
-  Benötigt:  Python 3.9 - 3.12
+  Benötigt:  Python 3.10 - 3.12
 
-Grund: mediapipe (Körper-Tracking) gibt es für Python 3.13 und neuer
-nicht als fertiges Paket.
+Gründe: mediapipe (Körper-Tracking) gibt es für Python 3.13 und neuer
+nicht als fertiges Paket; streamlit und streamlit-webrtc setzen
+mindestens 3.10 voraus.
 
 Falls eine passende Version installiert ist, gezielt auswählen:
 
@@ -60,9 +63,11 @@ fi
 
 if [[ "$do_setup" -eq 1 ]]; then
     echo "==> Installiere Abhängigkeiten"
+    # --upgrade, damit ein bereits vorhandener, zu alter Paketstand aktiv
+    # hochgezogen wird statt stehen zu bleiben.
     # --only-binary für die kompilierten Pakete: fehlt ein Wheel, bricht pip
     # sofort verständlich ab statt einen aussichtslosen Compiler-Lauf zu starten.
-    "$PYTHON" -m pip install \
+    "$PYTHON" -m pip install --upgrade \
         --only-binary=av,mediapipe,torch,opencv-contrib-python \
         -r requirements.txt
 fi
@@ -83,6 +88,11 @@ Installiere sie mit:
 
 Benötigt werden: streamlit, streamlit-webrtc, av, cv2 (OpenCV),
 ultralytics und mediapipe.
+
+Bleibt der Fehler nach --setup bestehen, ist der Paketstand
+widersprüchlich. Dann die Umgebung neu aufbauen:
+
+    rm -rf .venv && ./start.sh --setup
 EOF
     exit 1
 fi

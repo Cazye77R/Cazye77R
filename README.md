@@ -58,10 +58,12 @@ Zweite, eigenständige Anwendung in diesem Repository (`camera_detection/`): erk
 über die Kamera, was sich vor der Linse befindet — mit Rahmen, Beschriftung und
 vollständigem Körper-Skeleton.
 
-## Voraussetzung: Python 3.9 – 3.12
+## Voraussetzung: Python 3.10 – 3.12
 
-> **Python 3.13 und 3.14 funktionieren nicht.** Für sie gibt es kein fertiges
-> `mediapipe`-Paket (das Körper-Tracking), weder für Windows noch für Linux/macOS.
+> **Python 3.13 und 3.14 funktionieren nicht**, ebensowenig 3.9 und älter.
+> Für 3.13+ gibt es kein fertiges `mediapipe`-Paket (das Körper-Tracking), weder
+> für Windows noch für Linux/macOS; unterhalb von 3.10 scheitert es an
+> `streamlit` und `streamlit-webrtc`, die mindestens 3.10 voraussetzen.
 > pip versucht dann einen Build aus dem Quelltext und bricht mit einer irreführenden
 > Meldung ab — unter Windows mit *„Microsoft Visual C++ 14.0 or greater is required"*.
 > **Die C++ Build Tools zu installieren hilft dabei nicht**, mediapipe lässt sich so
@@ -75,7 +77,7 @@ suchen sich gezielt eine passende Version.
 
 **Windows:** Doppelklick auf `Kamera-Erkennung.bat`.
 
-Der Starter sucht automatisch nach einem passenden Python (3.12 → 3.11 → 3.10 → 3.9).
+Der Starter sucht automatisch nach einem passenden Python (3.12 → 3.11 → 3.10).
 Findet er keins, bietet er die Installation von Python 3.12 per `winget` an oder zeigt
 die Anleitung zum manuellen Download.
 

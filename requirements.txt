@@ -1,13 +1,17 @@
 # ---------------------------------------------------------------------------
-# BENOETIGT PYTHON 3.9 - 3.12
+# BENOETIGT PYTHON 3.10 - 3.12
 #
-# Die Obergrenze setzt mediapipe: fuer Python 3.13 und neuer werden keine
+# Obergrenze (3.12) setzt mediapipe: fuer Python 3.13 und neuer werden keine
 # fertigen Pakete (Wheels) angeboten, weder fuer Windows noch fuer Linux/macOS.
 # pip versucht dann einen Build aus dem Quelltext und bricht mit einer
 # irrefuehrenden Compiler-Meldung ab ("Microsoft Visual C++ 14.0 or greater
 # is required" bzw. fehlendes Bazel). Ein Compiler behebt das NICHT --
-# mediapipe laesst sich so nicht sinnvoll bauen. Stattdessen Python 3.12
-# verwenden; die Starter (Kamera-Erkennung.bat / start.sh) pruefen das.
+# mediapipe laesst sich so nicht sinnvoll bauen.
+#
+# Untergrenze (3.10) setzen streamlit, streamlit-webrtc und aiortc: sie
+# deklarieren alle requires_python >= 3.10.
+#
+# Die Starter (Kamera-Erkennung.bat / start.sh) pruefen diese Spanne.
 # ---------------------------------------------------------------------------
 
 # Version pinning uses ~= (compatible release). Note what that actually means:
@@ -24,15 +28,27 @@ numpy>=1.24
 torch>=2.0
 plotly>=5.20
 
-# Core UI
-# streamlit >= 1.37 is required: camera_detection/app.py uses st.fragment().
-streamlit~=1.37
+# ---------------------------------------------------------------------------
+# streamlit + streamlit-webrtc + av sind eng gekoppelt und muessen GEMEINSAM
+# aufloesen. Sie stehen daher bewusst nur mit Untergrenzen da, nicht mit ~=.
+#
+# Warum das wichtig ist: streamlit-webrtc >= 0.73 fordert av >= 15.1.0 und
+# streamlit >= 1.51.0. Ein Deckel wie av~=12.0 (also < 13.0) fuehrt NICHT zu
+# einer Fehlermeldung -- pip weicht dann still auf eine jahrealte
+# streamlit-webrtc aus, die noch "from tornado.platform.asyncio import
+# BaseAsyncIOLoop" macht. Aktuelles Streamlit bringt tornado aber nicht mehr
+# mit, also stuerzt die App erst BEIM START mit ModuleNotFoundError ab.
+# Genau dieser Fall ist hier schon einmal passiert.
+#
+# Faustregel: av niemals unter das deckeln, was streamlit-webrtc fordert.
+# ---------------------------------------------------------------------------
+streamlit>=1.51
+streamlit-webrtc>=0.76
+av>=15.1
 
-# Camera detection & tracking
+# Detection & Tracking -- unabhaengig vom obigen Geflecht, daher ~= in Ordnung
 ultralytics~=8.2
 mediapipe~=0.10
-streamlit-webrtc~=0.47
-av~=12.0
 
 # NOTE on OpenCV: cv2 is intentionally NOT pinned here. It arrives transitively
 # (ultralytics -> opencv-python, mediapipe -> opencv-contrib-python). Adding a
