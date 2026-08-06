@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Optional
 
-from PySide6.QtCore import QObject, QPointF, QRectF, QThread, Signal
+from PySide6.QtCore import QObject, QPointF, QRectF, QThread, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
@@ -97,7 +97,14 @@ class HeatmapOverlay(QGraphicsObject):
         self._max_dbm: float = -30.0
         self._opacity: float = 0.5    # 0.0 – 1.0
         self._gen:     int   = 0      # generation counter — ignores stale results
+        self._band_filter: Optional[str] = None
+        self._ssid_filter: Optional[str] = None
         self._worker:  Optional[_HeatmapWorker] = None
+
+        self._recompute_timer = QTimer(self)
+        self._recompute_timer.setSingleShot(True)
+        self._recompute_timer.setInterval(250)
+        self._recompute_timer.timeout.connect(self._do_update_heatmap)
 
     # ── QGraphicsItem interface ─────────────────────────────────────────────
 
@@ -124,13 +131,28 @@ class HeatmapOverlay(QGraphicsObject):
     def set_opacity_percent(self, pct: int) -> None:
         self._opacity = max(0.0, min(1.0, pct / 100.0))
 
+    def set_band_filter(self, band: Optional[str]) -> None:
+        self._band_filter = band
+        self.update_heatmap()
+
+    def set_ssid_filter(self, ssid: Optional[str]) -> None:
+        self._ssid_filter = ssid
+        self.update_heatmap()
+
     # ── Heatmap computation ─────────────────────────────────────────────────
 
     def update_heatmap(self) -> None:
-        """Start an async heatmap recalculation for the current floor."""
+        """Schedule an async heatmap recalculation (debounced)."""
+        self._recompute_timer.start()
+
+    def _do_update_heatmap(self) -> None:
         if self._floor is None:
             return
-        ms = list(self._floor.measurements)
+        ms = [
+            m for m in self._floor.measurements
+            if (self._ssid_filter is None or m.ssid == self._ssid_filter)
+            and (self._band_filter is None or m.band == self._band_filter)
+        ]
         if not ms:
             self._set_empty()
             return

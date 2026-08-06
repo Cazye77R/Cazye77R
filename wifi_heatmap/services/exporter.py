@@ -67,6 +67,7 @@ def _draw_legend(
     floor: Floor,
     min_dbm: float,
     max_dbm: float,
+    filter_note: str = "",
 ) -> None:
     """Paint a legend strip: gradient bar + dBm ticks + floor metadata."""
     p.fillRect(x, y, w, h, QColor(0x18, 0x18, 0x28))
@@ -124,6 +125,10 @@ def _draw_legend(
         line_y += 14
     p.drawText(info_x, line_y,
                f"Exportiert: {datetime.now().strftime('%d.%m.%Y  %H:%M')}")
+    if filter_note:
+        line_y += 14
+        p.setPen(QColor(0x4f, 0xc3, 0xf7))
+        p.drawText(info_x, line_y, filter_note)
 
 
 # ── Exporter ──────────────────────────────────────────────────────────────────
@@ -167,6 +172,7 @@ class ProjectExporter:
         min_dbm: float,
         max_dbm: float,
         scale: int = 1,
+        filter_note: str = "",
     ) -> QImage:
         """Render *scene* at *scale*× resolution with a legend strip appended."""
         scale   = max(1, min(4, scale))
@@ -182,7 +188,7 @@ class ProjectExporter:
         full.fill(QColor("#1e1e2e"))
         p = QPainter(full)
         p.drawImage(0, 0, scene_img)
-        _draw_legend(p, 0, out_h, out_w, leg_h, floor, min_dbm, max_dbm)
+        _draw_legend(p, 0, out_h, out_w, leg_h, floor, min_dbm, max_dbm, filter_note=filter_note)
         p.end()
 
         return full
@@ -215,6 +221,7 @@ class ProjectExporter:
         max_dbm: float,
         critical_threshold: float = -75.0,
         side_view_image: Optional[QImage] = None,
+        filter_note: str = "",
     ) -> None:
         """Build a multi-page PDF report using reportlab (landscape A4)."""
         try:

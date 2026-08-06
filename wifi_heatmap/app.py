@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import copy
+import json
+import logging
 import math
 import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QPointF, QSize, Signal
+from PySide6.QtCore import Qt, QPointF, QSize, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QCursor, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
     QApplication,
@@ -29,12 +31,65 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
+    QShortcut,
     QSpinBox,
     QSplitter,
     QTabBar,
     QVBoxLayout,
     QWidget,
 )
+
+# ── Config / logging setup ────────────────────────────────────────────────────
+
+_CONFIG_DIR  = Path.home() / ".wifi_heatmap"
+_CONFIG_FILE = _CONFIG_DIR / "config.json"
+
+
+def _setup_logging() -> None:
+    try:
+        _CONFIG_DIR.mkdir(exist_ok=True)
+        logging.basicConfig(
+            filename=str(_CONFIG_DIR / "wifi_heatmap.log"),
+            level=logging.WARNING,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+    except Exception:
+        pass
+
+
+_setup_logging()
+_log = logging.getLogger("wifi_heatmap")
+
+
+def _load_config() -> dict:
+    try:
+        if _CONFIG_FILE.exists():
+            return json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _save_config(data: dict) -> None:
+    try:
+        _CONFIG_DIR.mkdir(exist_ok=True)
+        _CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _load_recent_projects() -> list[str]:
+    return _load_config().get("recent_projects", [])
+
+
+def _add_recent_project(path: str) -> None:
+    cfg = _load_config()
+    recents: list[str] = cfg.get("recent_projects", [])
+    if path in recents:
+        recents.remove(path)
+    recents.insert(0, path)
+    cfg["recent_projects"] = recents[:5]
+    _save_config(cfg)
 
 from models.floor import Floor
 from models.measurement import Measurement
@@ -245,6 +300,90 @@ class FloorTabBar(QWidget):
         self.tab_bar.blockSignals(False)
 
 
+# ── Welcome dialog ────────────────────────────────────────────────────────────
+
+class WelcomeDialog(QDialog):
+    """Startup wizard: new project, open, or load recent."""
+
+    CODE_NEW    = 1
+    CODE_OPEN   = 2
+    CODE_RECENT = 3
+
+    def __init__(self, recent_projects: list[str], parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Willkommen — WiFi Heatmap")
+        self.setModal(True)
+        self.setFixedSize(420, 380)
+        self.setStyleSheet(
+            "QDialog { background-color:#2a2a3a; color:#e0e0e0; }"
+            "QPushButton { background:#353545; color:#d0d0e0; border:1px solid #3a3a4a;"
+            "  border-radius:4px; padding:6px 10px; font-size:12px; }"
+            "QPushButton:hover { background:#404058; border-color:#5a5a7a; }"
+            "QPushButton:pressed { background:#1a3050; }"
+        )
+
+        self.selected_path = ""
+        self._code         = 0
+
+        lay = QVBoxLayout(self)
+        lay.setSpacing(8)
+        lay.setContentsMargins(24, 24, 24, 20)
+
+        title = QLabel("📡 WiFi Heatmap")
+        title.setStyleSheet("font-size:22px; font-weight:bold; color:#4fc3f7;")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(title)
+
+        ver = QLabel("Version 1.0")
+        ver.setStyleSheet("font-size:11px; color:#5060a0;")
+        ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(ver)
+
+        lay.addSpacing(12)
+
+        btn_new = QPushButton("➕  Neues Projekt erstellen")
+        btn_new.setFixedHeight(40)
+        btn_new.clicked.connect(lambda: self._finish(self.CODE_NEW))
+        lay.addWidget(btn_new)
+
+        btn_open = QPushButton("📂  Bestehendes Projekt öffnen …")
+        btn_open.setFixedHeight(40)
+        btn_open.clicked.connect(lambda: self._finish(self.CODE_OPEN))
+        lay.addWidget(btn_open)
+
+        # Recent projects list
+        valid = [p for p in recent_projects if Path(p).exists()]
+        if valid:
+            lay.addSpacing(6)
+            rec_lbl = QLabel("Zuletzt verwendet:")
+            rec_lbl.setStyleSheet("color:#8090b0; font-size:11px;")
+            lay.addWidget(rec_lbl)
+
+            for rp in valid[:5]:
+                p = Path(rp)
+                rb = QPushButton(p.name)
+                rb.setToolTip(str(p))
+                rb.setFixedHeight(30)
+                rb.setStyleSheet(
+                    "QPushButton { background:#252535; color:#c0c8e0;"
+                    "  border:1px solid #2a2a4a; border-radius:3px;"
+                    "  padding:4px 8px; font-size:11px; text-align:left; }"
+                    "QPushButton:hover { background:#303050; }"
+                )
+                rb.clicked.connect(lambda _checked, path=rp: self._finish(self.CODE_RECENT, path))
+                lay.addWidget(rb)
+
+        lay.addStretch()
+
+    def _finish(self, code: int, path: str = "") -> None:
+        self._code = code
+        self.selected_path = path
+        self.accept()
+
+    def result_code(self) -> int:
+        return self._code
+
+
 # ── Main window ───────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
@@ -272,6 +411,15 @@ class MainWindow(QMainWindow):
         # ── dBm range (mirrored from canvas/properties for side view) ─
         self._min_dbm: float = -90.0
         self._max_dbm: float = -30.0
+
+        # ── Band filter ────────────────────────────────────────
+        self._band_filter: str = "Alle Bänder"
+
+        # ── Autosave timer ─────────────────────────────────────
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setInterval(120_000)
+        self._autosave_timer.timeout.connect(self._do_autosave)
+        self._autosave_timer.start()
 
         self._setup_menubar()
         self._setup_central_widget()
@@ -314,16 +462,24 @@ class MainWindow(QMainWindow):
         pp.thresholds_changed.connect(self._on_thresholds_changed)
         pp.calibrate_requested.connect(self._start_calibration)
 
-        # ── Wire canvas calibration signals ───────────────────
+        # ── Wire canvas signals ────────────────────────────────
         cv.calibration_ready.connect(self._on_calibration_ready)
         cv.calibration_status.connect(self.statusBar().showMessage)
+        cv.repeater_visibility_changed.connect(self._on_repeater_visibility_changed)
+
+        # ── Wire properties panel extra signals ───────────────
+        pp.band_filter_changed.connect(self._on_band_filter_changed)
+        pp.repeater_requested.connect(self._on_repeater_requested)
+        pp.hide_repeater_requested.connect(self._on_hide_repeater)
 
         # ── Dirty title ────────────────────────────────────────
         self._undo_stack.indexChanged.connect(lambda _: self._update_title())
 
         # ── Startup ────────────────────────────────────────────
-        self._create_default_project()
         self._refresh_network_list()
+        QTimer.singleShot(0, self._initial_startup)
+
+        self._setup_shortcuts()
 
     # ------------------------------------------------------------------
     # Menu bar
@@ -333,8 +489,10 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
 
         datei = menubar.addMenu("Datei")
-        datei.addAction(self._make_action("Neues Projekt", self._new_project))
-        datei.addAction(self._make_action("Projekt öffnen …", self._open_project))
+        datei.addAction(self._make_action("Neues Projekt", self._new_project,
+                                          QKeySequence("Ctrl+N")))
+        datei.addAction(self._make_action("Projekt öffnen …", self._open_project,
+                                          QKeySequence("Ctrl+O")))
         datei.addAction(self._make_action("Projekt speichern", self._save_project,
                                           QKeySequence("Ctrl+S")))
         datei.addSeparator()
@@ -371,6 +529,12 @@ class MainWindow(QMainWindow):
         extras.addAction(self._make_action(
             "Maßstab kalibrieren", self._start_calibration
         ))
+        extras.addAction(self._make_action(
+            "Auf Elemente zoomen", self._fit_to_view, QKeySequence("F")
+        ))
+
+        hilfe = menubar.addMenu("Hilfe")
+        hilfe.addAction(self._make_action("Über WiFi Heatmap …", self._show_about))
 
     def _make_action(
         self, label: str, slot, shortcut: QKeySequence | None = None
@@ -554,6 +718,7 @@ class MainWindow(QMainWindow):
         self._scan_worker.start()
 
     def _on_scan_result(self, result) -> None:
+        self._canvas_widget.clear_wifi_error()
         pos = self._canvas_widget.pending_measure_pos
         if pos is None:
             return
@@ -586,6 +751,8 @@ class MainWindow(QMainWindow):
             self._ssid_combo.addItem(result.ssid)
 
     def _on_scan_error(self, msg: str) -> None:
+        _log.warning("WiFi Scan Fehler: %s", msg)
+        self._canvas_widget.show_wifi_error(msg)
         QMessageBox.warning(self, "WLAN-Messung fehlgeschlagen", msg)
 
     def _on_scan_finished(self) -> None:
@@ -669,6 +836,169 @@ class MainWindow(QMainWindow):
             self._signal_label.setText("  Heatmap wird berechnet…")
         else:
             self._signal_label.setText("Signal: —")
+
+    # ------------------------------------------------------------------
+    # Band filter / repeater / fit-to-view
+    # ------------------------------------------------------------------
+
+    def _on_band_filter_changed(self, text: str) -> None:
+        band = None if text == "Alle Bänder" else text.replace("Nur ", "")
+        self._band_filter = text
+        self._canvas_widget.set_band_filter(band)
+        self._side_view.set_band_filter(band)
+
+    def _on_repeater_requested(self) -> None:
+        if self._project is None:
+            return
+        settings = self._project.settings
+        thresh_poor = float(settings.get("threshold_poor", -85))
+        thresh_good = float(settings.get("threshold_good", -60))
+        found = self._canvas_widget.show_repeater_recommendations(thresh_poor, thresh_good)
+        if not found:
+            QMessageBox.information(
+                self,
+                "Repeater-Empfehlung",
+                "Keine Empfehlung möglich.\n\n"
+                "Benötigt Messpunkte sowohl im guten Bereich\n"
+                f"(≥ {thresh_good:.0f} dBm) als auch im kritischen\n"
+                f"Bereich (< {thresh_poor:.0f} dBm).",
+            )
+
+    def _on_hide_repeater(self) -> None:
+        self._canvas_widget.clear_repeater_recommendations()
+
+    def _on_repeater_visibility_changed(self, visible: bool) -> None:
+        self._properties_panel.set_repeater_visible(visible)
+
+    def _fit_to_view(self) -> None:
+        self._canvas_widget.fit_to_view()
+
+    # ------------------------------------------------------------------
+    # Shortcuts
+    # ------------------------------------------------------------------
+
+    def _setup_shortcuts(self) -> None:
+        _TOOLS_BY_KEY = {
+            "1": CanvasMode.SELECT,
+            "2": CanvasMode.RECT,
+            "3": CanvasMode.LINE,
+            "4": CanvasMode.ROUTER,
+            "5": CanvasMode.MEASURE,
+            "6": CanvasMode.DELETE,
+        }
+        for key, mode in _TOOLS_BY_KEY.items():
+            QShortcut(QKeySequence(key), self).activated.connect(
+                lambda m=mode: self._set_toolbar_mode(m)
+            )
+        QShortcut(QKeySequence("M"), self).activated.connect(self._shortcut_measure)
+        QShortcut(QKeySequence("H"), self).activated.connect(self._heatmap_action.trigger)
+        QShortcut(QKeySequence("G"), self).activated.connect(self._grid_action.trigger)
+        QShortcut(QKeySequence("Escape"), self).activated.connect(
+            lambda: self._set_toolbar_mode(CanvasMode.SELECT)
+        )
+
+    def _set_toolbar_mode(self, mode: CanvasMode) -> None:
+        self._canvas_widget.set_mode(mode)
+        self._toolbar_widget.set_active_mode(mode)
+
+    def _shortcut_measure(self) -> None:
+        if self._canvas_widget.pending_measure_pos is not None:
+            self._on_measure_triggered()
+        else:
+            self._set_toolbar_mode(CanvasMode.MEASURE)
+
+    # ------------------------------------------------------------------
+    # Startup / welcome dialog
+    # ------------------------------------------------------------------
+
+    def _initial_startup(self) -> None:
+        recent = _load_recent_projects()
+        dlg = WelcomeDialog(recent, parent=self)
+        dlg.exec()
+        code = dlg.result_code()
+        if code == WelcomeDialog.CODE_NEW:
+            self._create_default_project()
+        elif code == WelcomeDialog.CODE_OPEN:
+            self._open_project_or_default()
+        elif code == WelcomeDialog.CODE_RECENT:
+            if not self._load_project_from_path(Path(dlg.selected_path)):
+                self._create_default_project()
+        else:
+            self._create_default_project()
+
+    def _open_project_or_default(self) -> None:
+        """Open-file dialog, falling back to new default project on cancel."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Projekt öffnen", "",
+            "WiFi Heatmap (*.wifiheat);;Alle Dateien (*)",
+        )
+        if path:
+            if not self._load_project_from_path(Path(path)):
+                self._create_default_project()
+        else:
+            self._create_default_project()
+
+    def _load_project_from_path(self, path: Path) -> bool:
+        """Load project from *path*, checking for autosave. Returns True on success."""
+        autosave = path.with_suffix(".autosave")
+        load_path = path
+        if (autosave.exists() and path.exists()
+                and autosave.stat().st_mtime > path.stat().st_mtime):
+            resp = QMessageBox.question(
+                self, "Wiederherstellung gefunden",
+                f"Eine neuere automatische Sicherung wurde gefunden.\n"
+                "Möchten Sie die gesicherte Version wiederherstellen?\n\n"
+                f"{autosave}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if resp == QMessageBox.StandardButton.Yes:
+                load_path = autosave
+
+        try:
+            project = Project.load(load_path)
+        except Exception as exc:
+            _log.exception("Projekt laden fehlgeschlagen: %s", path)
+            QMessageBox.critical(self, "Fehler",
+                                 f"Projekt konnte nicht geladen werden:\n{exc}")
+            return False
+
+        project_dir = path.parent
+        for floor in project.floors:
+            if floor.background_image:
+                candidate = project_dir / floor.background_image
+                floor.background_image = str(candidate) if candidate.exists() else None
+
+        self._setup_project(project, path)
+        return True
+
+    # ------------------------------------------------------------------
+    # Autosave
+    # ------------------------------------------------------------------
+
+    def _do_autosave(self) -> None:
+        if self._project is None or self._project_path is None:
+            return
+        try:
+            autosave_path = self._project_path.with_suffix(".autosave")
+            self._project.save(autosave_path)
+        except Exception:
+            _log.exception("Autosave fehlgeschlagen")
+
+    # ------------------------------------------------------------------
+    # About / help
+    # ------------------------------------------------------------------
+
+    def _show_about(self) -> None:
+        QMessageBox.about(
+            self,
+            "Über WiFi Heatmap",
+            "<h2 style='color:#4fc3f7;'>WiFi Heatmap</h2>"
+            "<p><b>Version 1.0</b></p>"
+            "<p>Werkzeug zur Erfassung und Visualisierung von WLAN-Signalstärken "
+            "auf Grundrissen. Messpunkte werden als Heatmap dargestellt; "
+            "Router-Standorte, Etagen-Management und PDF-Export sind integriert.</p>"
+            "<p style='color:#6080a0; font-size:11px;'>PySide6 · Python · reportlab</p>",
+        )
 
     # ------------------------------------------------------------------
     # Scale calibration
@@ -784,6 +1114,8 @@ class MainWindow(QMainWindow):
         self._refresh_side_view()
         self._canvas_widget.set_pixels_per_meter(project.pixels_per_meter)
         self._properties_panel.update_scale(project.pixels_per_meter)
+        if path is not None:
+            _add_recent_project(str(path))
 
     def _sync_tabs(self) -> None:
         floors = self._project.floors if self._project else []
@@ -937,18 +1269,7 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
-        try:
-            project = Project.load(path)
-        except Exception as exc:
-            QMessageBox.critical(self, "Fehler",
-                                 f"Projekt konnte nicht geladen werden:\n{exc}")
-            return
-        project_dir = Path(path).parent
-        for floor in project.floors:
-            if floor.background_image:
-                candidate = project_dir / floor.background_image
-                floor.background_image = str(candidate) if candidate.exists() else None
-        self._setup_project(project, Path(path))
+        self._load_project_from_path(Path(path))
 
     def _save_project(self) -> None:
         if self._project is None:
@@ -1150,6 +1471,10 @@ class MainWindow(QMainWindow):
                 QApplication.processEvents()   # allow scene to settle
                 self._canvas_widget.scene().clearSelection()
                 source_rect = self._canvas_widget.get_render_rect()
+                filter_note = (
+                    f"Band-Filter: {self._band_filter}"
+                    if self._band_filter != "Alle Bänder" else ""
+                )
                 img = ProjectExporter.render_floor_image(
                     self._canvas_widget.scene(),
                     source_rect,
@@ -1157,6 +1482,7 @@ class MainWindow(QMainWindow):
                     self._min_dbm,
                     self._max_dbm,
                     scale=1,
+                    filter_note=filter_note,
                 )
                 floor_images.append((floor, img))
 

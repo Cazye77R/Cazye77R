@@ -78,6 +78,8 @@ _ZOOM_MIN:  float = 0.10
 _ZOOM_MAX:  float = 5.00
 _ZOOM_STEP: float = 1.15
 
+_BG_PIXMAP_CACHE: dict[str, QPixmap] = {}  # path → QPixmap; persists across floor switches
+
 # Z-layer ordering
 _Z_BACKGROUND:     int = 0
 _Z_GRID:           int = 1
@@ -559,8 +561,9 @@ class CanvasWidget(QGraphicsView):
     measurement_selected = Signal(object)  # Measurement | None
     router_changed       = Signal(object)  # QPointF | None
     heatmap_computing    = Signal(bool)    # True while heatmap worker runs
-    calibration_ready    = Signal(object, object)  # (QPointF start, QPointF end)
-    calibration_status   = Signal(str)   # status message for statusbar
+    calibration_ready           = Signal(object, object)  # (QPointF start, QPointF end)
+    calibration_status          = Signal(str)   # status message for statusbar
+    repeater_visibility_changed = Signal(bool)  # True = recommendations visible
 
     _MENU_STYLE = (
         "QMenu { background-color:#2a2a3a; color:#e0e0e0; border:1px solid #3a3a4a; }"
@@ -667,6 +670,15 @@ class CanvasWidget(QGraphicsView):
         self._cal_items:          list                      = []     # temp scene items
         self._pixels_per_meter:   Optional[float]           = None
 
+        # ── Band filter ────────────────────────────────────────
+        self._band_filter:        Optional[str]             = None
+
+        # ── Repeater recommendations (temporary overlay) ───────
+        self._repeater_items:     list                      = []
+
+        # ── WiFi error overlay ─────────────────────────────────
+        self._wifi_error:         Optional[str]             = None
+
     # ──────────────────────────────────────────────────────────
     # Public API — mode / display
     # ──────────────────────────────────────────────────────────
@@ -723,6 +735,14 @@ class CanvasWidget(QGraphicsView):
 
     def set_ssid_filter(self, ssid: Optional[str]) -> None:
         self._ssid_filter = ssid
+        if self._heatmap_overlay is not None:
+            self._heatmap_overlay.set_ssid_filter(ssid)
+        self._rebuild_scene()
+
+    def set_band_filter(self, band: Optional[str]) -> None:
+        self._band_filter = band
+        if self._heatmap_overlay is not None:
+            self._heatmap_overlay.set_band_filter(band)
         self._rebuild_scene()
 
     def set_heatmap_visible(self, visible: bool) -> None:
@@ -787,7 +807,9 @@ class CanvasWidget(QGraphicsView):
         if self._floor is None:
             return
         self._floor.measurements.append(m)
-        if self._ssid_filter is None or m.ssid == self._ssid_filter:
+        ssid_ok = (self._ssid_filter is None or m.ssid == self._ssid_filter)
+        band_ok = (self._band_filter is None or m.band == self._band_filter)
+        if ssid_ok and band_ok:
             item = _MeasurementItem(m, self._min_dbm, self._max_dbm)
             item.enable_selection(self._mode == CanvasMode.SELECT)
             self._scene.addItem(item)
@@ -854,6 +876,102 @@ class CanvasWidget(QGraphicsView):
         self._scene.clearSelection()
         item.setSelected(True)
 
+    def fit_to_view(self) -> None:
+        """Zoom and pan to fit all visible scene content."""
+        rect = self.get_render_rect()
+        self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+        self._zoom_factor = max(_ZOOM_MIN, min(_ZOOM_MAX, self.transform().m11()))
+        self.zoom_changed.emit(self._zoom_factor * 100.0)
+
+    def show_wifi_error(self, msg: str) -> None:
+        self._wifi_error = msg
+        self.viewport().update()
+
+    def clear_wifi_error(self) -> None:
+        self._wifi_error = None
+        self.viewport().update()
+
+    def show_repeater_recommendations(
+        self, threshold_poor: float, threshold_good: float
+    ) -> bool:
+        """Compute and display repeater suggestions. Returns True if any found."""
+        self.clear_repeater_recommendations()
+        if self._floor is None:
+            return False
+
+        ms = [
+            m for m in self._floor.measurements
+            if (self._ssid_filter is None or m.ssid == self._ssid_filter)
+            and (self._band_filter is None or m.band == self._band_filter)
+        ]
+        bad  = [m for m in ms if m.dbm < threshold_poor]
+        good = [m for m in ms if m.dbm >= threshold_good]
+
+        if not bad or not good:
+            return False
+
+        clusters  = self._cluster_points(bad, radius=150.0)
+        seen_ids: set[int] = set()
+        for cluster in clusters:
+            cx = sum(m.x for m in cluster) / len(cluster)
+            cy = sum(m.y for m in cluster) / len(cluster)
+            nearest = min(good, key=lambda m: math.sqrt((m.x - cx)**2 + (m.y - cy)**2))
+            if id(nearest) not in seen_ids:
+                seen_ids.add(id(nearest))
+                self._add_repeater_marker(nearest)
+
+        self.repeater_visibility_changed.emit(bool(seen_ids))
+        return bool(seen_ids)
+
+    def clear_repeater_recommendations(self) -> None:
+        for item in self._repeater_items:
+            self._scene.removeItem(item)
+        self._repeater_items.clear()
+        self.repeater_visibility_changed.emit(False)
+
+    def _cluster_points(self, points: list, radius: float) -> list:
+        clusters: list = []
+        for p in points:
+            placed = False
+            for cluster in clusters:
+                cx = sum(q.x for q in cluster) / len(cluster)
+                cy = sum(q.y for q in cluster) / len(cluster)
+                if math.sqrt((p.x - cx)**2 + (p.y - cy)**2) < radius:
+                    cluster.append(p)
+                    placed = True
+                    break
+            if not placed:
+                clusters.append([p])
+        return clusters
+
+    def _add_repeater_marker(self, m) -> None:
+        r = 22.0
+        ell = QGraphicsEllipseItem(-r, -r, r * 2, r * 2)
+        ell.setPos(m.x, m.y)
+        pen = QPen(QColor("#4488ff"), 2.5, Qt.PenStyle.DashLine)
+        pen.setDashPattern([8, 4])
+        ell.setPen(pen)
+        ell.setBrush(QBrush(QColor(0x44, 0x88, 0xff, 30)))
+        ell.setZValue(150)
+        ell.setToolTip(
+            f"Empfohlener Repeater-Standort\n"
+            f"Signal hier: {m.dbm:.1f} dBm — nahe der kritischen Zone."
+        )
+        self._scene.addItem(ell)
+        self._repeater_items.append(ell)
+
+        txt = self._scene.addText("Repeater hier")
+        txt.setDefaultTextColor(QColor("#4488ff"))
+        f = QFont()
+        f.setPixelSize(11)
+        f.setBold(True)
+        txt.setFont(f)
+        txt.setPos(m.x - txt.boundingRect().width() / 2, m.y + r + 3)
+        txt.setZValue(150)
+        txt.setFlag(txt.GraphicsItemFlag.ItemIsMovable, False)
+        txt.setFlag(txt.GraphicsItemFlag.ItemIsSelectable, False)
+        self._repeater_items.append(txt)
+
     def get_render_rect(self) -> QRectF:
         """Scene bounding rect of all data items (excludes grid/snap/pending).
 
@@ -902,11 +1020,15 @@ class CanvasWidget(QGraphicsView):
             self._router_item.stop()
         self._selected_item        = None
         self._selected_measurement = None
+        had_repeaters = bool(self._repeater_items)
+        self._repeater_items.clear()
 
         _persistent = {self._grid_item, self._snap_indicator}
         for item in list(self._scene.items()):
             if item not in _persistent:
                 self._scene.removeItem(item)
+        if had_repeaters:
+            self.repeater_visibility_changed.emit(False)
 
         self._bg_item = None
         self._bg_move_mode = False
@@ -928,9 +1050,25 @@ class CanvasWidget(QGraphicsView):
         self._update_cursor()
 
     def _load_bg_pixmap(self, path: str) -> None:
-        px = QPixmap(path)
+        import logging as _logging
+        if path not in _BG_PIXMAP_CACHE:
+            _BG_PIXMAP_CACHE[path] = QPixmap(path)
+        px = _BG_PIXMAP_CACHE[path]
         if px.isNull():
-            return
+            _logging.getLogger("wifi_heatmap").warning("Hintergrundbild nicht gefunden: %s", path)
+            ph = QPixmap(400, 300)
+            ph.fill(QColor(0x30, 0x20, 0x20))
+            p = QPainter(ph)
+            p.setPen(QPen(QColor(0xcc, 0x60, 0x60)))
+            f = QFont()
+            f.setPixelSize(13)
+            p.setFont(f)
+            p.drawText(
+                ph.rect(), Qt.AlignmentFlag.AlignCenter,
+                f"⚠ Bild nicht gefunden\n{path}",
+            )
+            p.end()
+            px = ph
         item = QGraphicsPixmapItem(px)
         item.setZValue(_Z_BACKGROUND)
         item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable,    False)
@@ -965,6 +1103,8 @@ class CanvasWidget(QGraphicsView):
         for m in self._floor.measurements:
             if self._ssid_filter is not None and m.ssid != self._ssid_filter:
                 continue
+            if self._band_filter is not None and m.band != self._band_filter:
+                continue
             item = _MeasurementItem(m, self._min_dbm, self._max_dbm)
             item.enable_selection(in_select)
             self._scene.addItem(item)
@@ -998,6 +1138,8 @@ class CanvasWidget(QGraphicsView):
         overlay.set_floor(self._floor)
         overlay.set_dbm_range(self._min_dbm, self._max_dbm)
         overlay.set_opacity_percent(self._heatmap_opacity)
+        overlay.set_ssid_filter(self._ssid_filter)
+        overlay.set_band_filter(self._band_filter)
         overlay.computing_changed.connect(self.heatmap_computing)
         self._scene.addItem(overlay)
         self._heatmap_overlay = overlay
@@ -1565,10 +1707,28 @@ class CanvasWidget(QGraphicsView):
         self.setCursor(QCursor(cursor_map.get(self._mode, Qt.CursorShape.ArrowCursor)))
 
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
-        """Paint the dBm legend and optional scale text in the viewport corners."""
+        """Paint the dBm legend, scale text, and WiFi error in the viewport."""
         painter.save()
         painter.resetTransform()
         vp = self.viewport()
+
+        if self._wifi_error:
+            font = QFont()
+            font.setPixelSize(13)
+            painter.setFont(font)
+            fm = painter.fontMetrics()
+            msg = f"⚠ WiFi: {self._wifi_error}"
+            tw = fm.horizontalAdvance(msg)
+            th = fm.height()
+            x = (vp.width() - tw) // 2
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(0x60, 0x10, 0x10, 200)))
+            painter.drawRoundedRect(x - 8, 8, tw + 16, th + 6, 4, 4)
+            painter.setPen(QPen(QColor("#ff8080")))
+            painter.drawText(x, 8 + fm.ascent() + 2, msg)
+            painter.restore()
+            painter.save()
+            painter.resetTransform()
 
         if self._heatmap_visible and self._floor is not None and self._floor.measurements:
             if self._legend_pixmap is None:

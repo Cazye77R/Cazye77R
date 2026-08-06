@@ -5,6 +5,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -104,9 +105,12 @@ class _SignalBar(QWidget):
 # ── Floor info page ───────────────────────────────────────────────────────────
 
 class _FloorPage(QWidget):
-    opacity_changed    = Signal(int)          # 0–100
-    thresholds_changed = Signal(float, float) # min_dbm, max_dbm
-    calibrate_requested = Signal()
+    opacity_changed         = Signal(int)          # 0–100
+    thresholds_changed      = Signal(float, float) # min_dbm, max_dbm
+    calibrate_requested     = Signal()
+    band_filter_changed     = Signal(str)          # "Alle Bänder"|"Nur 2.4 GHz"|"Nur 5 GHz"
+    repeater_requested      = Signal()
+    hide_repeater_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -205,6 +209,41 @@ class _FloorPage(QWidget):
         self._cal_btn.clicked.connect(self.calibrate_requested)
         lay.addWidget(self._cal_btn)
 
+        lay.addWidget(_hr())
+
+        # Band filter
+        hdr5 = QLabel("Band-Filter")
+        hdr5.setStyleSheet(_HDR)
+        lay.addWidget(hdr5)
+
+        self._band_combo = QComboBox()
+        self._band_combo.addItems(["Alle Bänder", "Nur 2.4 GHz", "Nur 5 GHz"])
+        self._band_combo.setStyleSheet(
+            "QComboBox { background:#1e1e2e; color:#e0e0e0; border:1px solid #3a3a4a;"
+            " padding:3px; border-radius:3px; font-size:11px; }"
+            "QComboBox::drop-down { border:none; }"
+        )
+        self._band_combo.currentTextChanged.connect(self.band_filter_changed)
+        lay.addWidget(self._band_combo)
+
+        lay.addWidget(_hr())
+
+        # Repeater recommendation
+        hdr6 = QLabel("Repeater")
+        hdr6.setStyleSheet(_HDR)
+        lay.addWidget(hdr6)
+
+        self._repeater_btn = QPushButton("📡 Repeater-Standort empfehlen")
+        self._repeater_btn.setStyleSheet(_BTN)
+        self._repeater_btn.clicked.connect(self.repeater_requested)
+        lay.addWidget(self._repeater_btn)
+
+        self._hide_repeater_btn = QPushButton("Empfehlung ausblenden")
+        self._hide_repeater_btn.setStyleSheet(_BTN)
+        self._hide_repeater_btn.setVisible(False)
+        self._hide_repeater_btn.clicked.connect(self.hide_repeater_requested)
+        lay.addWidget(self._hide_repeater_btn)
+
         lay.addStretch()
 
     def update_floor(self, floor: Optional[Floor]) -> None:
@@ -224,6 +263,9 @@ class _FloorPage(QWidget):
             self._scale_lbl.setText(f"1 m = {ppm:.1f} px")
             self._scale_lbl.setStyleSheet("color:#60c060; font-size:11px;")
             self._cal_btn.setText("Neu kalibrieren")
+
+    def set_repeater_visible(self, visible: bool) -> None:
+        self._hide_repeater_btn.setVisible(visible)
 
     def _on_opacity(self, v: int) -> None:
         self._op_label.setText(f"{v} %")
@@ -354,6 +396,9 @@ class PropertiesPanel(QWidget):
     heatmap_opacity_changed      = Signal(int)     # 0–100
     thresholds_changed           = Signal(float, float)  # min_dbm, max_dbm
     calibrate_requested          = Signal()
+    band_filter_changed          = Signal(str)
+    repeater_requested           = Signal()
+    hide_repeater_requested      = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -375,6 +420,9 @@ class PropertiesPanel(QWidget):
         self._floor_page.opacity_changed.connect(self.heatmap_opacity_changed)
         self._floor_page.thresholds_changed.connect(self.thresholds_changed)
         self._floor_page.calibrate_requested.connect(self.calibrate_requested)
+        self._floor_page.band_filter_changed.connect(self.band_filter_changed)
+        self._floor_page.repeater_requested.connect(self.repeater_requested)
+        self._floor_page.hide_repeater_requested.connect(self.hide_repeater_requested)
         self._measure_page.remeasure_requested.connect(self.remeasure_requested)
         self._measure_page.delete_requested.connect(self.delete_measurement_requested)
 
@@ -393,3 +441,6 @@ class PropertiesPanel(QWidget):
 
     def update_scale(self, ppm: Optional[float]) -> None:
         self._floor_page.update_scale(ppm)
+
+    def set_repeater_visible(self, visible: bool) -> None:
+        self._floor_page.set_repeater_visible(visible)

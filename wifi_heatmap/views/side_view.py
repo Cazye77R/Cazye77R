@@ -55,6 +55,7 @@ class SideView(QWidget):
         self._x_max:   float = 1000.0
         # Temporarily overridden during render_to_image() for off-screen painting
         self._render_w: Optional[int] = None
+        self._band_filter: Optional[str] = None
 
     # ── Public API ───────────────────────────────────────────────────
 
@@ -78,6 +79,12 @@ class SideView(QWidget):
 
     def refresh(self) -> None:
         """Re-read floor data and repaint (call after in-place model changes)."""
+        self._recalc_x_range()
+        self._update_height()
+        self.update()
+
+    def set_band_filter(self, band: Optional[str]) -> None:
+        self._band_filter = band
         self._recalc_x_range()
         self._update_height()
         self.update()
@@ -120,10 +127,15 @@ class SideView(QWidget):
     def _sorted_floors(self) -> list[Floor]:
         return sorted(self._floors, key=lambda f: f.level)
 
+    def _visible_measurements(self, floor: Floor) -> list:
+        if self._band_filter is None:
+            return floor.measurements
+        return [m for m in floor.measurements if m.band == self._band_filter]
+
     def _recalc_x_range(self) -> None:
         xs: list[float] = []
         for f in self._floors:
-            for m in f.measurements:
+            for m in self._visible_measurements(f):
                 xs.append(m.x)
             if f.router_position:
                 xs.append(f.router_position[0])
@@ -217,7 +229,7 @@ class SideView(QWidget):
 
         # Measurement dots
         cy = rect.top() + rect.height() // 2
-        for m in floor.measurements:
+        for m in self._visible_measurements(floor):
             self._draw_dot(painter, self._to_wx(m.x), cy, m)
 
         # Per-floor router icon (only on its own strip)
