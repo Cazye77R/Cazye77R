@@ -1,3 +1,15 @@
+# ---------------------------------------------------------------------------
+# BENOETIGT PYTHON 3.9 - 3.12
+#
+# Die Obergrenze setzt mediapipe: fuer Python 3.13 und neuer werden keine
+# fertigen Pakete (Wheels) angeboten, weder fuer Windows noch fuer Linux/macOS.
+# pip versucht dann einen Build aus dem Quelltext und bricht mit einer
+# irrefuehrenden Compiler-Meldung ab ("Microsoft Visual C++ 14.0 or greater
+# is required" bzw. fehlendes Bazel). Ein Compiler behebt das NICHT --
+# mediapipe laesst sich so nicht sinnvoll bauen. Stattdessen Python 3.12
+# verwenden; die Starter (Kamera-Erkennung.bat / start.sh) pruefen das.
+# ---------------------------------------------------------------------------
+
 # Version pinning uses ~= (compatible release). Note what that actually means:
 # a two-component spec like ~=1.37 expands to ">=1.37, <2.0" — patch AND minor
 # updates are allowed, only major bumps are blocked. Blocking minor bumps would

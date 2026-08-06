@@ -58,20 +58,40 @@ Zweite, eigenständige Anwendung in diesem Repository (`camera_detection/`): erk
 über die Kamera, was sich vor der Linse befindet — mit Rahmen, Beschriftung und
 vollständigem Körper-Skeleton.
 
+## Voraussetzung: Python 3.9 – 3.12
+
+> **Python 3.13 und 3.14 funktionieren nicht.** Für sie gibt es kein fertiges
+> `mediapipe`-Paket (das Körper-Tracking), weder für Windows noch für Linux/macOS.
+> pip versucht dann einen Build aus dem Quelltext und bricht mit einer irreführenden
+> Meldung ab — unter Windows mit *„Microsoft Visual C++ 14.0 or greater is required"*.
+> **Die C++ Build Tools zu installieren hilft dabei nicht**, mediapipe lässt sich so
+> nicht bauen. Stattdessen
+> [Python 3.12](https://www.python.org/downloads/release/python-31210/) verwenden.
+
+Ein bereits installiertes neueres Python kann parallel bestehen bleiben — die Starter
+suchen sich gezielt eine passende Version.
+
 ## Starten
 
 **Windows:** Doppelklick auf `Kamera-Erkennung.bat`.
 
-Beim ersten Start fragt der Starter, ob die benötigten Pakete installiert werden sollen
+Der Starter sucht automatisch nach einem passenden Python (3.12 → 3.11 → 3.10 → 3.9).
+Findet er keins, bietet er die Installation von Python 3.12 per `winget` an oder zeigt
+die Anleitung zum manuellen Download.
+
+Beim ersten Start fragt er, ob die benötigten Pakete installiert werden sollen
 (ca. 2–3 GB). Sie landen isoliert im Unterordner `.venv`, die System-Python-Installation
 bleibt unberührt. Danach startet die App und der Browser öffnet sich automatisch.
-Voraussetzung ist eine Python-Installation von [python.org](https://www.python.org/downloads/) —
-im Installer muss *„Add python.exe to PATH"* angekreuzt sein.
 
 **macOS / Linux:**
 ```bash
 ./start.sh --setup   # einmalig: Abhängigkeiten installieren
 ./start.sh           # danach nur noch das
+```
+
+Steht die passende Version nicht als Standard-`python3` bereit, gezielt auswählen:
+```bash
+PYTHON=python3.12 ./start.sh --setup
 ```
 
 **Manuell:**

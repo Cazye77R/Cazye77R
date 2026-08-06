@@ -36,9 +36,35 @@ if [[ "$do_update" -eq 1 ]]; then
     git pull origin "$BRANCH"
 fi
 
+# Python-Version prüfen, bevor irgendetwas installiert wird. mediapipe wird
+# für Python 3.13+ nicht als fertiges Paket angeboten; ohne diese Prüfung
+# versucht pip einen Build aus dem Quelltext, der mit einer irreführenden
+# Compiler-Fehlermeldung abbricht.
+if ! "$PYTHON" -c 'import sys; sys.exit(0 if (3,9) <= sys.version_info < (3,13) else 1)' 2>/dev/null; then
+    version="$("$PYTHON" -c 'import sys; print(sys.version.split()[0])' 2>/dev/null || echo 'nicht gefunden')"
+    cat >&2 <<EOF
+FEHLER: Python-Version wird nicht unterstützt.
+
+  Gefunden:  $version
+  Benötigt:  Python 3.9 - 3.12
+
+Grund: mediapipe (Körper-Tracking) gibt es für Python 3.13 und neuer
+nicht als fertiges Paket.
+
+Falls eine passende Version installiert ist, gezielt auswählen:
+
+    PYTHON=python3.12 ./start.sh --setup
+EOF
+    exit 1
+fi
+
 if [[ "$do_setup" -eq 1 ]]; then
     echo "==> Installiere Abhängigkeiten"
-    "$PYTHON" -m pip install -r requirements.txt
+    # --only-binary für die kompilierten Pakete: fehlt ein Wheel, bricht pip
+    # sofort verständlich ab statt einen aussichtslosen Compiler-Lauf zu starten.
+    "$PYTHON" -m pip install \
+        --only-binary=av,mediapipe,torch,opencv-contrib-python \
+        -r requirements.txt
 fi
 
 # Preflight: fail with a readable message instead of a Python traceback.
