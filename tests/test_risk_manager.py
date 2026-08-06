@@ -82,8 +82,9 @@ class TestPositionSize:
     def test_small_equity(self):
         """500€ Equity, 100€ Aktie, 95€ SL, 2% Risk, 25% cap."""
         rm = RiskManager(max_risk_per_trade_pct=2.0, max_position_size_pct=25.0)
-        # risk: 10/5 = 2; cap: 500*25%/100 = 1.25 → int = 1
-        assert rm.position_size(500, 100.0, 95.0) == 1
+        # risk: 10/5 = 2; cap: 500*25%/100 = 1.25 → Bruchteil erlaubt
+        # (int-Floor würde teure Titel fälschlich auf 0 kappen)
+        assert rm.position_size(500, 100.0, 95.0) == 1.25
 
 
 # ---------------------------------------------------------------------------
