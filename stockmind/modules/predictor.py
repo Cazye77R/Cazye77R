@@ -159,12 +159,11 @@ def predict(
     sentiment_score: float = 0.0,
 ) -> Prediction:
     """
+    Erstellt eine Vorhersage für einen Ticker.
+
     ml_bundle:      Optional dict mit 'model' und 'scaler' (aus trainer.load_model).
     training_state: Optional dict mit 'accuracy' etc. (aus trainer.load_state).
-    Beide werden von app.py übergeben – predictor importiert trainer NICHT mehr.
-    """
-    """
-    Erstellt eine Vorhersage für einen Ticker.
+    Beide werden von app.py übergeben – predictor importiert trainer NICHT.
 
     Args:
         ticker:       Aktien-Ticker
@@ -202,17 +201,27 @@ def predict(
         try:
             features = _build_features(df, sentiment_score=sentiment_score)
             if len(features) > 0:
-                last_row = features.iloc[[-1]].values
-                # Rückwärtskompatibilität: Modelle die vor dem Sentiment-Feature
-                # trainiert wurden haben n_features_in_ == 12; wir degradieren
-                # dann auf die ursprünglichen 12 Spalten ohne sentiment.
-                expected = getattr(ml_bundle["scaler"], "n_features_in_", last_row.shape[1])
-                if expected != last_row.shape[1]:
-                    warnings.append(
-                        "ML-Modell wurde vor Sentiment-Feature trainiert – "
-                        "bitte Modell neu trainieren für volle Genauigkeit."
-                    )
-                    last_row = last_row[:, :expected]
+                # Spalten exakt auf die beim Training persistierten
+                # feature_names ausrichten – positionales Abschneiden würde
+                # stillschweigend falsche Spalten in den Scaler geben
+                trained_names = ml_bundle.get("feature_names")
+                if trained_names:
+                    missing = [c for c in trained_names if c not in features.columns]
+                    if missing:
+                        raise ValueError(
+                            f"Feature-Mismatch zum trainierten Modell: {missing} "
+                            f"fehlen – bitte Modell neu trainieren."
+                        )
+                    last_row = features.iloc[[-1]][trained_names].values
+                else:
+                    last_row = features.iloc[[-1]].values
+                    expected = getattr(ml_bundle["scaler"], "n_features_in_", last_row.shape[1])
+                    if expected != last_row.shape[1]:
+                        warnings.append(
+                            "ML-Modell ohne feature_names gespeichert – "
+                            "bitte Modell neu trainieren für volle Genauigkeit."
+                        )
+                        last_row = last_row[:, :expected]
                 X = ml_bundle["scaler"].transform(last_row)
                 ml_prob = float(ml_bundle["model"].predict_proba(X)[0][1])
                 ml_score = (ml_prob - 0.5) * 2

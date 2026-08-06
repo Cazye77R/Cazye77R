@@ -44,9 +44,9 @@ def is_ollama_running() -> bool:
     return OllamaProvider().health()
 
 
-def is_llm_ready() -> bool:
-    """Prüft ob der konfigurierte LLM-Provider bereit ist."""
-    return get_provider().health()
+def is_llm_ready(provider: str | None = None) -> bool:
+    """Prüft ob der (optional benannte) LLM-Provider bereit ist."""
+    return get_provider(provider).health()
 
 
 def get_ollama_status() -> dict:
@@ -55,9 +55,9 @@ def get_ollama_status() -> dict:
     return OllamaProvider().get_status()
 
 
-def get_llm_status() -> dict:
-    """Status des konfigurierten Providers (provider-agnostisch)."""
-    return get_provider().get_status()
+def get_llm_status(provider: str | None = None) -> dict:
+    """Status des (optional benannten) Providers – provider-agnostisch."""
+    return get_provider(provider).get_status()
 
 
 # ---------------------------------------------------------------------------

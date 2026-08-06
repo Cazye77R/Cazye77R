@@ -94,7 +94,7 @@ class RiskManager:
         equity:          float,
         entry_price:     float,
         stop_loss_price: float,
-    ) -> int:
+    ) -> float:
         """
         Berechnet die maximale Stückzahl basierend auf Risk-% vom Equity.
 
@@ -107,13 +107,14 @@ class RiskManager:
             stop_loss_price: Stop-Loss-Preis in €
 
         Returns:
-            Stückzahl (int ≥ 0); 0 wenn keine sinnvolle Größe berechenbar.
+            Stückzahl (float ≥ 0, Bruchteile erlaubt – z. B. Krypto oder
+            teure Titel über dem Positions-Cap); 0 wenn nicht berechenbar.
         """
         if equity <= 0 or entry_price <= 0 or stop_loss_price <= 0:
-            return 0
+            return 0.0
         risk_per_share = abs(entry_price - stop_loss_price)
         if risk_per_share < 1e-9:
-            return 0
+            return 0.0
 
         max_risk_eur = equity * self.max_risk_per_trade_pct / 100.0
         risk_based   = max_risk_eur / risk_per_share
@@ -121,7 +122,7 @@ class RiskManager:
         # Obergrenze: max. % des Eigenkapitals in einer Position
         size_cap = (equity * self.max_position_size_pct / 100.0) / entry_price
 
-        return max(0, int(min(risk_based, size_cap)))
+        return max(0.0, round(min(risk_based, size_cap), 8))
 
     # ------------------------------------------------------------------
     # 2. Stop-Loss / Take-Profit via ATR(14)
@@ -210,9 +211,10 @@ class RiskManager:
 
     def check_exposure(
         self,
-        positions:  dict,
-        new_ticker: str,
-        equity:     float,
+        positions:   dict,
+        new_ticker:  str,
+        equity:      float,
+        order_value: float = 0.0,
     ) -> bool:
         """
         Prüft ob die korrelierten Positionen nach einem Kauf das Limit überschreiten.
@@ -220,18 +222,20 @@ class RiskManager:
         Korrelations-Heuristik: gleiche Markt-Gruppe (.DE, Crypto, US).
 
         Args:
-            positions:  Aktuelles Positions-Dict (symbol → {quantity, avg_price, …})
-            new_ticker: Ticker des geplanten Kaufs
-            equity:     Gesamtportfoliowert für %-Berechnung
+            positions:   Aktuelles Positions-Dict (symbol → {quantity, avg_price, …})
+            new_ticker:  Ticker des geplanten Kaufs
+            equity:      Gesamtportfoliowert für %-Berechnung
+            order_value: Notional der geplanten Order in € – wird zur bestehenden
+                         Exposure addiert, damit auch der erste Trade begrenzt ist
 
         Returns:
             True wenn Trade ok (unter Limit), False wenn Limit überschritten.
         """
-        if not positions or equity <= 0:
+        if equity <= 0:
             return True
 
         new_market        = _ticker_market(new_ticker)
-        correlated_value  = sum(
+        correlated_value  = order_value + sum(
             pos.get("quantity", 0) * pos.get("avg_price", 0)
             for sym, pos in positions.items()
             if _ticker_market(sym) == new_market
@@ -259,6 +263,7 @@ class RiskManager:
         positions:       dict,
         equity_curve:    list[float],
         stop_loss_price: float | None = None,
+        order_value:     float = 0.0,
     ) -> tuple[bool, str]:
         """
         Umfassende Trade-Validierung. SELLs werden immer genehmigt.
@@ -288,20 +293,23 @@ class RiskManager:
                 f"überschreitet Grenze -{self.max_drawdown_pct:.1f}%."
             )
 
-        # 2. Korrelierte Exposure
-        if not self.check_exposure(positions, ticker, equity):
+        # 2. Korrelierte Exposure (inkl. der geplanten Order selbst)
+        if not self.check_exposure(positions, ticker, equity, order_value=order_value):
             return False, (
                 f"Korreliertes Exposure-Limit erreicht "
                 f"({self.max_correlated_exposure_pct:.0f}% max für Markt-Gruppe "
                 f"'{_ticker_market(ticker)}')."
             )
 
-        # 3. Positionsgröße prüfen (wenn Stop-Loss bekannt)
+        # 3. Positionsgröße prüfen (wenn Stop-Loss bekannt).
+        #    Bruchteils-Größen sind erlaubt, aber ein Notional unter 1 €
+        #    ist wirtschaftlich sinnlos (Gebühr > Position).
         if stop_loss_price is not None and stop_loss_price > 0:
             min_size = self.position_size(equity, entry_price, stop_loss_price)
-            if min_size == 0:
+            if min_size * entry_price < 1.0:
                 return False, (
-                    f"Positionsgröße = 0: Equity {equity:.0f}€ zu gering "
+                    f"Positionsgröße zu klein ({min_size:.6f} Stk ≈ "
+                    f"{min_size * entry_price:.2f} €): Equity {equity:.0f}€ zu gering "
                     f"für Risk-Limit {self.max_risk_per_trade_pct:.1f}% "
                     f"bei SL-Abstand {abs(entry_price - stop_loss_price):.2f}€."
                 )
