@@ -106,6 +106,7 @@ class _SignalBar(QWidget):
 class _FloorPage(QWidget):
     opacity_changed    = Signal(int)          # 0–100
     thresholds_changed = Signal(float, float) # min_dbm, max_dbm
+    calibrate_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -188,6 +189,22 @@ class _FloorPage(QWidget):
         self._max_slider.valueChanged.connect(self._on_threshold)
         lay.addWidget(self._max_slider)
 
+        lay.addWidget(_hr())
+
+        # Scale calibration
+        hdr4 = QLabel("Maßstab")
+        hdr4.setStyleSheet(_HDR)
+        lay.addWidget(hdr4)
+
+        self._scale_lbl = QLabel("nicht kalibriert")
+        self._scale_lbl.setStyleSheet(_MUTED)
+        lay.addWidget(self._scale_lbl)
+
+        self._cal_btn = QPushButton("Kalibrieren")
+        self._cal_btn.setStyleSheet(_BTN)
+        self._cal_btn.clicked.connect(self.calibrate_requested)
+        lay.addWidget(self._cal_btn)
+
         lay.addStretch()
 
     def update_floor(self, floor: Optional[Floor]) -> None:
@@ -197,6 +214,16 @@ class _FloorPage(QWidget):
         else:
             self._floor_name.setText(floor.name)
             self._floor_count.setText(str(len(floor.measurements)))
+
+    def update_scale(self, ppm: Optional[float]) -> None:
+        if ppm is None:
+            self._scale_lbl.setText("nicht kalibriert")
+            self._scale_lbl.setStyleSheet(_MUTED)
+            self._cal_btn.setText("Kalibrieren")
+        else:
+            self._scale_lbl.setText(f"1 m = {ppm:.1f} px")
+            self._scale_lbl.setStyleSheet("color:#60c060; font-size:11px;")
+            self._cal_btn.setText("Neu kalibrieren")
 
     def _on_opacity(self, v: int) -> None:
         self._op_label.setText(f"{v} %")
@@ -326,6 +353,7 @@ class PropertiesPanel(QWidget):
     delete_measurement_requested = Signal(object)  # Measurement
     heatmap_opacity_changed      = Signal(int)     # 0–100
     thresholds_changed           = Signal(float, float)  # min_dbm, max_dbm
+    calibrate_requested          = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -346,6 +374,7 @@ class PropertiesPanel(QWidget):
         # Forward inner signals
         self._floor_page.opacity_changed.connect(self.heatmap_opacity_changed)
         self._floor_page.thresholds_changed.connect(self.thresholds_changed)
+        self._floor_page.calibrate_requested.connect(self.calibrate_requested)
         self._measure_page.remeasure_requested.connect(self.remeasure_requested)
         self._measure_page.delete_requested.connect(self.delete_measurement_requested)
 
@@ -361,3 +390,6 @@ class PropertiesPanel(QWidget):
 
     def clear(self) -> None:
         self._stack.setCurrentWidget(self._floor_page)
+
+    def update_scale(self, ppm: Optional[float]) -> None:
+        self._floor_page.update_scale(ppm)

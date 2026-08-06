@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from models.floor import Floor
 
@@ -13,6 +13,7 @@ from models.floor import Floor
 class Project:
     name: str
     floors: list[Floor] = field(default_factory=list)
+    pixels_per_meter: Optional[float] = None
     settings: dict[str, Any] = field(
         default_factory=lambda: {
             "target_ssid": "",
@@ -29,6 +30,7 @@ class Project:
         return {
             "name": self.name,
             "floors": [f.to_dict() for f in self.floors],
+            "pixels_per_meter": self.pixels_per_meter,
             "settings": self.settings,
             "created_at": self.created_at.isoformat(),
             "modified_at": self.modified_at.isoformat(),
@@ -39,6 +41,7 @@ class Project:
         return cls(
             name=data["name"],
             floors=[Floor.from_dict(f) for f in data.get("floors", [])],
+            pixels_per_meter=data.get("pixels_per_meter"),
             settings=data.get("settings", {}),
             created_at=datetime.fromisoformat(data["created_at"]),
             modified_at=datetime.fromisoformat(data["modified_at"]),

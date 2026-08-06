@@ -11,6 +11,7 @@ from PySide6.QtGui import (
     QColor,
     QContextMenuEvent,
     QCursor,
+    QFont,
     QKeyEvent,
     QMouseEvent,
     QPainter,
@@ -64,12 +65,13 @@ except ImportError:
 
 
 class CanvasMode(enum.Enum):
-    SELECT  = "select"
-    RECT    = "rect"
-    LINE    = "line"
-    ROUTER  = "router"
-    MEASURE = "measure"
-    DELETE  = "delete"
+    SELECT    = "select"
+    RECT      = "rect"
+    LINE      = "line"
+    ROUTER    = "router"
+    MEASURE   = "measure"
+    DELETE    = "delete"
+    CALIBRATE = "calibrate"
 
 
 _ZOOM_MIN:  float = 0.10
@@ -557,6 +559,8 @@ class CanvasWidget(QGraphicsView):
     measurement_selected = Signal(object)  # Measurement | None
     router_changed       = Signal(object)  # QPointF | None
     heatmap_computing    = Signal(bool)    # True while heatmap worker runs
+    calibration_ready    = Signal(object, object)  # (QPointF start, QPointF end)
+    calibration_status   = Signal(str)   # status message for statusbar
 
     _MENU_STYLE = (
         "QMenu { background-color:#2a2a3a; color:#e0e0e0; border:1px solid #3a3a4a; }"
@@ -657,6 +661,12 @@ class CanvasWidget(QGraphicsView):
         self._pre_drag_elem_id: Optional[str]  = None
         self._pre_drag_pos:     Optional[dict] = None
 
+        # ── Scale calibration ──────────────────────────────────
+        self._cal_state:          int                       = 0      # 0=idle,1=await-end
+        self._cal_start:          Optional[QPointF]         = None
+        self._cal_items:          list                      = []     # temp scene items
+        self._pixels_per_meter:   Optional[float]           = None
+
     # ──────────────────────────────────────────────────────────
     # Public API — mode / display
     # ──────────────────────────────────────────────────────────
@@ -665,6 +675,9 @@ class CanvasWidget(QGraphicsView):
         if mode != CanvasMode.MEASURE and self._mode == CanvasMode.MEASURE:
             self._clear_pending_marker()
             self.pending_changed.emit(False)
+
+        if mode != CanvasMode.CALIBRATE and self._mode == CanvasMode.CALIBRATE:
+            self._cancel_calibration()
 
         self._mode = mode
         interactive = (mode == CanvasMode.SELECT)
@@ -1342,6 +1355,9 @@ class CanvasWidget(QGraphicsView):
             if self._mode == CanvasMode.MEASURE:
                 self._clear_pending_marker()
                 self.pending_changed.emit(False)
+            if self._mode == CanvasMode.CALIBRATE:
+                self._cancel_calibration()
+                self.calibration_status.emit("Kalibrierung abgebrochen")
             event.accept()
         elif k == Qt.Key.Key_Delete and not event.isAutoRepeat():
             if self._mode == CanvasMode.SELECT:
@@ -1428,6 +1444,10 @@ class CanvasWidget(QGraphicsView):
                 hit_m = self._measurement_item_at(event.position())
                 if hit_m is not None:
                     self.remove_measurement_item(hit_m.measurement)
+            event.accept()
+
+        elif self._mode == CanvasMode.CALIBRATE:
+            self._handle_calibrate_click(raw_pt)
             event.accept()
 
         else:
@@ -1534,29 +1554,108 @@ class CanvasWidget(QGraphicsView):
             self.setCursor(QCursor(Qt.CursorShape.OpenHandCursor))
             return
         cursor_map: dict[CanvasMode, Qt.CursorShape] = {
-            CanvasMode.SELECT:  Qt.CursorShape.ArrowCursor,
-            CanvasMode.RECT:    Qt.CursorShape.CrossCursor,
-            CanvasMode.LINE:    Qt.CursorShape.CrossCursor,
-            CanvasMode.ROUTER:  Qt.CursorShape.CrossCursor,
-            CanvasMode.MEASURE: Qt.CursorShape.CrossCursor,
-            CanvasMode.DELETE:  Qt.CursorShape.ForbiddenCursor,
+            CanvasMode.SELECT:    Qt.CursorShape.ArrowCursor,
+            CanvasMode.RECT:      Qt.CursorShape.CrossCursor,
+            CanvasMode.LINE:      Qt.CursorShape.CrossCursor,
+            CanvasMode.ROUTER:    Qt.CursorShape.CrossCursor,
+            CanvasMode.MEASURE:   Qt.CursorShape.CrossCursor,
+            CanvasMode.DELETE:    Qt.CursorShape.ForbiddenCursor,
+            CanvasMode.CALIBRATE: Qt.CursorShape.CrossCursor,
         }
         self.setCursor(QCursor(cursor_map.get(self._mode, Qt.CursorShape.ArrowCursor)))
 
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
-        """Paint the dBm legend in the top-right corner of the viewport."""
-        if not self._heatmap_visible:
-            return
-        if self._floor is None or not self._floor.measurements:
-            return
-
-        if self._legend_pixmap is None:
-            self._legend_pixmap = create_legend_gradient(
-                80, 160, self._min_dbm, self._max_dbm
-            )
-        px = self._legend_pixmap
+        """Paint the dBm legend and optional scale text in the viewport corners."""
         painter.save()
-        painter.resetTransform()   # switch from scene → viewport coordinates
+        painter.resetTransform()
         vp = self.viewport()
-        painter.drawPixmap(vp.width() - px.width() - 8, 8, px)
+
+        if self._heatmap_visible and self._floor is not None and self._floor.measurements:
+            if self._legend_pixmap is None:
+                self._legend_pixmap = create_legend_gradient(
+                    80, 160, self._min_dbm, self._max_dbm
+                )
+            px = self._legend_pixmap
+            painter.drawPixmap(vp.width() - px.width() - 8, 8, px)
+
+        if self._pixels_per_meter is not None:
+            scale_text = f"1 m = {self._pixels_per_meter:.1f} px"
+            font = QFont()
+            font.setPixelSize(11)
+            painter.setFont(font)
+            fm = painter.fontMetrics()
+            tw = fm.horizontalAdvance(scale_text)
+            th = fm.height()
+            x = 8
+            y = vp.height() - 8 - th
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(0, 0, 0, 140)))
+            painter.drawRoundedRect(x - 4, y - 2, tw + 8, th + 4, 3, 3)
+            painter.setPen(QPen(QColor("#e0e0e0")))
+            painter.drawText(x, y + fm.ascent(), scale_text)
+
         painter.restore()
+
+    # ──────────────────────────────────────────────────────────
+    # Scale calibration
+    # ──────────────────────────────────────────────────────────
+
+    def set_pixels_per_meter(self, ppm: Optional[float]) -> None:
+        """Apply a previously stored calibration value (e.g. on project load)."""
+        self._pixels_per_meter = ppm
+        self.viewport().update()
+
+    def _handle_calibrate_click(self, scene_pt: QPointF) -> None:
+        if self._cal_state == 0:
+            # First click — place red start dot
+            self._cal_start = scene_pt
+            dot = QGraphicsEllipseItem(-5, -5, 10, 10)
+            dot.setPos(scene_pt)
+            dot.setBrush(QBrush(QColor("#ff4444")))
+            dot.setPen(QPen(QColor("#cc0000"), 1.5))
+            dot.setZValue(200)
+            self._scene.addItem(dot)
+            self._cal_items.append(dot)
+            self._cal_state = 1
+            self.calibration_status.emit(
+                "Kalibrierung: Endpunkt klicken (Esc = abbrechen)"
+            )
+        else:
+            # Second click — draw dashed line, emit signal for dialog
+            end_pt = scene_pt
+            pen = QPen(QColor("#ff4444"), 1.5, Qt.PenStyle.DashLine)
+            pen.setDashPattern([6, 4])
+            line = QGraphicsLineItem(
+                self._cal_start.x(), self._cal_start.y(),
+                end_pt.x(), end_pt.y(),
+            )
+            line.setPen(pen)
+            line.setZValue(200)
+            self._scene.addItem(line)
+            self._cal_items.append(line)
+
+            dot2 = QGraphicsEllipseItem(-5, -5, 10, 10)
+            dot2.setPos(end_pt)
+            dot2.setBrush(QBrush(QColor("#ff4444")))
+            dot2.setPen(QPen(QColor("#cc0000"), 1.5))
+            dot2.setZValue(200)
+            self._scene.addItem(dot2)
+            self._cal_items.append(dot2)
+
+            self._cal_state = 0
+            # Emit — app.py will show the dialog and call finish_calibration()
+            self.calibration_ready.emit(self._cal_start, end_pt)
+
+    def _cancel_calibration(self) -> None:
+        for item in self._cal_items:
+            self._scene.removeItem(item)
+        self._cal_items.clear()
+        self._cal_state = 0
+        self._cal_start = None
+
+    def finish_calibration(self, pixels_per_meter: float) -> None:
+        """Called by app after dialog confirms the real-world distance."""
+        self._cancel_calibration()
+        self._pixels_per_meter = pixels_per_meter
+        self.viewport().update()
+        self.set_mode(CanvasMode.SELECT)

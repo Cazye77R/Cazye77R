@@ -312,6 +312,11 @@ class MainWindow(QMainWindow):
         pp.heatmap_opacity_changed.connect(self._on_opacity_changed)
         pp.thresholds_changed.connect(cv.set_dbm_range)
         pp.thresholds_changed.connect(self._on_thresholds_changed)
+        pp.calibrate_requested.connect(self._start_calibration)
+
+        # ── Wire canvas calibration signals ───────────────────
+        cv.calibration_ready.connect(self._on_calibration_ready)
+        cv.calibration_status.connect(self.statusBar().showMessage)
 
         # ── Dirty title ────────────────────────────────────────
         self._undo_stack.indexChanged.connect(lambda _: self._update_title())
@@ -361,6 +366,11 @@ class MainWindow(QMainWindow):
         self._grid_action.setChecked(False)
         self._grid_action.triggered.connect(self._toggle_grid)
         self._ansicht_menu.addAction(self._grid_action)
+
+        extras = menubar.addMenu("Extras")
+        extras.addAction(self._make_action(
+            "Maßstab kalibrieren", self._start_calibration
+        ))
 
     def _make_action(
         self, label: str, slot, shortcut: QKeySequence | None = None
@@ -614,9 +624,14 @@ class MainWindow(QMainWindow):
         if m is None or floor is None or floor.router_position is None:
             self._router_dist_label.setText("")
             return
-        rx, ry   = floor.router_position
-        dist_px  = math.sqrt((m.x - rx) ** 2 + (m.y - ry) ** 2)
-        self._router_dist_label.setText(f"📡 {dist_px:.0f} px")
+        rx, ry  = floor.router_position
+        dist_px = math.sqrt((m.x - rx) ** 2 + (m.y - ry) ** 2)
+        ppm = self._project.pixels_per_meter if self._project else None
+        if ppm and ppm > 0:
+            dist_m = dist_px / ppm
+            self._router_dist_label.setText(f"📡 {dist_m:.2f} m")
+        else:
+            self._router_dist_label.setText(f"📡 {dist_px:.0f} px")
 
     def _on_opacity_changed(self, opacity: int) -> None:
         self._canvas_widget.set_heatmap_opacity(opacity)
@@ -656,6 +671,94 @@ class MainWindow(QMainWindow):
             self._signal_label.setText("Signal: —")
 
     # ------------------------------------------------------------------
+    # Scale calibration
+    # ------------------------------------------------------------------
+
+    def _start_calibration(self) -> None:
+        self._canvas_widget.set_mode(CanvasMode.CALIBRATE)
+        self.statusBar().showMessage(
+            "Kalibrierung: Startpunkt klicken (Esc = abbrechen)"
+        )
+
+    def _on_calibration_ready(self, start: QPointF, end: QPointF) -> None:
+        dx = end.x() - start.x()
+        dy = end.y() - start.y()
+        dist_px = math.sqrt(dx * dx + dy * dy)
+        if dist_px < 1:
+            self.statusBar().showMessage("Kalibrierung: Punkte zu nah beieinander")
+            self._canvas_widget.set_mode(CanvasMode.SELECT)
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Maßstab kalibrieren")
+        dialog.setStyleSheet("background-color:#2a2a3a; color:#e0e0e0;")
+        lay = QVBoxLayout(dialog)
+
+        info = QLabel(
+            f"Gemessene Strecke: {dist_px:.1f} px\n"
+            "Wie lang ist diese Strecke in Wirklichkeit?"
+        )
+        info.setStyleSheet("color:#e0e0e0; font-size:12px;")
+        lay.addWidget(info)
+
+        form = QFormLayout()
+        dist_input = QLineEdit("1.0")
+        dist_input.setStyleSheet(
+            "background:#1e1e2e; color:#e0e0e0; border:1px solid #3a3a4a;"
+            " padding:3px; border-radius:3px;"
+        )
+
+        unit_combo = QComboBox()
+        unit_combo.addItems(["m", "cm"])
+        unit_combo.setStyleSheet(
+            "background:#1e1e2e; color:#e0e0e0; border:1px solid #3a3a4a;"
+            " padding:2px; border-radius:3px;"
+        )
+
+        row = QHBoxLayout()
+        row.addWidget(dist_input)
+        row.addWidget(unit_combo)
+        unit_widget = QWidget()
+        unit_widget.setLayout(row)
+        form.addRow("Reale Länge:", unit_widget)
+        lay.addLayout(form)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.setStyleSheet("color:#e0e0e0;")
+        btns.accepted.connect(dialog.accept)
+        btns.rejected.connect(dialog.reject)
+        lay.addWidget(btns)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            self._canvas_widget.set_mode(CanvasMode.SELECT)
+            return
+
+        try:
+            real_dist = float(dist_input.text().replace(",", "."))
+        except ValueError:
+            self.statusBar().showMessage("Kalibrierung: Ungültiger Wert")
+            self._canvas_widget.set_mode(CanvasMode.SELECT)
+            return
+
+        if unit_combo.currentText() == "cm":
+            real_dist /= 100.0  # convert to meters
+
+        if real_dist <= 0:
+            self.statusBar().showMessage("Kalibrierung: Wert muss > 0 sein")
+            self._canvas_widget.set_mode(CanvasMode.SELECT)
+            return
+
+        ppm = dist_px / real_dist
+        if self._project:
+            self._project.pixels_per_meter = ppm
+        self._canvas_widget.finish_calibration(ppm)
+        self._properties_panel.update_scale(ppm)
+        self._update_router_distance()
+        self.statusBar().showMessage(f"Maßstab kalibriert: 1 m = {ppm:.1f} px")
+
+    # ------------------------------------------------------------------
     # Project management
     # ------------------------------------------------------------------
 
@@ -679,6 +782,8 @@ class MainWindow(QMainWindow):
         self._update_floor_label()
         self._update_title()
         self._refresh_side_view()
+        self._canvas_widget.set_pixels_per_meter(project.pixels_per_meter)
+        self._properties_panel.update_scale(project.pixels_per_meter)
 
     def _sync_tabs(self) -> None:
         floors = self._project.floors if self._project else []
