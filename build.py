@@ -100,14 +100,18 @@ def build(debug: bool = False) -> None:
         "--hidden-import", "pyautogui",
         "--hidden-import", "pyscreeze",
         "--hidden-import", "mouseinfo",
-        # Embed the profiles/ directory (accessible at runtime via sys._MEIPASS)
-        f"--add-data", f"profiles{SEP}profiles",
-        # Config and gesture modules live next to the entry point – PyInstaller
-        # picks them up automatically, but explicit imports guard against tree-
-        # shaking if they are only imported via importlib at runtime.
+        # Seed profiles, read at runtime from sys._MEIPASS. These are
+        # read-only; profile_manager copies/saves into a per-user directory,
+        # because _MEIPASS is deleted when the executable exits.
+        "--add-data", f"profiles{SEP}profiles",
+        # Local modules live next to the entry point – PyInstaller picks them
+        # up automatically, but explicit imports guard against tree-shaking.
         "--hidden-import", "config",
         "--hidden-import", "gestures",
         "--hidden-import", "profile_manager",
+        "--hidden-import", "runtime",
+        "--hidden-import", "camera",
+        "--hidden-import", "version",
     ]
 
     # Console window: keep for debug, suppress for release

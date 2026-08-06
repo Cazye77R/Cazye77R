@@ -2,3 +2,12 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+
+# Launcher / build artefacts
+.venv/
+dist/
+build/
+*.spec
+
+# Runtime state written by the app
+profiles/active_profile.json

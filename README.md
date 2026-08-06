@@ -1,46 +1,71 @@
 # HandCursor
 
-Maussteuerung per Handgesten über die Webcam – kein Maus-Hardware nötig.
+Maussteuerung per Handgesten über die Webcam – keine Maus-Hardware nötig.
 MediaPipe erkennt Handlandmarken in Echtzeit; definierte Gesten werden in
 Mausbewegungen, Klicks, Scrollen und Drag & Drop übersetzt.
 
 ---
 
+## Schnellstart
+
+Ein Skript genügt – es legt beim ersten Aufruf eine virtuelle Umgebung an,
+installiert die Abhängigkeiten und startet dann:
+
+```bash
+# Linux / macOS
+./start.sh              # interaktives Menü
+./start.sh ui           # Streamlit-Oberfläche
+./start.sh app          # reines OpenCV-Fenster
+./start.sh calibrate    # Kalibrierungs-Wizard
+```
+
+```bat
+REM Windows (oder start.bat doppelklicken)
+start.bat
+start.bat ui
+```
+
+Ohne die Wrapper geht es genauso: `python run.py ui`.
+
+| Modus | Wirkung |
+|---|---|
+| `ui` | Streamlit-Oberfläche mit Live-Bild, Profilen und Einstellungen |
+| `app` | Reines OpenCV-Fenster (die schlanke Variante) |
+| `calibrate` | Kalibrierungs-Wizard |
+| `test` | Testsuite |
+| `build` | Standalone-EXE bauen |
+| `doctor` | Installation prüfen – erster Anlaufpunkt bei Problemen |
+
+Nützliche Flags: `--profile NAME`, `--camera N`, `--port N`, `--no-venv`,
+`--reinstall`, `--force`.
+
+**Wenn etwas nicht startet:** `python run.py doctor` prüft Python-Version,
+Anzeige, Kameras, alle Abhängigkeiten und die Profile – und nennt zu jedem
+fehlenden Paket den passenden Installationsbefehl.
+
+---
+
 ## Installation
 
-### Aus dem Quellcode (empfohlen für Entwicklung)
+### Aus dem Quellcode
+
+Der Launcher erledigt das normalerweise. Von Hand:
 
 ```bash
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
-
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+pip install -r requirements-dev.txt   # nur für Tests und Build
 ```
 
-Starten:
-
-```bash
-# Reines OpenCV-Fenster (Produktion)
-python hand_cursor.py
-
-# Streamlit-App mit Live-Feed, Profilverwaltung und Kalibrierung
-streamlit run app.py
-```
+Python **3.10 – 3.12** (MediaPipe veröffentlicht oberhalb von 3.12 noch keine
+Wheels; der Launcher prüft das und sagt es deutlich).
 
 ### Als standalone EXE (Windows)
 
-Lade die fertige `HandCursor.exe` aus dem [Releases-Bereich](../../releases) herunter
-und führe sie direkt aus – keine Python-Installation erforderlich.
-
-Selbst bauen:
-
 ```bash
-pip install pyinstaller
-python build.py          # Release-Build (kein Konsolenfenster)
-python build.py --debug  # mit Konsolenfenster zur Fehlersuche
+python run.py build          # oder: python build.py
+python build.py --debug      # mit Konsolenfenster zur Fehlersuche
 ```
 Die EXE landet unter `dist/HandCursor.exe`.
 
@@ -51,53 +76,69 @@ Die EXE landet unter `dist/HandCursor.exe`.
 | Geste | Aktion | Erkennung |
 |---|---|---|
 | Zeigefingerspitze bewegen | Maus bewegen | `lm[8]` x/y-Position |
-| Daumen + Zeigefinger Pinch (kurz) | Linksklick | Pinch < `PINCH_THRESHOLD`, < 0,3 s |
-| Doppel-Pinch (schnell wiederholt) | Doppelklick | 2× Pinch innerhalb `DOUBLE_CLICK_WINDOW` |
-| Daumen + Mittelfinger Pinch | Rechtsklick | `lm[4]` + `lm[12]` < `PINCH_THRESHOLD` |
-| Daumen + Zeigefinger Pinch halten | Drag & Drop | Pinch ≥ `DRAG_THRESHOLD_SEC` → `mouseDown` |
-| Zeige- + Mittelfinger gestreckt, Rest eingeklappt | Scroll-Modus | `lm[8]`/`lm[12]` y < PIP-Gelenk; Ring/Klein eingeklappt |
-| Hand im Scroll-Modus nach oben | Scroll up | y-Delta negativ |
-| Hand im Scroll-Modus nach unten | Scroll down | y-Delta positiv |
+| Daumen + Zeigefinger Pinch (kurz) | Linksklick | Pinch < `pinch_threshold`, kürzer als `drag_threshold` |
+| Doppel-Pinch (schnell wiederholt) | Doppelklick | 2× Pinch innerhalb `double_click_window` |
+| Daumen + Mittelfinger Pinch | Rechtsklick | `lm[4]` + `lm[12]`, Flanke – feuert einmal pro Geste |
+| Daumen + Zeigefinger Pinch halten | Drag & Drop | Pinch ≥ `drag_threshold` → `mouseDown` |
+| Zeige- + Mittelfinger gestreckt, Rest eingeklappt | Scroll-Modus | Fingerspitze über PIP-Gelenk |
+| Im Scroll-Modus Hand nach oben / unten | Scroll up / down | y-Delta zwischen zwei Frames |
+
+**Notaus:** Die Maus schnell in eine Bildschirmecke reißen bricht die Steuerung
+ab (PyAutoGUI-Failsafe). Abschaltbar mit `--no-failsafe`. Im OpenCV-Fenster
+beendet zusätzlich `q` oder `Esc`.
+
+Zum gefahrlosen Ausprobieren: `--no-control` bzw. die Checkbox
+„Steuerung aktiv" in der Oberfläche – Gesten werden erkannt und angezeigt,
+die Maus bleibt unberührt.
 
 ---
 
-## Streamlit-App
+## Oberfläche
 
 ```bash
-streamlit run app.py
+./start.sh ui
 ```
 
-- **Linke Spalte:** Live-Kamerafeed mit Gesten-Overlay, Badge mit aktueller Geste, FPS-Anzeige
-- **Rechte Spalte:** Profil-Dropdown (Default / Gaming / Accessibility), Einstellungs-Slider,
-  „Steuerung aktiv"-Checkbox (Gesten testen ohne Mausübernahme), Gesten-Log
+- **Links:** Live-Kamerabild mit Gesten-Overlay, farbiges Badge der aktuellen
+  Geste, FPS-Anzeige
+- **Rechts:** Profil-Auswahl, Einstellungs-Regler, „Steuerung aktiv",
+  „Kamera freigeben", Gesten-Log der letzten 10 Gesten
+
+Kamera und Kalibrierungs-Seite teilen sich einen einzigen Kamera-Thread, der
+Seitenwechsel übernimmt das Gerät sauber – ohne Standbild und ohne Neustart.
 
 ### Kalibrierungs-Wizard
 
-```bash
-streamlit run app.py  # → Seitennavigation: "calibrate"
-```
+1. **Pinch** – misst über 30 Frames die engste Pinch-Distanz → `pinch_threshold`
+2. **Mapping** – Zeigefinger in alle Ecken führen, das grüne Rechteck zeigt den
+   erfassten Bereich → `map_x` / `map_y`
+3. **Smooth** – Regler mit Live-Vorschau (blau = geglättet, grün = roh)
 
-Dreistufiger Assistent:
-1. **Pinch-Kalibrierung** – misst die engste Pinch-Distanz (30 Frames) → neuer `PINCH_THRESHOLD`
-2. **Mapping-Bereich** – zeichnet live-Rechteck, während Zeigefinger in alle Ecken geführt wird → neue `MAP_X`/`MAP_Y`
-3. **Smooth-Faktor** – Slider mit Live-Vorschau (blau = geglättet, grün = roh)
-
-Ergebnisse werden als benanntes Profil gespeichert.
+Das Ergebnis wird als Profil gespeichert, sofort aktiviert und gilt auch für
+`./start.sh app`.
 
 ---
 
 ## Profile
 
-Profile liegen als JSON in `profiles/`:
+Profile sind JSON-Dateien in `profiles/`:
 
 | Profil | Anwendungsfall |
 |---|---|
 | `default` | Allgemeine Nutzung |
 | `gaming` | Niedrige Schwellwerte, schnelle Reaktion |
 | `accessibility` | Große Toleranzen, träge Bewegung |
-| `calibrated` | Automatisch vom Kalibrierungs-Wizard erstellt |
+| `calibrated` | Wird vom Kalibrierungs-Wizard angelegt |
 
-Eigene Profile über die Streamlit-App oder direkt als JSON in `profiles/` anlegen.
+```bash
+python hand_cursor.py --list-profiles
+python hand_cursor.py --profile gaming
+```
+
+Das zuletzt aktivierte Profil wird gemerkt und beim nächsten Start verwendet.
+In der EXE liegen die mitgelieferten Profile schreibgeschützt im Bundle;
+eigene Profile landen im Benutzerverzeichnis und überleben einen Neustart.
+`HANDCURSOR_HOME` verlegt dieses Verzeichnis.
 
 ---
 
@@ -105,19 +146,20 @@ Eigene Profile über die Streamlit-App oder direkt als JSON in `profiles/` anleg
 
 | Einschränkung | Hinweis |
 |---|---|
-| **Beleuchtung** | Homogenes, diffuses Licht verbessert die Erkennungsrate deutlich. Gegenlicht (Fenster hinter der Hand) führt zu Aussetzern. |
-| **Kamera-Distanz** | Optimale Distanz: 40–70 cm. Bei > 80 cm sinkt die Landmark-Präzision, Pinch-Erkennung wird unzuverlässig. |
-| **Einfarbiger Hintergrund** | Strukturierter oder bewegter Hintergrund erhöht False-Positive-Rate bei der Handerkennung. |
-| **Eine Hand** | Aktuell wird nur eine Hand gleichzeitig verarbeitet (`max_num_hands=1`). |
-| **Betriebssysteme** | Getestet auf Windows 10/11 und Ubuntu 22.04. macOS funktioniert grundsätzlich, PyAutoGUI benötigt dort Accessibility-Rechte. |
-| **Webcam-Framerate** | Bei < 20 FPS werden Gesten träger erkannt. USB-Webcam mit 30 FPS empfohlen. |
-| **EXE-Startzeit** | Die PyInstaller-EXE entpackt MediaPipe-Modelle beim ersten Start (~5–10 s). Folgestarts sind schneller. |
+| **Beleuchtung** | Homogenes, diffuses Licht verbessert die Erkennung deutlich. Gegenlicht (Fenster hinter der Hand) führt zu Aussetzern. |
+| **Kamera-Distanz** | Optimal 40–70 cm. Ab etwa 80 cm sinkt die Landmark-Präzision, die Pinch-Erkennung wird unzuverlässig. |
+| **Hintergrund** | Strukturierter oder bewegter Hintergrund erhöht die Fehlerkennungsrate. |
+| **Eine Hand** | Es wird nur eine Hand gleichzeitig ausgewertet (`max_num_hands=1`). |
+| **Eine Kamera-Instanz** | Alle Seiten teilen sich eine Kamera. Andere Programme (Videokonferenz) müssen sie freigeben. |
+| **Betriebssysteme** | Windows 10/11 und Ubuntu 22.04. macOS läuft grundsätzlich, PyAutoGUI braucht dort Bedienungshilfen-Rechte. |
+| **Kein Headless-Betrieb** | Die App steuert die echte Maus und braucht einen Desktop. Über SSH ohne X11-Weiterleitung bricht der Launcher mit einer Erklärung ab. |
+| **EXE-Startzeit** | Die EXE entpackt die MediaPipe-Modelle beim ersten Start (~5–10 s). |
 
 ---
 
 ## Screenshots
 
-> *Platzhalter – Screenshots folgen nach erster stabiler Version.*
+> *Platzhalter – folgen nach der ersten stabilen Version.*
 
 | Ansicht | |
 |---|---|
@@ -130,14 +172,32 @@ Eigene Profile über die Streamlit-App oder direkt als JSON in `profiles/` anleg
 ## Projektstruktur
 
 ```
-hand_cursor.py       Einstiegspunkt (OpenCV-Loop)
-gestures.py          GestureDetector-Klasse
-config.py            Alle konfigurierbaren Werte
-profile_manager.py   Profil laden/speichern/auflisten
-app.py               Streamlit-App
-pages/calibrate.py   Kalibrierungs-Wizard (Streamlit-Page)
-profiles/            Gespeicherte Profile (JSON)
-build.py             PyInstaller-Build-Script
-version.py           Versionsnummer und App-Name
-tests/               Unit-Tests (pytest)
+run.py               Launcher (Setup + Start) – stdlib only
+start.sh / start.bat Wrapper für Linux/macOS bzw. Windows
+hand_cursor.py       Einstiegspunkt OpenCV-Fenster (mit CLI)
+app.py               Streamlit-Oberfläche
+pages/calibrate.py   Kalibrierungs-Wizard
+gestures.py          GestureDetector – gesamte Gesten- und Flankenerkennung
+camera.py            Prozessweiter Einzelbesitzer der Kamera
+runtime.py           Live-Einstellungen, von allen Seiten geteilt
+config.py            Standardwerte + SETTING_KEYS
+profile_manager.py   Profile laden/speichern/auflisten
+profiles/            Profile (JSON)
+build.py             PyInstaller-Build
+version.py           Version und App-Name
+tests/               Testsuite (pytest)
 ```
+
+`stock_model/` im selben Repository ist ein davon unabhängiges Projekt
+(LSTM-Kursprognose) mit eigenen Abhängigkeiten in `requirements-stock.txt`.
+
+---
+
+## Tests
+
+```bash
+python run.py test        # oder: python -m pytest tests/ -v
+```
+
+Die Testsuite läuft ohne Kamera und ohne Display – `tests/` importiert
+bewusst keine Module, die `cv2` oder `pyautogui` auf Modulebene laden.
