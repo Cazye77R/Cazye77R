@@ -6,12 +6,24 @@ Modes:
   - Personenerkennung: Nur Personen + Körper-Skeleton
   - Beides           : Objekte + Personen + optional Skeleton
 
-Start: streamlit run camera_detection/app.py
+Start:
+  - Windows        : Doppelklick auf Kamera-Erkennung.bat
+  - macOS / Linux  : ./start.sh
+  - manuell        : python -m streamlit run camera_detection/app.py
 """
 from __future__ import annotations
 
 import logging
+import pathlib
+import sys
 import threading
+
+# Put the project root on sys.path before importing the camera_detection package.
+# `streamlit run` only adds the script's own folder (camera_detection/), so without
+# this the import below fails with ModuleNotFoundError. Running via
+# `python -m streamlit` happens to work because that puts the CWD on the path —
+# this keeps the app working under either invocation.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 import av
 import streamlit as st

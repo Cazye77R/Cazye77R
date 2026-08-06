@@ -1,0 +1,12 @@
+# Windows-Batchdateien brauchen CRLF. Mit reinen LF-Zeilenenden kann cmd.exe
+# Sprungmarken (:label / goto) fehlerhaft parsen — der Starter bricht dann mit
+# schwer deutbaren Meldungen ab. Diese Regel erzwingt CRLF beim Auschecken,
+# unabhaengig von der core.autocrlf-Einstellung des jeweiligen Rechners.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Shell-Skripte umgekehrt: immer LF, sonst scheitert der Shebang.
+*.sh text eol=lf
+
+# Modellgewichte sind binaer
+*.pt binary

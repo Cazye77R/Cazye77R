@@ -1,0 +1,15 @@
+# Virtuelle Umgebungen (Kamera-Erkennung.bat legt .venv an)
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Modellgewichte und Trainings-Artefakte
+# yolov8*.pt wird beim ersten Start automatisch heruntergeladen
+*.pt
+artifacts/
+
+# Streamlit — config.toml bleibt bewusst versioniert, nur Secrets nicht
+.streamlit/secrets.toml

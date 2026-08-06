@@ -50,6 +50,57 @@ Die App bietet:
 - Wahl der Fenstergröße, Forecast-Horizont und Schnelltraining mit wenigen Epochen.
 - Anzeige der prognostizierten Renditen und fortgeschriebenen Preise.
 
+---
+
+# Live-Kamera-Erkennung & Körper-Tracking
+
+Zweite, eigenständige Anwendung in diesem Repository (`camera_detection/`): erkennt live
+über die Kamera, was sich vor der Linse befindet — mit Rahmen, Beschriftung und
+vollständigem Körper-Skeleton.
+
+## Starten
+
+**Windows:** Doppelklick auf `Kamera-Erkennung.bat`.
+
+Beim ersten Start fragt der Starter, ob die benötigten Pakete installiert werden sollen
+(ca. 2–3 GB). Sie landen isoliert im Unterordner `.venv`, die System-Python-Installation
+bleibt unberührt. Danach startet die App und der Browser öffnet sich automatisch.
+Voraussetzung ist eine Python-Installation von [python.org](https://www.python.org/downloads/) —
+im Installer muss *„Add python.exe to PATH"* angekreuzt sein.
+
+**macOS / Linux:**
+```bash
+./start.sh --setup   # einmalig: Abhängigkeiten installieren
+./start.sh           # danach nur noch das
+```
+
+**Manuell:**
+```bash
+python -m streamlit run camera_detection/app.py
+```
+
+## Funktionen
+
+- **Drei Erkennungsmodi:** nur Objekte, nur Personen, oder beides gleichzeitig.
+- **Objekterkennung** über YOLOv8 mit allen 80 COCO-Klassen.
+- **Körper-Tracking** über MediaPipe Pose mit 33 Landmarken pro Person.
+- **Klassenfilter:** gezielt einzelne Klassen auswählen (z. B. nur `car` und `dog`).
+- **Umschaltbare Anzeige:** Rahmen, Beschriftung und Skeleton einzeln ein-/ausblendbar.
+- **Modellwahl:** YOLOv8n (schnell), YOLOv8s (ausgewogen), YOLOv8m (genau).
+- **Kamera-Auflösung** und Konfidenzschwelle einstellbar.
+- **Live-Statistik:** FPS, erkannte Personen und Objekte, verworfene Frames.
+
+Die Gewichte des gewählten Modells werden beim ersten Verwenden automatisch geladen.
+
+## Hinweis zu OpenCV
+
+`cv2` wird bewusst nicht in `requirements.txt` gepinnt — es kommt transitiv über
+`ultralytics` und `mediapipe`. Auf Headless-Servern anschließend zusätzlich
+`opencv-contrib-python-headless` installieren; Details stehen als Kommentar in
+`requirements.txt`.
+
+---
+
 ## Ergebnisse
 Nach dem Training wird ein Checkpoint unter `artifacts/return_lstm.pt` gespeichert, der sowohl die Modellgewichte als auch die wichtigsten Hyperparameter (inkl. Normalisierungs-Statistiken) enthält. Dieses Format kann mit PyTorch geladen und für Inferenz oder weiteres Feintuning verwendet werden.
 
