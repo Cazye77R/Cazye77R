@@ -958,6 +958,13 @@ class CanvasWidget(QGraphicsView):
             self._measurement_items[id(m)] = item
 
     def _restore_router(self) -> None:
+        if self._router_item is not None:
+            self._router_item.stop()
+            self._scene.removeItem(self._router_item)
+            self._router_item = None
+        if self._router_line is not None:
+            self._scene.removeItem(self._router_line)
+            self._router_line = None
         if self._floor is None or self._floor.router_position is None:
             return
         rx, ry = self._floor.router_position

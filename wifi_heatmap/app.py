@@ -504,8 +504,9 @@ class MainWindow(QMainWindow):
         self._net_worker.finished.connect(lambda: self._refresh_btn.setEnabled(True))
         self._net_worker.start()
 
-    def _on_network_list_ready(self, nets: list) -> None:
+    def _on_network_list_ready(self, nets: list, connected: str) -> None:
         current = self._ssid_combo.currentText()
+        fresh_start = (current == "Alle Netzwerke" and self._ssid_combo.count() == 1)
         self._ssid_combo.blockSignals(True)
         self._ssid_combo.clear()
         self._ssid_combo.addItem("Alle Netzwerke")
@@ -513,8 +514,12 @@ class MainWindow(QMainWindow):
             ssid = net.get("ssid", "")
             if ssid and self._ssid_combo.findText(ssid) < 0:
                 self._ssid_combo.addItem(ssid)
-        idx = self._ssid_combo.findText(current)
-        self._ssid_combo.setCurrentIndex(max(0, idx))
+        if fresh_start and connected:
+            idx = self._ssid_combo.findText(connected)
+            self._ssid_combo.setCurrentIndex(max(0, idx))
+        else:
+            idx = self._ssid_combo.findText(current)
+            self._ssid_combo.setCurrentIndex(max(0, idx))
         self._ssid_combo.blockSignals(False)
 
     def _on_ssid_filter_changed(self, text: str) -> None:

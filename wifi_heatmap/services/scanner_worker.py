@@ -33,9 +33,13 @@ class ScanWorker(QThread):
 
 
 class NetworkListWorker(QThread):
-    """Fetches visible networks via WifiScanner.get_available_networks()."""
+    """Fetches visible networks via WifiScanner.get_available_networks().
 
-    result_ready = Signal(list)   # list[dict]
+    Emits (nets, connected_ssid) where connected_ssid is the SSID the host
+    is currently connected to (empty string if unavailable or on error).
+    """
+
+    result_ready = Signal(list, str)   # (list[dict], connected_ssid)
 
     def __init__(self, scanner: WifiScanner) -> None:
         super().__init__()
@@ -44,8 +48,15 @@ class NetworkListWorker(QThread):
     def run(self) -> None:
         try:
             nets = self._scanner.get_available_networks()
-            self.result_ready.emit(nets)
         except WifiError:
-            self.result_ready.emit([])
+            nets = []
         except Exception:
-            self.result_ready.emit([])
+            nets = []
+
+        connected = ""
+        try:
+            connected = self._scanner.scan().ssid
+        except Exception:
+            pass
+
+        self.result_ready.emit(nets, connected)
