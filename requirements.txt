@@ -1,5 +1,5 @@
-pandas>=2.0
+mediapipe>=0.10
+opencv-python>=4.8
+pyautogui>=0.9.54
 numpy>=1.24
-torch>=2.0
-streamlit>=1.33
-plotly>=5.20
+streamlit>=1.33,<2

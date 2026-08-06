@@ -1,0 +1,9 @@
+{
+  "name": "Accessibility",
+  "smooth_factor": 0.15,
+  "pinch_threshold": 0.075,
+  "click_cooldown": 0.6,
+  "scroll_sensitivity": 5,
+  "drag_threshold": 0.5,
+  "double_click_window": 0.5
+}

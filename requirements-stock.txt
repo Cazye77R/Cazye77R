@@ -1,0 +1,8 @@
+# Dependencies for the unrelated stock_model/ package (LSTM return forecaster).
+# HandCursor does not need these - install only if you work on stock_model.
+#   pip install -r requirements-stock.txt
+pandas>=2.0
+numpy>=1.24
+torch>=2.0
+streamlit>=1.33,<2
+plotly>=5.20
