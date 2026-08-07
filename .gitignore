@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# StockMind – generierte Daten (kein Quellcode)
+stockmind/data/cache/*
+!stockmind/data/cache/.gitkeep
+stockmind/data/training_state/*
+!stockmind/data/training_state/.gitkeep
+stockmind/data/portfolio/*
+!stockmind/data/portfolio/.gitkeep
+stockmind/data/logs/*
+!stockmind/data/logs/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Umgebungsvariablen – .env.example NICHT ignorieren
+stockmind/.env
+.env
+!.env.example
+!stockmind/.env.example
+
+# OS
+.DS_Store
+Thumbs.db

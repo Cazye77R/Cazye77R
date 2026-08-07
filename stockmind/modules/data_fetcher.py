@@ -1,0 +1,830 @@
+"""
+StockMind – Marktdaten-Modul
+Ticker-Suche (Name/WKN/Freitext), WKN-Auflösung, OHLCV-Download mit
+technischen Indikatoren (ta-Bibliothek) und lokalem 24h-Cache.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+import time
+from pathlib import Path
+from typing import Optional
+
+import pandas as pd
+import requests
+import yfinance as yf
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from config import (
+    CACHE_DIR,
+    CACHE_TTL_HOURS,
+    DEFAULT_INTERVAL,
+    DEFAULT_PERIOD,
+)
+
+from modules.logger import logger
+
+logger.debug(f"Module loaded: {__name__}")
+
+# ---------------------------------------------------------------------------
+# Konstanten
+# ---------------------------------------------------------------------------
+
+_YAHOO_SEARCH_URL = "https://query1.finance.yahoo.com/v1/finance/search"
+_YAHOO_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (StockMind/0.1; +https://github.com/stockmind)",
+    "Accept": "application/json",
+    "Accept-Language": "de-DE,de;q=0.9",
+}
+_CACHE_TTL_S: int = CACHE_TTL_HOURS * 3600
+
+# WKN: genau 6 alphanumerische Zeichen (deutsche Wertpapierkennnummer)
+_WKN_RE = re.compile(r'^[A-Za-z0-9]{6}$')
+
+# ISIN: 2 Buchstaben + 10 Zeichen
+_ISIN_RE = re.compile(r'^[A-Z]{2}[A-Z0-9]{10}$')
+
+# Lesbarer Typ je Yahoo quoteType
+_TYPE_MAP: dict[str, str] = {
+    "EQUITY":         "Aktie",
+    "ETF":            "ETF",
+    "MUTUALFUND":     "Fonds",
+    "INDEX":          "Index",
+    "FUTURE":         "Future",
+    "CURRENCY":       "Währung",
+    "CRYPTOCURRENCY": "Krypto",
+    "OPTION":         "Option",
+}
+
+# Bekannte deutsche Xetra-Suffixe für WKN-Mapping-Fallback
+_DE_SUFFIX = ".DE"
+
+# Deutsche Regionalbörsen-Suffixe (niedrigere Priorität als XETRA)
+_DE_SFXS = frozenset({"F", "MU", "BE", "HM", "DU", "HA"})
+
+# Binance REST API für Crypto-OHLCV
+_BINANCE_URL = "https://api.binance.com/api/v3/klines"
+_BINANCE_PERIOD_LIMIT: dict[str, int] = {
+    "1mo": 30, "3mo": 90, "6mo": 180,
+    "1y": 365, "2y": 730, "5y": 1825,
+}
+_BINANCE_INTERVAL_MAP: dict[str, str] = {
+    "1d": "1d", "1h": "1h", "1wk": "1w", "1mo": "1M",
+}
+
+# Statische Liste der wichtigsten Kryptowährungen (Fallback wenn Yahoo-Suche nichts liefert)
+_CRYPTO_STATIC: list[dict] = [
+    {"symbol": "BTC-USD",  "name": "Bitcoin",       "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "ETH-USD",  "name": "Ethereum",      "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "BNB-USD",  "name": "BNB",           "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "XRP-USD",  "name": "XRP",           "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "SOL-USD",  "name": "Solana",        "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "ADA-USD",  "name": "Cardano",       "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "DOGE-USD", "name": "Dogecoin",      "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "AVAX-USD", "name": "Avalanche",     "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "DOT-USD",  "name": "Polkadot",      "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "LINK-USD", "name": "Chainlink",     "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "LTC-USD",  "name": "Litecoin",      "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "MATIC-USD","name": "Polygon (MATIC)","exchange": "Binance",         "type": "Krypto", "wkn": ""},
+    {"symbol": "UNI-USD",  "name": "Uniswap",       "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "ATOM-USD", "name": "Cosmos",        "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "XLM-USD",  "name": "Stellar",       "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
+    {"symbol": "TRX-USD",  "name": "TRON",          "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "TON-USD",  "name": "Toncoin",       "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {"symbol": "SHIB-USD", "name": "Shiba Inu",     "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+]
+
+# Schlüsselwörter die ALLE Kryptowährungen zurückgeben (generische Suchanfragen)
+_CRYPTO_KEYWORDS = frozenset({"krypto", "crypto", "cryptocurrency", "coin", "token", "defi"})
+
+
+# ---------------------------------------------------------------------------
+# 1. Ticker-Suche
+# ---------------------------------------------------------------------------
+
+def search_stocks(query: str) -> list[dict]:
+    """
+    Sucht Wertpapiere per Freitext, WKN oder ISIN.
+
+    Strategie:
+    - Bei WKN-Muster (6 alphanumerisch): erst `get_wkn_symbol`, dann Yahoo-Suche
+    - Sonst: direkte Yahoo Finance Search API
+    - Beide Quellen werden dedupliziert und nach Relevanz sortiert
+
+    Returns:
+        Liste von Dicts:
+        [{"symbol": "SAP.DE", "name": "SAP SE", "exchange": "XETRA",
+          "wkn": "716460", "type": "Aktie"}]
+    """
+    query = query.strip()
+    if not query:
+        return []
+
+    results: list[dict] = []
+
+    # WKN-Sonderbehandlung: versuche direkte Auflösung
+    if _WKN_RE.match(query):
+        symbol = get_wkn_symbol(query)
+        if symbol:
+            results = _yahoo_search(symbol)
+            # WKN in alle Treffer eintragen
+            for r in results:
+                r.setdefault("wkn", query.upper())
+            if results:
+                return results
+
+    # Standard-Yahoo-Suche (Freitext, ISIN, Ticker)
+    results = _yahoo_search(query)
+
+    # Krypto-Suche: statische Liste ergänzen wenn Yahoo-Suche nichts liefert
+    # oder Suchanfrage eindeutig auf Krypto hinweist
+    crypto_hits = _search_crypto_static(query)
+    if crypto_hits:
+        seen = {r.get("symbol") for r in results if "error" not in r}
+        for c in crypto_hits:
+            if c["symbol"] not in seen:
+                results.append(c)
+
+    # Fehler-Dicts nie als Treffer zurückgeben – sie sähen in der UI wie
+    # ein Suchergebnis aus. Fehler nur loggen, Aufrufer sieht "keine Treffer".
+    clean = [r for r in results if "error" not in r]
+    for r in results:
+        if "error" in r:
+            logger.warning(f"Ticker-Suche '{query}': {r['error']}")
+    return clean
+
+
+def _yahoo_search(query: str) -> list[dict]:
+    """Interne Yahoo-Finance-Such-Anfrage."""
+    params = {
+        "q": query,
+        "lang": "de-DE",
+        "region": "DE",
+        "quotesCount": 10,
+        "newsCount": 0,
+        "enableFuzzyQuery": True,
+        "enableCb": False,
+    }
+    try:
+        resp = requests.get(
+            _YAHOO_SEARCH_URL,
+            params=params,  # type: ignore[arg-type]
+            headers=_YAHOO_HEADERS,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        quotes = resp.json().get("quotes", [])
+    except requests.exceptions.Timeout:
+        return [{"error": "Timeout bei Yahoo Finance Suche (>10s)"}]
+    except requests.exceptions.ConnectionError:
+        return [{"error": "Keine Verbindung zu Yahoo Finance möglich"}]
+    except Exception as exc:
+        return [{"error": str(exc)}]
+
+    out: list[dict] = []
+    seen: set[str] = set()
+    for q in quotes:
+        symbol = q.get("symbol", "")
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        out.append({
+            "symbol": symbol,
+            "name": q.get("longname") or q.get("shortname") or symbol,
+            "exchange": q.get("exchange", ""),
+            "type": _TYPE_MAP.get(q.get("quoteType", ""), q.get("quoteType", "–")),
+            "wkn": "",      # Yahoo liefert keine WKN; Feld für Konsistenz
+        })
+
+    # XETRA (.DE) vor deutschen Regionalbörsen (.F, .MU, .BE, …) vor Rest.
+    # Stabile Sortierung: Reihenfolge innerhalb jeder Gruppe bleibt erhalten.
+    _DE_SFXS = frozenset({"F", "MU", "BE", "HM", "DU", "HA"})
+
+    def _xetra_rank(r: dict) -> int:
+        sym = r.get("symbol", "")
+        if sym.endswith(".DE"):
+            return 0
+        sfx = sym.rsplit(".", 1)[-1] if "." in sym else ""
+        return 1 if sfx in _DE_SFXS else 2
+
+    out.sort(key=_xetra_rank)
+    return out
+
+
+def _search_crypto_static(query: str) -> list[dict]:
+    """Sucht in der statischen Krypto-Liste. Gibt Treffer bei Ticker- oder Namensübereinstimmung zurück."""
+    q = query.strip().upper()
+    q_lower = query.strip().lower()
+
+    # Generische Krypto-Suche: alle zeigen
+    if q_lower in _CRYPTO_KEYWORDS:
+        return list(_CRYPTO_STATIC)
+
+    matches = []
+    for c in _CRYPTO_STATIC:
+        base = c["symbol"].replace("-USD", "")   # z. B. "BTC" aus "BTC-USD"
+        if q == base or c["name"].upper().startswith(q) or q in c["name"].upper():
+            matches.append(c)
+    return matches
+
+
+# Rückwärtskompatibilität
+def search_ticker(query: str) -> list[dict]:
+    """Alias für search_stocks() (Rückwärtskompatibilität)."""
+    return search_stocks(query)
+
+
+def resolve_ticker(query: str) -> Optional[str]:
+    """Gibt das erste Ticker-Symbol für einen Suchbegriff zurück, oder None."""
+    for r in search_stocks(query):
+        if "error" not in r and r.get("symbol"):
+            return r["symbol"]
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 2. WKN → Yahoo Finance Symbol
+# ---------------------------------------------------------------------------
+
+def get_wkn_symbol(wkn: str) -> str:
+    """
+    Versucht eine WKN in ein Yahoo Finance Ticker-Symbol umzuwandeln.
+
+    Strategie (Fallback-Kette):
+    1. Bekannte statische Mappings (häufige deutsche Standardwerte)
+    2. Yahoo Finance Search API – sucht WKN als Freitext
+    3. Suche mit Xetra-Suffix-Variante "{WKN}.DE"
+
+    Returns:
+        Yahoo Finance Symbol (z.B. "SAP.DE") oder "" wenn nicht gefunden.
+    """
+    wkn = wkn.strip().upper()
+
+    # --- Statisches Mapping für die häufigsten deutschen Standardwerte ---
+    _STATIC: dict[str, str] = {
+        "716460": "SAP.DE",
+        "840400": "DBK.DE",
+        "519000": "BMW.DE",
+        "710000": "DAI.DE",      # Mercedes (ehem. Daimler)
+        "766403": "MBG.DE",      # Mercedes-Benz Group
+        "555750": "DTE.DE",      # Deutsche Telekom
+        "515100": "BAS.DE",      # BASF
+        "575200": "BAY.DE",      # Bayer
+        "604843": "ADS.DE",      # Adidas
+        "695200": "ALV.DE",      # Allianz
+        "521000": "MUV2.DE",     # Munich Re
+        "555200": "RWE.DE",
+        "ENAG99": "EOAN.DE",     # E.ON
+        "703712": "VOW3.DE",     # Volkswagen Vz.
+        "760177": "VOW.DE",      # Volkswagen St.
+        "677650": "FRE.DE",      # Fresenius SE
+        "578560": "FME.DE",      # Fresenius Medical Care
+        "543900": "HEN3.DE",     # Henkel Vz.
+        "604700": "IFX.DE",      # Infineon (alte WKN)
+        "623100": "IFX.DE",      # Infineon
+        "648300": "LIN.DE",      # Linde
+        "555480": "SIE.DE",      # Siemens
+        "766030": "AIR.DE",      # Airbus
+        "A14Y8F": "DHER.DE",     # Delivery Hero
+        "A2E4K2": "PUM.DE",      # Puma
+    }
+    if wkn in _STATIC:
+        return _STATIC[wkn]
+
+    # --- Yahoo Finance Suche mit WKN als Query ---
+    results = _yahoo_search(wkn)
+    for r in results:
+        if "error" not in r and r.get("symbol"):
+            return r["symbol"]
+
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# 3. OHLCV-Download-Helfer
+# ---------------------------------------------------------------------------
+
+def _normalize_raw(raw: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """Normalisiert einen rohen yfinance-DataFrame auf OHLCV-Spalten ohne Zeitzone."""
+    if raw is None or raw.empty:
+        return None
+    raw = raw.copy()
+    raw.index = pd.to_datetime(raw.index).tz_localize(None)
+    if isinstance(raw.columns, pd.MultiIndex):
+        raw.columns = raw.columns.get_level_values(0)
+    ohlcv = [c for c in ("Open", "High", "Low", "Close", "Volume") if c in raw.columns]
+    if len(ohlcv) < 5:
+        return None
+    df = raw[list(ohlcv)].dropna(subset=["Close"])
+    return df if len(df) >= 2 else None
+
+
+def _fetch_yf_history(symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
+    """Primärer yfinance-Download via Ticker.history() – robuster als yf.download()."""
+    try:
+        raw = yf.Ticker(symbol).history(
+            period=period, interval=interval,
+            # auto_adjust=True:  Bereinigt Splits und Dividenden (OHLCV bleibt vergleichbar).
+            # back_adjust=False: Historische Preise werden NICHT rückwärts skaliert –
+            #   forward-adjustierte Preise sind für ML-Features stabiler und verhindern
+            #   negative Preise bei Reverse-Splits.
+            auto_adjust=True,
+            back_adjust=False,
+        )
+        if raw is None or raw.empty:
+            logger.warning(f"yf.Ticker.history: keine Daten für {symbol} (period={period})")
+            return None
+        return _normalize_raw(raw)
+    except Exception as exc:
+        logger.warning(f"yf.Ticker.history fehlgeschlagen ({symbol}): {exc}")
+        return None
+
+
+def _fetch_yf_download(symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
+    """Fallback-Download via yf.download() mit MultiIndex-Normalisierung."""
+    try:
+        raw = yf.download(
+            symbol, period=period, interval=interval,
+            progress=False,
+            # Gleiche Bereinigungsstrategie wie _fetch_yf_history – siehe dort.
+            auto_adjust=True,
+            back_adjust=False,
+        )
+        if raw is None or raw.empty:
+            logger.warning(f"yf.download: keine Daten für {symbol} (period={period})")
+            return None
+        return _normalize_raw(raw)
+    except Exception as exc:
+        logger.warning(f"yf.download fehlgeschlagen ({symbol}): {exc}")
+        return None
+
+
+def _fetch_binance_ohlcv(symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
+    """
+    OHLCV von Binance REST API für Krypto-Symbole (Format: BTC-USD → BTCUSDT).
+    Kein API-Key erforderlich für öffentliche Kurs-Daten.
+    """
+    if not symbol.endswith("-USD"):
+        return None
+    base = symbol[:-4]   # "BTC" aus "BTC-USD"
+    binance_sym = base + "USDT"
+    limit = _BINANCE_PERIOD_LIMIT.get(period, 365)
+    b_interval = _BINANCE_INTERVAL_MAP.get(interval, "1d")
+    try:
+        resp = requests.get(
+            _BINANCE_URL,
+            params={"symbol": binance_sym, "interval": b_interval, "limit": limit},  # type: ignore[arg-type]
+            timeout=10,
+        )
+        resp.raise_for_status()
+        klines = resp.json()
+        if not klines or not isinstance(klines, list):
+            return None
+        rows = [
+            {
+                "Date":   pd.Timestamp(k[0], unit="ms"),
+                "Open":   float(k[1]),
+                "High":   float(k[2]),
+                "Low":    float(k[3]),
+                "Close":  float(k[4]),
+                "Volume": float(k[5]),
+            }
+            for k in klines
+        ]
+        df = pd.DataFrame(rows).set_index("Date")
+        df.index = pd.to_datetime(df.index).tz_localize(None)
+        return df if len(df) >= 2 else None
+    except Exception as exc:
+        logger.debug(f"Binance fetch fehlgeschlagen ({binance_sym}): {exc}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# 4. OHLCV + Technische Indikatoren (mit Cache)
+# ---------------------------------------------------------------------------
+
+def fetch_ohlcv(
+    symbol: str,
+    period: str = DEFAULT_PERIOD,
+    interval: str = DEFAULT_INTERVAL,
+) -> pd.DataFrame:
+    """
+    Lädt OHLCV-Daten und berechnet technische Indikatoren.
+
+    Download-Strategie:
+    - Krypto (endet auf -USD): Binance API → yf.Ticker.history() → yf.download()
+    - Aktien/ETFs/Indizes:     yf.Ticker.history() → yf.download()
+    - Deutsche Regionalbörse (z. B. BMW3.F): automatischer XETRA-Fallback (.DE)
+
+    Berechnet automatisch RSI, MACD, Bollinger Bands, SMA, EMA.
+    Ergebnisse werden 24h lokal gecacht (data/cache/).
+
+    Returns:
+        DataFrame mit OHLCV + Indikatoren.
+        Bei Fehler: leeres DataFrame mit df.attrs["error"] gesetzt – kein Crash.
+    """
+    symbol    = symbol.strip().upper()
+    requested = symbol   # Original-Anfrage – für den Cache-Key nach Fallbacks
+
+    # Cache prüfen
+    cached = _load_cache(symbol, period, interval)
+    if cached is not None:
+        return cached
+
+    # Download: Reihenfolge je Asset-Typ
+    raw: Optional[pd.DataFrame] = None
+    if symbol.endswith("-USD"):
+        # Krypto: Binance zuerst (zuverlässiger für Crypto), dann yfinance
+        raw = _fetch_binance_ohlcv(symbol, period, interval)
+        if raw is None:
+            raw = _fetch_yf_history(symbol, period, interval)
+        if raw is None:
+            raw = _fetch_yf_download(symbol, period, interval)
+    else:
+        # Aktien/ETFs/Indizes: yf.Ticker.history() zuerst (robuster gegen Auth-Änderungen),
+        # yf.download() als Fallback
+        raw = _fetch_yf_history(symbol, period, interval)
+        if raw is None:
+            raw = _fetch_yf_download(symbol, period, interval)
+
+    if raw is None:
+        parts = symbol.rsplit(".", 1)
+        base  = parts[0] if len(parts) == 2 else symbol
+        sfx   = parts[1] if len(parts) == 2 else ""
+
+        # Fallback 1: deutsche Regionalbörse (z. B. BMW3.F) → XETRA (BMW.DE) probieren
+        if sfx in _DE_SFXS:
+            xetra = base + ".DE"
+            raw = _fetch_yf_history(xetra, period, interval)
+            if raw is None:
+                raw = _fetch_yf_download(xetra, period, interval)
+            if raw is not None:
+                symbol = xetra
+
+        # Fallback 2: Vorzugsaktie / Klassen-Suffix (z. B. BMW3.DE → BMW.DE)
+        if raw is None and sfx == "DE":
+            base_stripped = re.sub(r"\d+$", "", base)
+            if base_stripped != base:
+                alt = base_stripped + ".DE"
+                logger.info(f"Klassen-Suffix entfernt: '{symbol}' → '{alt}'")
+                raw = _fetch_yf_history(alt, period, interval)
+                if raw is None:
+                    raw = _fetch_yf_download(alt, period, interval)
+                if raw is not None:
+                    symbol = alt
+
+        # Fallback 3: kein Suffix, kein Krypto, kein Index → XETRA (.DE) versuchen
+        if raw is None and "." not in symbol and not symbol.endswith("-USD") and not symbol.startswith("^"):
+            xetra = symbol + ".DE"
+            logger.info(f"Kein Suffix für '{symbol}' – versuche XETRA-Fallback: {xetra}")
+            raw = _fetch_yf_history(xetra, period, interval)
+            if raw is None:
+                raw = _fetch_yf_download(xetra, period, interval)
+            if raw is not None:
+                symbol = xetra
+
+        if raw is None:
+            logger.warning(f"Alle Quellen erfolglos für {symbol} (period={period})")
+            return _empty_df(
+                f"Keine Daten für '{symbol}' — alle Quellen erfolglos "
+                f"(period={period}, interval={interval}). "
+                "Ticker prüfen: Deutsche Aktien = SYMBOL.DE (z. B. BMW.DE), "
+                "US-Aktien = AAPL / MSFT, Krypto = BTC-USD, Indizes = ^GDAXI / ^DJI."
+            )
+
+    df = raw.copy()
+
+    # Indikatoren berechnen
+    df = _add_indicators(df)
+
+    # Tatsächlich verwendeten Ticker speichern (nach möglichem .DE-Fallback)
+    df.attrs["symbol"] = symbol
+
+    # Unter dem AUFGERUFENEN Symbol cachen – sonst läuft z. B. "BMW" bei
+    # jedem Aufruf erneut durch die komplette Fallback-Kette. Zusätzlich
+    # unter dem aufgelösten Symbol, damit auch direkte Anfragen treffen.
+    _save_cache(requested, period, interval, df)
+    if symbol != requested:
+        _save_cache(symbol, period, interval, df)
+
+    return df
+
+
+def _add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """Berechnet alle technischen Indikatoren und fügt sie als Spalten hinzu."""
+    close = df["Close"]
+
+    try:
+        from ta.momentum import RSIIndicator
+        from ta.trend import MACD, EMAIndicator, SMAIndicator
+        from ta.volatility import BollingerBands
+
+        # RSI(14)
+        rsi = RSIIndicator(close=close, window=14)
+        df["rsi"] = rsi.rsi()
+
+        # MACD(12/26/9)
+        macd_obj = MACD(close=close, window_fast=12, window_slow=26, window_sign=9)
+        df["macd"]        = macd_obj.macd()
+        df["macd_signal"] = macd_obj.macd_signal()
+        df["macd_diff"]   = macd_obj.macd_diff()
+
+        # Bollinger Bands(20, 2σ)
+        bb = BollingerBands(close=close, window=20, window_dev=2)
+        df["bb_upper"] = bb.bollinger_hband()
+        df["bb_lower"] = bb.bollinger_lband()
+        df["bb_mid"]   = bb.bollinger_mavg()
+        df["bb_pband"] = bb.bollinger_pband()   # Position innerhalb der Bänder (0–1)
+        df["bb_wband"] = bb.bollinger_wband()   # Bandbreite (Volatilität)
+
+        # SMAs
+        for w in (20, 50, 200):
+            if len(df) >= w:
+                df[f"sma_{w}"] = SMAIndicator(close=close, window=w).sma_indicator()
+
+        # EMAs
+        for w in (12, 26):
+            df[f"ema_{w}"] = EMAIndicator(close=close, window=w).ema_indicator()
+
+    except ImportError:
+        logger.debug("ta-Bibliothek nicht installiert – verwende manuellen Indikator-Fallback")
+        df = _add_indicators_manual(df)
+    except Exception as _exc:
+        logger.warning(f"Indikator-Berechnung fehlgeschlagen, OHLCV ohne Indikatoren: {_exc}")
+
+    return df
+
+
+def _add_indicators_manual(df: pd.DataFrame) -> pd.DataFrame:
+    """Fallback-Indikatorberechnung ohne ta-Bibliothek."""
+
+    close = df["Close"]
+
+    # RSI
+    delta = close.diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = (-delta.clip(upper=0)).rolling(14).mean()
+    rs = gain / loss.replace(0, float("nan"))
+    df["rsi"] = 100 - (100 / (1 + rs))
+
+    # MACD
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    df["macd"]        = ema12 - ema26
+    df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
+    df["macd_diff"]   = df["macd"] - df["macd_signal"]
+    df["ema_12"] = ema12
+    df["ema_26"] = ema26
+
+    # Bollinger Bands
+    bb_mid = close.rolling(20).mean()
+    bb_std = close.rolling(20).std()
+    df["bb_mid"]   = bb_mid
+    df["bb_upper"] = bb_mid + 2 * bb_std
+    df["bb_lower"] = bb_mid - 2 * bb_std
+    band_range = df["bb_upper"] - df["bb_lower"]
+    df["bb_pband"] = (close - df["bb_lower"]) / band_range.replace(0, float("nan"))
+    df["bb_wband"] = band_range / bb_mid.replace(0, float("nan"))
+
+    # SMAs
+    for w in (20, 50, 200):
+        if len(df) >= w:
+            df[f"sma_{w}"] = close.rolling(w).mean()
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# 4. Fetch-Info (unverändert für app.py-Kompatibilität)
+# ---------------------------------------------------------------------------
+
+def fetch_info(ticker: str) -> dict:
+    """
+    Gibt Basis-Metadaten eines Tickers zurück (Name, Sektor, Währung, …).
+    Gibt bei Fehler ein Dict mit 'error'-Key zurück – kein Crash.
+    """
+    ticker = ticker.strip().upper()
+    try:
+        info = yf.Ticker(ticker).info
+        return {
+            "symbol": ticker,
+            "name": info.get("longName") or info.get("shortName", ticker),
+            "sector": info.get("sector", "–"),
+            "industry": info.get("industry", "–"),
+            "currency": info.get("currency", "USD"),
+            "country": info.get("country", "–"),
+            "market_cap": info.get("marketCap"),
+            "website": info.get("website", ""),
+            "description": info.get("longBusinessSummary", ""),
+        }
+    except Exception as exc:
+        logger.warning(f"fetch_info({ticker}): {exc}")
+        return {"symbol": ticker, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Hilfsfunktionen
+# ---------------------------------------------------------------------------
+
+def is_valid_ticker(ticker: str) -> bool:
+    """Prüft ob ein Ticker syntaktisch plausibel ist (1–12 Zeichen: Buchstaben, Ziffern, .)."""
+    return bool(re.match(r'^[A-Za-z0-9.^]{1,12}$', ticker.strip()))
+
+
+def is_wkn(query: str) -> bool:
+    """Gibt True zurück wenn der String eine WKN sein könnte (6 alphanumerische Zeichen)."""
+    return bool(_WKN_RE.match(query.strip()))
+
+
+def cache_info(symbol: str, period: str = DEFAULT_PERIOD, interval: str = DEFAULT_INTERVAL) -> dict:
+    """
+    Gibt Metadaten zum Cache-Eintrag zurück.
+    Returns: {"cached": bool, "age_minutes": float | None, "path": str}
+    """
+    path = _cache_path(symbol, period, interval)
+    if not path.exists():
+        return {"cached": False, "age_minutes": None, "path": str(path)}
+    age = time.time() - path.stat().st_mtime
+    return {
+        "cached": age < _CACHE_TTL_S,
+        "age_minutes": round(age / 60, 1),
+        "path": str(path),
+    }
+
+
+def invalidate_cache(symbol: str, period: str = DEFAULT_PERIOD, interval: str = DEFAULT_INTERVAL) -> bool:
+    """Löscht den Cache-Eintrag für ein Symbol. Returns True wenn eine Datei gelöscht wurde."""
+    path = _cache_path(symbol, period, interval)
+    if path.exists():
+        path.unlink()
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Datenqualitäts-Report
+# ---------------------------------------------------------------------------
+
+_MAX_MOVE_WARN_PCT: float = 20.0   # Tagesbewegung > 20 % als Outlier markieren
+_MISSING_DAYS_WARN: int   = 5      # mehr als 5 fehlende Handelstage → Warning
+
+
+def get_data_quality_report(df: pd.DataFrame) -> dict:
+    """
+    Prüft Datenqualität eines OHLCV-DataFrames.
+
+    Beachte: yfinance enthält ausschließlich derzeit gelistete Aktien
+    (Survivorship Bias). Aus dem Markt ausgeschiedene Titel fehlen
+    vollständig; dies lässt sich auf Daten-Ebene nicht kompensieren.
+
+    Args:
+        df: OHLCV-DataFrame mit DatetimeIndex.
+
+    Returns:
+        dict mit:
+          missing_days       – fehlende Handelstage (Wochentage Mo–Fr, Feiertage
+                               können als fehlende Tage erscheinen)
+          zero_volume_days   – Tage mit Volume == 0 oder NaN
+          max_daily_move_pct – maximale absolute Tagesbewegung in %
+          first_date         – frühestes Datum im DataFrame (ISO-String)
+          last_date          – letztes Datum im DataFrame (ISO-String)
+          issues             – Liste menschenlesbarer Warnungen
+          ok                 – True wenn keine Auffälligkeiten
+    """
+    if df is None or df.empty:
+        return {
+            "missing_days": 0,
+            "zero_volume_days": 0,
+            "max_daily_move_pct": 0.0,
+            "first_date": "",
+            "last_date": "",
+            "issues": ["Kein DataFrame vorhanden."],
+            "ok": False,
+        }
+
+    idx = pd.to_datetime(df.index).tz_localize(None)
+    first_date = idx[0].date().isoformat()
+    last_date  = idx[-1].date().isoformat()
+
+    # --- Fehlende Handelstage (Mo–Fr, Feiertage nicht ausgenommen) ---
+    expected_bdays = pd.bdate_range(idx[0], idx[-1])
+    # Normalisiere beide Seiten auf Datum für den Vergleich
+    actual_dates   = set(d.date() for d in idx)
+    expected_dates = set(d.date() for d in expected_bdays)
+    missing_days   = len(expected_dates - actual_dates)
+
+    # --- Zero-Volume-Tage ---
+    if "Volume" in df.columns:
+        zero_volume_days = int((df["Volume"].fillna(0) == 0).sum())
+    else:
+        zero_volume_days = 0
+
+    # --- Maximale Tagesbewegung ---
+    if "Close" in df.columns and len(df) > 1:
+        pct_changes = df["Close"].pct_change().abs() * 100
+        max_daily_move_pct = float(pct_changes.max())
+    else:
+        max_daily_move_pct = 0.0
+
+    # --- Issues sammeln ---
+    issues: list[str] = []
+    if missing_days > _MISSING_DAYS_WARN:
+        issues.append(
+            f"{missing_days} fehlende Handelstage "
+            f"(Feiertage zählen mit – realer Wert niedriger)"
+        )
+    if zero_volume_days > 0:
+        issues.append(f"{zero_volume_days} Tage mit Volume = 0")
+    if max_daily_move_pct > _MAX_MOVE_WARN_PCT:
+        issues.append(
+            f"Maximale Tagesbewegung {max_daily_move_pct:.1f}% "
+            f"(möglicher Kurs-Split oder Datenfehler)"
+        )
+
+    return {
+        "missing_days":       missing_days,
+        "zero_volume_days":   zero_volume_days,
+        "max_daily_move_pct": round(max_daily_move_pct, 2),
+        "first_date":         first_date,
+        "last_date":          last_date,
+        "issues":             issues,
+        "ok":                 len(issues) == 0,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Cache-Implementierung (intern)
+# ---------------------------------------------------------------------------
+
+def _cache_path(symbol: str, period: str, interval: str) -> Path:
+    """Berechnet den Dateipfad für einen Cache-Eintrag."""
+    # Absoluter Pfad relativ zur Projektroot (Verzeichnis über modules/)
+    root = Path(os.path.dirname(os.path.dirname(__file__)))
+    cache_dir = root / CACHE_DIR
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    # Dateiname: sicher, eindeutig
+    safe_symbol = re.sub(r'[^A-Za-z0-9]', '_', symbol)
+    key = f"{safe_symbol}_{period}_{interval}"
+    return cache_dir / f"{key}.parquet"
+
+
+def _cache_ttl_s(interval: str) -> int:
+    """TTL abhängig vom Intervall – Intraday-Daten dürfen nicht 24h alt sein."""
+    if interval in ("1m", "5m", "15m", "30m", "1h"):
+        return min(_CACHE_TTL_S, 3600)
+    return _CACHE_TTL_S
+
+
+def _load_cache(symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
+    """Lädt gecachte Daten wenn vorhanden und nicht abgelaufen."""
+    path = _cache_path(symbol, period, interval)
+    if not path.exists():
+        return None
+    if time.time() - path.stat().st_mtime > _cache_ttl_s(interval):
+        return None     # Abgelaufen – nicht löschen, wird beim nächsten Fetch überschrieben
+    try:
+        df = pd.read_parquet(path)
+    except Exception as _exc:
+        # Korrupte Datei löschen – sonst bleibt sie dauerhaft unlesbar liegen
+        logger.warning(f"Cache-Datei korrupt ({path.name}): {_exc} – wird gelöscht.")
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return None
+    # attrs überleben Parquet nicht → aus Sidecar-Metadaten wiederherstellen
+    meta_path = path.with_suffix(".meta.json")
+    if meta_path.exists():
+        try:
+            with open(meta_path) as fh:
+                df.attrs["symbol"] = json.load(fh).get("symbol", symbol)
+        except (OSError, json.JSONDecodeError):
+            df.attrs["symbol"] = symbol
+    else:
+        df.attrs["symbol"] = symbol
+    return df
+
+
+def _save_cache(symbol: str, period: str, interval: str, df: pd.DataFrame) -> None:
+    """Persistiert einen DataFrame als Cache-Eintrag (atomar, mit Metadaten)."""
+    path = _cache_path(symbol, period, interval)
+    tmp  = path.with_suffix(".parquet.tmp")
+    try:
+        df.to_parquet(tmp, compression="snappy")
+        os.replace(tmp, path)
+        # Aufgelöstes Symbol (nach .DE-Fallback) als Sidecar sichern
+        with open(path.with_suffix(".meta.json"), "w") as fh:
+            json.dump({"symbol": df.attrs.get("symbol", symbol)}, fh)
+    except Exception as _exc:
+        logger.warning(f"Cache-Schreiben fehlgeschlagen ({path.name}): {_exc}")
+
+
+def _empty_df(error_msg: str) -> pd.DataFrame:
+    """Gibt ein leeres DataFrame mit gesetztem error-Attribut zurück."""
+    df = pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+    df.attrs["error"] = error_msg
+    return df

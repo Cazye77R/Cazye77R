@@ -1,0 +1,43 @@
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+# Start conservative; tighten incrementally once all modules are annotated.
+disallow_untyped_defs = false
+disallow_incomplete_defs = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+# Modules that import third-party libraries with no/incomplete stubs.
+# Suppress import-untyped errors – these are legitimate dependencies.
+module = [
+    "modules.data_fetcher",
+    "modules.model_manager",
+    "modules.llm_providers.ollama_provider",
+    "modules.llm_providers.nvidia_provider",
+    "modules.backtester",
+    "modules.walk_forward",
+]
+warn_unused_ignores = false
+disable_error_code = ["import-untyped"]
+
+[tool.coverage.run]
+source = ["stockmind"]
+omit = ["stockmind/app.py", "*/tests/*"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
