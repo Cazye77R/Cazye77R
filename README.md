@@ -50,6 +50,79 @@ Die App bietet:
 - Wahl der Fenstergröße, Forecast-Horizont und Schnelltraining mit wenigen Epochen.
 - Anzeige der prognostizierten Renditen und fortgeschriebenen Preise.
 
+---
+
+# Live-Kamera-Erkennung & Körper-Tracking
+
+Zweite, eigenständige Anwendung in diesem Repository (`camera_detection/`): erkennt live
+über die Kamera, was sich vor der Linse befindet — mit Rahmen, Beschriftung und
+vollständigem Körper-Skeleton.
+
+## Voraussetzung: Python 3.10 – 3.12
+
+> **Python 3.13 und 3.14 funktionieren nicht**, ebensowenig 3.9 und älter.
+> Für 3.13+ gibt es kein fertiges `mediapipe`-Paket (das Körper-Tracking), weder
+> für Windows noch für Linux/macOS; unterhalb von 3.10 scheitert es an
+> `streamlit` und `streamlit-webrtc`, die mindestens 3.10 voraussetzen.
+> pip versucht dann einen Build aus dem Quelltext und bricht mit einer irreführenden
+> Meldung ab — unter Windows mit *„Microsoft Visual C++ 14.0 or greater is required"*.
+> **Die C++ Build Tools zu installieren hilft dabei nicht**, mediapipe lässt sich so
+> nicht bauen. Stattdessen
+> [Python 3.12](https://www.python.org/downloads/release/python-31210/) verwenden.
+
+Ein bereits installiertes neueres Python kann parallel bestehen bleiben — die Starter
+suchen sich gezielt eine passende Version.
+
+## Starten
+
+**Windows:** Doppelklick auf `Kamera-Erkennung.bat`.
+
+Der Starter sucht automatisch nach einem passenden Python (3.12 → 3.11 → 3.10).
+Findet er keins, bietet er die Installation von Python 3.12 per `winget` an oder zeigt
+die Anleitung zum manuellen Download.
+
+Beim ersten Start fragt er, ob die benötigten Pakete installiert werden sollen
+(ca. 2–3 GB). Sie landen isoliert im Unterordner `.venv`, die System-Python-Installation
+bleibt unberührt. Danach startet die App und der Browser öffnet sich automatisch.
+
+**macOS / Linux:**
+```bash
+./start.sh --setup   # einmalig: Abhängigkeiten installieren
+./start.sh           # danach nur noch das
+```
+
+Steht die passende Version nicht als Standard-`python3` bereit, gezielt auswählen:
+```bash
+PYTHON=python3.12 ./start.sh --setup
+```
+
+**Manuell:**
+```bash
+python -m streamlit run camera_detection/app.py
+```
+
+## Funktionen
+
+- **Drei Erkennungsmodi:** nur Objekte, nur Personen, oder beides gleichzeitig.
+- **Objekterkennung** über YOLOv8 mit allen 80 COCO-Klassen.
+- **Körper-Tracking** über MediaPipe Pose mit 33 Landmarken pro Person.
+- **Klassenfilter:** gezielt einzelne Klassen auswählen (z. B. nur `car` und `dog`).
+- **Umschaltbare Anzeige:** Rahmen, Beschriftung und Skeleton einzeln ein-/ausblendbar.
+- **Modellwahl:** YOLOv8n (schnell), YOLOv8s (ausgewogen), YOLOv8m (genau).
+- **Kamera-Auflösung** und Konfidenzschwelle einstellbar.
+- **Live-Statistik:** FPS, erkannte Personen und Objekte, verworfene Frames.
+
+Die Gewichte des gewählten Modells werden beim ersten Verwenden automatisch geladen.
+
+## Hinweis zu OpenCV
+
+`cv2` wird bewusst nicht in `requirements.txt` gepinnt — es kommt transitiv über
+`ultralytics` und `mediapipe`. Auf Headless-Servern anschließend zusätzlich
+`opencv-contrib-python-headless` installieren; Details stehen als Kommentar in
+`requirements.txt`.
+
+---
+
 ## Ergebnisse
 Nach dem Training wird ein Checkpoint unter `artifacts/return_lstm.pt` gespeichert, der sowohl die Modellgewichte als auch die wichtigsten Hyperparameter (inkl. Normalisierungs-Statistiken) enthält. Dieses Format kann mit PyTorch geladen und für Inferenz oder weiteres Feintuning verwendet werden.
 
