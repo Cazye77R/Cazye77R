@@ -3,9 +3,11 @@ StockMind – Streamlit Dashboard  (Bloomberg / Trading-Terminal Style)
 """
 from __future__ import annotations
 
+import html
 import math
 import os
 import random
+import re
 import sys
 import time
 from typing import Optional
@@ -40,7 +42,13 @@ from modules.backtester import (
     lambo_display,
     lambo_progress,
 )
-from modules.data_fetcher import fetch_info, fetch_ohlcv, get_data_quality_report, search_stocks
+from modules.data_fetcher import (
+    fetch_info,
+    fetch_ohlcv,
+    get_data_quality_report,
+    invalidate_cache,
+    search_stocks,
+)
 from modules.easter_eggs import (
     CONFETTI_MARKER,
     CURRENCIES,
@@ -55,8 +63,7 @@ from modules.model_manager import (
     get_available_models,
     get_available_models_with_info,
     get_llm_status,
-    get_ollama_status,
-    is_ollama_running,
+    is_llm_ready,
 )
 from modules.predictor import SIGNAL_FUNCTIONS, predict
 from modules.sentiment_analyzer import analyze_news
@@ -66,6 +73,9 @@ from modules.trainer import (
     compare_bandits,
     load_model,
     load_state,
+)
+from modules.trainer import (
+    train as train_ml_model,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,22 +93,26 @@ st.set_page_config(
 # Alle externen API-Aufrufe laufen garantiert im Hauptthread (kein Context-Loss).
 # ─────────────────────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=60, show_spinner=False)
-def _check_ollama() -> bool:
-    """Gecachter Ollama-Verbindungscheck (60 s TTL)."""
-    return is_ollama_running()
+def _current_provider() -> str:
+    """
+    Provider-Auswahl dieser Session (Selectbox in Tab 3); Fallback auf .env.
+    Bewusst NICHT über os.environ – das würde alle Sessions des Prozesses ändern.
+    """
+    return st.session_state.get(
+        "llm_provider_sel", os.environ.get("LLM_PROVIDER", "ollama").lower()
+    )
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _ollama_status() -> dict:
-    """Gecachter erweiterter Ollama-Status (60 s TTL)."""
-    return get_ollama_status()
+def _check_llm(provider: str) -> bool:
+    """Gecachter Verbindungscheck des gewählten Providers (60 s TTL)."""
+    return is_llm_ready(provider)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _llm_status() -> dict:
-    """Gecachter Status des konfigurierten Providers (60 s TTL)."""
-    return get_llm_status()
+def _llm_status(provider: str) -> dict:
+    """Gecachter Status des gewählten Providers (60 s TTL, Cache-Key = Provider)."""
+    return get_llm_status(provider)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -129,6 +143,13 @@ def _info(ticker: str) -> dict:
 def _search(query: str) -> list:
     """Gecachte Suchergebnisse (2 min TTL)."""
     return search_stocks(query)
+
+
+@st.cache_data(show_spinner=False)
+def _compare_bandits_cached(history: list) -> dict:
+    """Bandit-A/B-Replay – gecacht auf die History (O(T²), sonst bei jedem Rerun)."""
+    from modules.trainer import _METHODS as _avail
+    return compare_bandits(history, _avail)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Bloomberg / Trading-Terminal CSS
@@ -326,9 +347,9 @@ _QUOTES = [
 ]
 
 _TICKER_WORDS = (
-    "KAUFEN \u2022 HALTEN \u2022 VERKAUFEN \u2022 RSI \u2022 MACD \u2022 BOLLINGER \u2022 "
-    "KI ANALYSIERT \u2022 MUSTER ERKANNT \u2022 SIGNAL \u2022 TREND \u2022 VOLUMEN \u2022 "
-    "SUPPORT \u2022 RESISTANCE \u2022 MOMENTUM \u2022 DIVERGENZ \u2022 BREAKOUT \u2022 "
+    "KAUFEN • HALTEN • VERKAUFEN • RSI • MACD • BOLLINGER • "
+    "KI ANALYSIERT • MUSTER ERKANNT • SIGNAL • TREND • VOLUMEN • "
+    "SUPPORT • RESISTANCE • MOMENTUM • DIVERGENZ • BREAKOUT • "
 )
 
 def _ticker_html() -> str:
@@ -338,7 +359,8 @@ def _ticker_html() -> str:
     )
 
 def _quote_html(quote: str) -> str:
-    return f'<div class="sm-quote">"{quote}"</div>'
+    # LLM-/API-Text darf nie roh ins HTML (Stored XSS über persistierte Insights)
+    return f'<div class="sm-quote">"{html.escape(quote)}"</div>'
 
 def _signal_badge_html(signal: str) -> str:
     mapping = {
@@ -347,7 +369,7 @@ def _signal_badge_html(signal: str) -> str:
         "NEUTRAL": "sm-badge-neutral", "HALTEN": "sm-badge-neutral", "HOLD": "sm-badge-neutral",
     }
     cls = mapping.get(signal.upper(), "sm-badge-neutral")
-    return f'<span class="{cls}">{signal}</span>'
+    return f'<span class="{cls}">{html.escape(signal)}</span>'
 
 def _section(label: str) -> None:
     st.markdown(f'<div class="sm-header">{label}</div>', unsafe_allow_html=True)
@@ -375,7 +397,7 @@ def _startup_check() -> None:
         return
     _ensure_data_dirs()
 
-    ollama_ok = _check_ollama()
+    ollama_ok = _check_llm(_current_provider())
     has_models = False
     if ollama_ok:
         try:
@@ -409,6 +431,7 @@ def _init_session() -> None:
         "analysis_text": "",
         "sentiment_result": None,
         "explanation_text": "",
+        "explanation_error": "",
         "data_quality": None,
         "portfolio_name": "default",
         "model": "llama3",
@@ -436,11 +459,11 @@ def _init_session() -> None:
         "pt_budget": DEFAULT_BUDGET_EUR,
         "pt_order_cost": ORDER_COST_EUR,
         "pt_spread": SPREAD_PERCENT,
-        # Training-Zustand (für Animation/Sperre)
-        "running_training": False,
-        # Portfolio-Cache (vermeidet wiederholte yfinance-Calls)
-        "pt_summary_cache": None,
-        "pt_prices_cache": {},
+        # Persistierte Ergebnisse (überleben st.rerun)
+        "cycle_result": None,
+        "auto_result": None,
+        "auto_trade_result": None,
+        "backtest_result": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -739,18 +762,24 @@ with st.sidebar:
                 f"↗ {hist_ticker}", key=f"hist_{hist_ticker}",
                 use_container_width=True,
             ):
-                st.session_state.ticker = hist_ticker
                 with st.spinner(f"Lade {hist_ticker}…"):
                     df_h = _ohlcv(hist_ticker, st.session_state.period)
-                    if not df_h.empty:
-                        st.session_state.df   = df_h
-                        st.session_state.info = _info(hist_ticker)
-                        st.session_state.prediction    = None
-                        st.session_state.analysis_text = ""
-                        st.session_state.sentiment_result = None
-                        st.session_state.explanation_text = ""
-                        st.session_state.data_quality = get_data_quality_report(df_h)
-                st.rerun()
+                if df_h.empty:
+                    # Fehler sichtbar machen statt still nichts zu tun
+                    st.toast(
+                        df_h.attrs.get("error", f"Keine Daten für {hist_ticker}."),
+                        icon="🚨",
+                    )
+                else:
+                    st.session_state.ticker = hist_ticker
+                    st.session_state.df   = df_h
+                    st.session_state.info = _info(hist_ticker)
+                    st.session_state.prediction    = None
+                    st.session_state.analysis_text = ""
+                    st.session_state.sentiment_result = None
+                    st.session_state.explanation_text = ""
+                    st.session_state.data_quality = get_data_quality_report(df_h)
+                    st.rerun()
     else:
         st.caption("Noch keine Aktien analysiert.")
 
@@ -822,22 +851,24 @@ tab1, tab2, tab3 = st.tabs([
 with tab1:
     # ── A: Suchleiste ────────────────────────────────────────────────────────
     _section("🔍 Aktiensuche  –  WKN, ISIN, Name oder Ticker")
-    row_a, row_b, row_c, row_d = st.columns([4, 1, 1, 1])
-    with row_a:
-        q = st.text_input(
-            "Suche", placeholder="z.B. BMW, 519000, Apple, SAP.DE",
-            key="search_q", label_visibility="collapsed",
-        )
-    with row_b:
-        do_search = st.button("🔍 Suchen", use_container_width=True, key="btn_search")
-    with row_c:
-        st.session_state.period = st.selectbox(
-            "Zeitraum", ["1mo", "3mo", "6mo", "1y", "2y", "5y"],
-            index=3, key="period_sel", label_visibility="collapsed",
-        )
-    with row_d:
-        do_load = st.button("📥 Laden", use_container_width=True,
-                             type="primary", key="btn_load")
+    # st.form: Enter im Textfeld löst die Suche aus (erster Submit-Button)
+    with st.form("search_form", border=False):
+        row_a, row_b, row_c, row_d = st.columns([4, 1, 1, 1])
+        with row_a:
+            q = st.text_input(
+                "Suche", placeholder="z.B. BMW, 519000, Apple, SAP.DE",
+                key="search_q", label_visibility="collapsed",
+            )
+        with row_b:
+            do_search = st.form_submit_button("🔍 Suchen", use_container_width=True)
+        with row_c:
+            st.session_state.period = st.selectbox(
+                "Zeitraum", ["1mo", "3mo", "6mo", "1y", "2y", "5y"],
+                index=3, key="period_sel", label_visibility="collapsed",
+            )
+        with row_d:
+            do_load = st.form_submit_button("📥 Laden", use_container_width=True,
+                                            type="primary")
 
     # Suche ausführen
     if do_search and q:
@@ -878,9 +909,10 @@ with tab1:
             ticker_to_load = ""
 
         if ticker_to_load:
-            # Cache für diesen Ticker invalidieren → garantiert frische Daten
+            # Nur den Parquet-Cache DIESES Tickers invalidieren (frische Daten),
+            # statt den kompletten Streamlit-Cache aller Ticker zu leeren
+            invalidate_cache(ticker_to_load, st.session_state.period)
             _ohlcv.clear()
-            _info.clear()
             with st.spinner(f"Lade {ticker_to_load}…"):
                 df_new = _ohlcv(ticker_to_load, st.session_state.period)
             if df_new.empty:
@@ -903,7 +935,6 @@ with tab1:
                 if len(hist) > 10:
                     st.session_state.history = hist[-10:]
                 st.toast(f"📊 {len(df_new)} Kerzen geladen", icon="✅")
-                st.success(f"✅ {len(df_new)} Kerzen geladen.")
                 st.rerun()
         else:
             st.toast("Bitte WKN, Ticker oder Firmenname eingeben.", icon="🚨")
@@ -930,7 +961,7 @@ with tab1:
                 'style="font-size:13px;margin-left:10px;cursor:default;">✅ Datenqualität</span>'
             )
         else:
-            issues_html = "&#10;".join(dq["issues"])
+            issues_html = html.escape("\n".join(dq["issues"]), quote=True)
             dq_badge = (
                 f'<span title="Datenqualität: {issues_html}" '
                 f'style="font-size:13px;margin-left:10px;cursor:default;color:#f0b429;">'
@@ -940,8 +971,8 @@ with tab1:
         st.markdown(
             f'<div style="margin:8px 0 4px;">'
             f'<span style="font-family:IBM Plex Mono;font-size:22px;'
-            f'font-weight:700;color:#c9d1d9;">{name}</span>&nbsp;&nbsp;'
-            f'<span style="color:#8b949e;font-size:14px;">{ticker} · {curr}</span>'
+            f'font-weight:700;color:#c9d1d9;">{html.escape(str(name))}</span>&nbsp;&nbsp;'
+            f'<span style="color:#8b949e;font-size:14px;">{html.escape(ticker)} · {html.escape(str(curr))}</span>'
             f'&nbsp;&nbsp;<span style="font-family:IBM Plex Mono;font-size:20px;'
             f'font-weight:700;color:#00ff88;">{last:.2f}</span>'
             f'&nbsp;<span style="color:{chg_c};font-size:14px;">{chg:+.2f}%</span>'
@@ -985,8 +1016,10 @@ with tab1:
             if st.button("🔮 Signal berechnen", use_container_width=True,
                          key="btn_quick_pred"):
                 with st.spinner("Berechne Signal…"):
+                    _sent_score = (st.session_state.sentiment_result or {}).get("score", 0.0)
                     pred = predict(ticker, df, method=st.session_state.method,
-                                  ml_bundle=load_model(ticker), training_state=load_state(ticker))
+                                  ml_bundle=load_model(ticker), training_state=load_state(ticker),
+                                  sentiment_score=_sent_score)
                     st.session_state.prediction   = pred
                     st.session_state.last_pred_ticker = ticker
                     st.session_state.last_pred_signal = pred.signal
@@ -1006,18 +1039,19 @@ with tab1:
                     st.caption(pred.summary[:120])
 
             # KI-Analyse (Sentiment + Erklärung)
-            llm_ok = _check_ollama()
+            llm_ok = _check_llm(_current_provider())
             if llm_ok:
                 if st.button("🤖 Sentiment & Erklärung", use_container_width=True,
                              key="btn_quick_ai"):
                     pred = st.session_state.prediction or predict(
                         ticker, df, method=st.session_state.method,
                         ml_bundle=load_model(ticker), training_state=load_state(ticker),
+                        sentiment_score=(st.session_state.sentiment_result or {}).get("score", 0.0),
                     )
                     with st.spinner("Analysiere News-Sentiment…"):
                         try:
                             from modules.llm_providers import get_provider
-                            _prov = get_provider()
+                            _prov = get_provider(_current_provider())
                             sent = analyze_news(
                                 ticker, n=5,
                                 provider=_prov,
@@ -1053,17 +1087,25 @@ with tab1:
                                 model_name=st.session_state.model,
                             )
                             st.session_state.explanation_text = expl
+                            st.session_state.explanation_error = ""
                         except Exception as _e:
-                            st.session_state.explanation_text = str(_e)
+                            st.session_state.explanation_text = ""
+                            st.session_state.explanation_error = str(_e)
             else:
                 st.warning("LLM offline → Tab ⚙️")
 
             # Ergebnis-Anzeige: Sentiment-Karte + Erklärung
             sent = st.session_state.sentiment_result
             expl = st.session_state.explanation_text
-            if sent or expl:
+            expl_err = st.session_state.get("explanation_error", "")
+            if sent or expl or expl_err:
                 st.divider()
                 _section("🧠 KI-Analyse")
+                if sent and sent.get("error"):
+                    st.warning(f"Sentiment-Analyse fehlgeschlagen: {sent['error']}")
+                    sent = None
+                if expl_err:
+                    st.error(f"Erklärung fehlgeschlagen: {expl_err}")
                 if sent:
                     score = sent.get("score", 0.0)
                     n_news = sent.get("n_news", 0)
@@ -1095,13 +1137,14 @@ with tab1:
             show_vol = st.checkbox("Volumen", value=True, key="chk_vol")
             st.plotly_chart(
                 _candlestick_pro(df, ticker, show_volume=show_vol, show_sma=show_sma),
+                width="stretch",
             )
             ind_opts = ["– keiner –", "RSI", "MACD", "Bollinger Bands"]
             ind_sel  = st.selectbox("Indikator", ind_opts, key="ind_sel")
             if ind_sel != "– keiner –":
                 fig_ind = _indicator_fig(df, ind_sel)
                 if fig_ind:
-                    st.plotly_chart(fig_ind)
+                    st.plotly_chart(fig_ind, width="stretch")
 
     else:
         # Onboarding wenn noch keine Daten geladen
@@ -1143,21 +1186,39 @@ with tab1:
                 )
                 btn_cycle = st.button("▶ Zyklus starten", use_container_width=True,
                                       type="primary", key="btn_llm_cycle")
+                btn_ml = st.button(
+                    "📈 ML-Modell trainieren", use_container_width=True,
+                    key="btn_ml_train",
+                    help=(
+                        "Trainiert das sklearn-GBM-Modell (TimeSeriesSplit-CV "
+                        "mit Embargo) und speichert es für '🔮 Signal berechnen'."
+                    ),
+                )
+                if btn_ml:
+                    try:
+                        with st.spinner("Trainiere GBM-Modell (5-Fold-CV)…"):
+                            _ml_state = train_ml_model(st.session_state.ticker, df)
+                        st.toast(
+                            f"ML-Training fertig – Balanced Accuracy "
+                            f"{_ml_state['accuracy']:.1%}",
+                            icon="✅",
+                        )
+                    except ValueError as _e:
+                        st.error(str(_e))
             with col_r:
                 if btn_cycle:
-                    if not _check_ollama():
-                        st.error("Ollama offline – bitte `ollama serve` starten.")
+                    if not _check_llm(_current_provider()):
+                        st.error("LLM offline – Provider im Tab ⚙️ prüfen.")
                     else:
                         anim_slot = st.empty()
                         quote = random.choice(_QUOTES)
                         anim_slot.markdown(
-                            _ticker_html() + _quote_html(
-                                f'<span class="sm-pulse">⬛</span> '
-                                f'KI analysiert {st.session_state.ticker}… · {quote}'
-                            ),
+                            _ticker_html() +
+                            f'<div class="sm-quote">"<span class="sm-pulse">⬛</span> '
+                            f'KI analysiert {html.escape(st.session_state.ticker)}… · '
+                            f'{html.escape(quote)}"</div>',
                             unsafe_allow_html=True,
                         )
-                        st.session_state.running_training = True
                         with st.spinner(f"Trainingszyklus ({t_method})…"):
                             result = trainer.run_training_cycle(
                                 st.session_state.ticker,
@@ -1168,47 +1229,52 @@ with tab1:
                         if result.get("error"):
                             st.error(result["error"])
                         else:
-                            ok = result.get("correct", False)
-                            pred_sig = result.get("prediction", "?")
-                            actual   = result.get("actual", "?")
-                            conf     = result.get("confidence", 0.0)
-                            cycle    = result.get("cycle", 0)
-                            m_acc    = result.get("method_accuracy", 0.0)
-                            o_acc    = result.get("overall_accuracy", 0.0)
-
-                            mc1, mc2, mc3, mc4 = st.columns(4)
-                            mc1.metric("Vorhersage",
-                                       pred_sig, "✅ Korrekt" if ok else "❌ Falsch")
-                            mc2.metric("Konfidenz", f"{conf:.0%}")
-                            mc3.metric("Methoden-Acc", f"{m_acc:.1%}")
-                            mc4.metric("Gesamt-Acc", f"{o_acc:.1%}")
-
-                            if result.get("reasoning"):
-                                st.markdown(
-                                    _quote_html(result["reasoning"][:300]),
-                                    unsafe_allow_html=True,
-                                )
-                            # Easter Egg
+                            cycle = result.get("cycle", 0)
+                            # Easter Egg einmalig beim Abschluss auswerten
                             if ENABLE_EASTER_EGGS:
-                                egg = check_easter_egg({
+                                result["_egg"] = check_easter_egg({
                                     "cycles": cycle,
                                     "previous_cycles": st.session_state.prev_cycles,
-                                    "accuracy": o_acc,
+                                    "accuracy": result.get("overall_accuracy", 0.0),
                                     "total_return_pct": None,
                                 })
-                                if egg:
-                                    if CONFETTI_MARKER in egg:
-                                        st.balloons()
-                                        egg = egg.replace(CONFETTI_MARKER, "")
-                                    st.info(egg)
                             st.session_state.prev_cycles = cycle
 
-                            # Letzte Vorhersage in Sidebar aktualisieren
+                            # Ergebnis persistieren – überlebt so den Rerun
+                            st.session_state.cycle_result = result
                             st.session_state.last_pred_ticker = st.session_state.ticker
-                            st.session_state.last_pred_signal = pred_sig
-                            st.session_state.last_pred_conf   = conf
+                            st.session_state.last_pred_signal = result.get("prediction", "?")
+                            st.session_state.last_pred_conf   = result.get("confidence", 0.0)
                             st.session_state.last_pred_time   = time.strftime("%H:%M:%S")
                             st.rerun()
+
+                # Persistiertes Ergebnis rendern (auch nach Rerun sichtbar)
+                _cyc = st.session_state.cycle_result
+                if _cyc and not _cyc.get("error"):
+                    ok       = _cyc.get("correct", False)
+                    pred_sig = _cyc.get("prediction", "?")
+                    conf     = _cyc.get("confidence", 0.0)
+                    m_acc    = _cyc.get("method_accuracy", 0.0)
+                    o_acc    = _cyc.get("overall_accuracy", 0.0)
+
+                    mc1, mc2, mc3, mc4 = st.columns(4)
+                    mc1.metric("Vorhersage",
+                               pred_sig, "✅ Korrekt" if ok else "❌ Falsch")
+                    mc2.metric("Konfidenz", f"{conf:.0%}")
+                    mc3.metric("Methoden-Acc", f"{m_acc:.1%}")
+                    mc4.metric("Gesamt-Acc", f"{o_acc:.1%}")
+
+                    if _cyc.get("reasoning"):
+                        st.markdown(
+                            _quote_html(_cyc["reasoning"][:300]),
+                            unsafe_allow_html=True,
+                        )
+                    egg = _cyc.pop("_egg", None)
+                    if egg:
+                        if CONFETTI_MARKER in egg:
+                            st.balloons()
+                            egg = egg.replace(CONFETTI_MARKER, "")
+                        st.info(egg)
                 else:
                     st.markdown(
                         _quote_html(random.choice(_QUOTES)),
@@ -1241,11 +1307,12 @@ with tab1:
                                      type="primary", key="btn_auto")
             with col_y:
                 if btn_auto:
-                    if not _check_ollama():
-                        st.error("Ollama offline.")
+                    if not _check_llm(_current_provider()):
+                        st.error("LLM offline – Provider im Tab ⚙️ prüfen.")
                     else:
                         st.markdown(_ticker_html(), unsafe_allow_html=True)
                         last_res = None
+                        log_lines: list[str] = []
                         with st.status(
                             f"Auto-Training: {n_auto} Zyklen für "
                             f"{st.session_state.ticker} [{selected_bandit}]",
@@ -1262,17 +1329,22 @@ with tab1:
                                 )
                                 last_res = res
                                 if res.get("error"):
-                                    st.write(f"❌ Zyklus {i+1}: {res['error']}")
+                                    line = f"❌ Zyklus {i+1}: {res['error']}"
+                                    st.write(line)
+                                    log_lines.append(line)
                                     break
                                 ok_sym = "✅" if res.get("correct") else "❌"
-                                st.write(
+                                line = (
                                     f"{ok_sym} Zyklus {i+1} · "
                                     f"**{res.get('prediction','?')}** · "
                                     f"Methode: {res.get('method','?')} · "
                                     f"Acc: {res.get('overall_accuracy', 0):.1%}"
                                 )
+                                st.write(line)
+                                log_lines.append(line)
                             status.update(label="Fertig!", state="complete")
 
+                        egg = None
                         if last_res and not last_res.get("error"):
                             if ENABLE_EASTER_EGGS:
                                 egg = check_easter_egg({
@@ -1281,13 +1353,28 @@ with tab1:
                                     "accuracy": last_res.get("overall_accuracy"),
                                     "total_return_pct": None,
                                 })
-                                if egg:
-                                    if CONFETTI_MARKER in egg:
-                                        st.balloons()
-                                        egg = egg.replace(CONFETTI_MARKER, "")
-                                    st.info(egg)
                             st.session_state.prev_cycles = last_res.get("cycle", 0)
-                            st.rerun()
+                        # Protokoll persistieren – überlebt so den Rerun
+                        st.session_state.auto_result = {
+                            "log": log_lines, "egg": egg, "bandit": selected_bandit,
+                        }
+                        st.rerun()
+
+                # Persistiertes Protokoll rendern (auch nach Rerun sichtbar)
+                _auto = st.session_state.auto_result
+                if _auto and _auto.get("log"):
+                    with st.expander(
+                        f"📋 Letzter Auto-Lauf [{_auto.get('bandit', '?')}]",
+                        expanded=True,
+                    ):
+                        for line in _auto["log"]:
+                            st.write(line)
+                    egg = _auto.pop("egg", None)
+                    if egg:
+                        if CONFETTI_MARKER in egg:
+                            st.balloons()
+                            egg = egg.replace(CONFETTI_MARKER, "")
+                        st.info(egg)
 
                 # Bandit A/B-Vergleich (wenn genug History vorhanden)
                 state_now = load_state(st.session_state.ticker)
@@ -1296,8 +1383,7 @@ with tab1:
                     st.divider()
                     _section("📊 Bandit-Vergleich (A/B Replay)")
                     with st.spinner("Berechne Vergleich…"):
-                        from modules.trainer import _METHODS as _AVAIL_METHODS
-                        _cmp = compare_bandits(_hist, _AVAIL_METHODS)
+                        _cmp = _compare_bandits_cached(_hist)
                     if _cmp["figure"].data:
                         st.plotly_chart(_cmp["figure"], width="stretch")
                         fr = _cmp.get("final_rewards", {})
@@ -1335,55 +1421,102 @@ with tab1:
                     st.toast(f"Methode '{bt_method}' nicht verfügbar.", icon="🚨")
                     st.error(f"Methode '{bt_method}' nicht verfügbar.")
                 else:
-                    with st.spinner("Berechne Signale…"):
-                        signals = {}
-                        df_bt = st.session_state.df
-                        for i in range(50, len(df_bt)):
-                            try:
-                                sig, _ = fn(df_bt.iloc[:i+1])
-                                signals[df_bt.index[i]] = sig
-                            except Exception:
-                                signals[df_bt.index[i]] = "HALTEN"
-                        sig_s  = pd.Series(signals)
+                    signals: dict = {}
+                    failed = 0
+                    df_bt = st.session_state.df
+                    n_bars = len(df_bt) - 50
+                    bt_bar = st.progress(0.0, text="Berechne Signale…")
+                    for j, i in enumerate(range(50, len(df_bt))):
+                        try:
+                            sig, _ = fn(df_bt.iloc[:i+1])
+                            signals[df_bt.index[i]] = sig
+                        except Exception:
+                            signals[df_bt.index[i]] = "HALTEN"
+                            failed += 1
+                        if j % 25 == 0:
+                            bt_bar.progress(
+                                (j + 1) / max(n_bars, 1),
+                                text=f"Berechne Signale… {j + 1}/{n_bars}",
+                            )
+                    bt_bar.empty()
+                    sig_s  = pd.Series(signals)
+                    with st.spinner("Simuliere Trades…"):
                         result = backtest_signals(
                             st.session_state.ticker, df_bt, sig_s,
                             initial_cash=bt_budget,
                         )
-                    # Kompakte KPI-Zeile
-                    bc1, bc2, bc3, bc4, bc5 = st.columns(5)
-                    bc1.metric("Rendite", f"{result.total_return_pct:+.2f}%")
-                    bc2.metric("Buy & Hold", f"{result.buy_and_hold_pct:+.2f}%")
-                    bc3.metric("Win-Rate", f"{result.win_rate:.0%}")
-                    bc4.metric("Max Drawdown", f"{result.max_drawdown_pct:.2f}%")
-                    bc5.metric("Sharpe", f"{result.sharpe_ratio:.2f}")
+                    # Ergebnis persistieren – überlebt jede weitere Interaktion
+                    st.session_state.backtest_result = {
+                        "result": result, "method": bt_method,
+                        "budget": bt_budget, "failed": failed,
+                        "ticker": st.session_state.ticker,
+                        "index": df_bt.index,
+                    }
 
-                    if result.equity_curve:
-                        eq_idx = df_bt.index[-len(result.equity_curve):]
-                        eq_series = pd.Series(result.equity_curve, index=eq_idx)
-                        trades_df = pd.DataFrame(result.trades)
-                        ext = compute_metrics(eq_series, trades_df)
+            # Persistiertes Backtest-Ergebnis rendern
+            _bt = st.session_state.backtest_result
+            if _bt:
+                result    = _bt["result"]
+                bt_m      = _bt["method"]
+                bt_b      = _bt["budget"]
+                st.caption(f"Backtest: {_bt['ticker']} · {bt_m} · Startkapital {bt_b:,.0f} €")
+                if _bt.get("failed"):
+                    st.warning(
+                        f"{_bt['failed']} Signal-Berechnungen fehlgeschlagen – "
+                        f"diese Bars wurden als HALTEN gewertet."
+                    )
+                # Kompakte KPI-Zeile
+                bc1, bc2, bc3, bc4, bc5 = st.columns(5)
+                bc1.metric("Rendite", f"{result.total_return_pct:+.2f}%")
+                bc2.metric("Buy & Hold", f"{result.buy_and_hold_pct:+.2f}%")
+                bc3.metric("Win-Rate", f"{result.win_rate:.0%}")
+                bc4.metric("Max Drawdown", f"{result.max_drawdown_pct:.2f}%")
+                bc5.metric("Sharpe", f"{result.sharpe_ratio:.2f}")
 
-                        # Erweiterte Metriken-Karte
-                        st.markdown("**Erweiterte Kennzahlen**")
-                        m1, m2, m3, m4, m5, m6 = st.columns(6)
-                        m1.metric("Sharpe", f"{ext['sharpe']:.2f}")
-                        m2.metric("Sortino", f"{ext['sortino']:.2f}")
-                        m3.metric("Calmar", f"{ext['calmar']:.2f}")
-                        m4.metric("Max DD Dauer", f"{ext['max_drawdown_duration_days']}T")
-                        m5.metric("Profit Faktor", f"{ext['profit_factor']:.2f}")
-                        m6.metric("Expectancy", f"{ext['expectancy']:.2f}€")
+                if result.equity_curve:
+                    eq_idx = _bt["index"][-len(result.equity_curve):]
+                    eq_series = pd.Series(result.equity_curve, index=eq_idx)
+                    trades_df = pd.DataFrame(result.trades)
+                    ext = compute_metrics(eq_series, trades_df)
 
-                        # Equity-Kurve + Underwater-Chart
-                        eq_df = pd.DataFrame({"value": result.equity_curve})
-                        st.plotly_chart(
-                            _equity_chart(eq_df, bt_budget,
-                                          f"Equity Curve – {bt_method}"),
-                            width="stretch",
-                        )
-                        st.plotly_chart(
-                            _underwater_chart(eq_series,
-                                              f"Drawdown – {bt_method}"),
-                            width="stretch",
+                    # Erweiterte Metriken-Karte
+                    st.markdown("**Erweiterte Kennzahlen**")
+                    m1, m2, m3, m4, m5, m6 = st.columns(6)
+                    m1.metric("Sharpe", f"{ext['sharpe']:.2f}")
+                    m2.metric("Sortino", f"{ext['sortino']:.2f}")
+                    m3.metric("Calmar", f"{ext['calmar']:.2f}")
+                    m4.metric("Max DD Dauer", f"{ext['max_drawdown_duration_days']}T")
+                    m5.metric("Profit Faktor", f"{ext['profit_factor']:.2f}")
+                    m6.metric("Expectancy", f"{ext['expectancy']:.2f}€")
+
+                    # Equity-Kurve + Underwater-Chart
+                    eq_df = pd.DataFrame({"value": result.equity_curve})
+                    st.plotly_chart(
+                        _equity_chart(eq_df, bt_b,
+                                      f"Equity Curve – {bt_m}"),
+                        width="stretch",
+                    )
+                    st.plotly_chart(
+                        _underwater_chart(eq_series,
+                                          f"Drawdown – {bt_m}"),
+                        width="stretch",
+                    )
+                    # CSV-Export: Equity-Kurve + Trades
+                    _exp1, _exp2 = st.columns(2)
+                    _exp1.download_button(
+                        "⬇️ Equity-Kurve (CSV)",
+                        eq_series.rename("equity").to_csv().encode(),
+                        file_name=f"backtest_{_bt['ticker']}_{bt_m}_equity.csv",
+                        mime="text/csv",
+                        key="dl_bt_equity",
+                    )
+                    if not trades_df.empty:
+                        _exp2.download_button(
+                            "⬇️ Trades (CSV)",
+                            trades_df.to_csv(index=False).encode(),
+                            file_name=f"backtest_{_bt['ticker']}_{bt_m}_trades.csv",
+                            mime="text/csv",
+                            key="dl_bt_trades",
                         )
 
         # ── Trainings-Statistiken ────────────────────────────────────────────
@@ -1416,11 +1549,13 @@ with tab1:
                 if acc:
                     st.plotly_chart(
                         _accuracy_gauge(acc),
+                        width="stretch",
                     )
 
             if state.get("method_scores"):
                 st.plotly_chart(
                     _method_bars(state["method_scores"]),
+                    width="stretch",
                 )
 
             if state.get("insights"):
@@ -1528,6 +1663,7 @@ with tab2:
         st.plotly_chart(
             _equity_chart(perf_df, float(pt_state.start_budget),
                           "Portfolio-Wert über Zeit"),
+            width="stretch",
         )
 
     # ── Offene Positionen ─────────────────────────────────────────────────────
@@ -1589,9 +1725,11 @@ with tab2:
                                      signal=sig_str)
                 if res["ok"]:
                     pnl_str = f"{res['pnl']:+.2f} €" if res.get("pnl") else "–"
-                    st.success(
+                    # Toast statt st.success – überlebt den folgenden Rerun
+                    st.toast(
                         f"{pt_dir} {res['quantity']:.4f} × {ticker_pt} "
-                        f"@ {res['exec_price']:.2f} € · PnL: {pnl_str}"
+                        f"@ {res['exec_price']:.2f} € · PnL: {pnl_str}",
+                        icon="✅",
                     )
                     st.rerun()
                 else:
@@ -1619,65 +1757,91 @@ with tab2:
                     index=ANALYSIS_METHODS.index("Auto (KI wählt)"),
                     key="at_method",
                 )
+            _HOLD_LABELS = {
+                "HOLD_ALREADY_IN":  "Bereits in Position – kein Neukauf",
+                "HOLD_LOW_CASH":    "Zu wenig Cash",
+                "HOLD_NO_POSITION": "Keine Position zum Verkaufen",
+                "HOLD_NEUTRAL":     "Konfidenz < 50 % – kein Signal",
+                "HOLD_RISK_LIMIT":  "Risk-Manager: Positionsgröße 0",
+                "BUY_FAILED":       "Kauf fehlgeschlagen",
+                "SELL_FAILED":      "Verkauf fehlgeschlagen",
+                "SKIP":             "Übersprungen (Fehler)",
+            }
+
+            def _at_log_line(entry: dict) -> str:
+                decision = entry.get("decision", "?")
+                pred     = entry.get("prediction", "?")
+                conf     = entry.get("confidence", 0.0)
+                price    = entry.get("current_price")
+                pval     = entry.get("portfolio_value")
+
+                if decision == "BUY":
+                    icon  = "🟢"
+                    label = f"**KAUF** · {pred} ({conf:.0%})"
+                elif decision == "SELL":
+                    icon  = "🔴"
+                    label = f"**VERKAUF** · {pred} ({conf:.0%}) · PnL {entry.get('pnl', 0.0):+.2f} €"
+                elif decision == "STOP_LOSS":
+                    icon  = "🛑"
+                    label = f"**STOP-LOSS** · PnL {entry.get('pnl', 0.0):+.2f} €"
+                elif decision == "TAKE_PROFIT":
+                    icon  = "🎯"
+                    label = f"**TAKE-PROFIT** · PnL {entry.get('pnl', 0.0):+.2f} €"
+                elif decision == "SKIP":
+                    icon  = "❌"
+                    label = f"Fehler: {entry.get('reason', '?')}"
+                else:
+                    icon  = "⚪"
+                    label = _HOLD_LABELS.get(decision, f"HALTEN ({decision})")
+                    if pred and pred != "?":
+                        label += f" · Signal: {pred} ({conf:.0%})"
+
+                price_str = f" · Kurs {price:.2f} €" if price else ""
+                pval_str  = f" · Portfolio {pval:,.0f} €" if pval else ""
+                return f"{icon} Zyklus {entry.get('cycle','?')}: {label}{price_str}{pval_str}"
+
             if st.button("🚀 Auto-Trade starten", use_container_width=True,
                          type="primary", key="btn_auto_trade"):
-                if not _check_ollama():
-                    st.toast("Ollama offline.", icon="🚨")
-                    st.error("Ollama offline.")
+                if not _check_llm(_current_provider()):
+                    st.toast("LLM offline.", icon="🚨")
+                    st.error("LLM offline – Provider im Tab ⚙️ prüfen.")
                 else:
                     st.markdown(_ticker_html(), unsafe_allow_html=True)
+                    at_lines: list[str] = []
                     with st.status(
                         f"Auto-Trade: {at_cycles} Zyklen",
                         expanded=True,
                     ) as at_status:
-                        log = pt.auto_trade(
-                            st.session_state.ticker,
-                            st.session_state.model,
-                            cycles=at_cycles,
-                            method=at_method,
-                            invest_pct=at_invest,
-                        )
-                        _HOLD_LABELS = {
-                            "HOLD_ALREADY_IN":  "Bereits in Position – kein Neukauf",
-                            "HOLD_LOW_CASH":    "Zu wenig Cash",
-                            "HOLD_NO_POSITION": "Keine Position zum Verkaufen",
-                            "HOLD_NEUTRAL":     "Konfidenz < 50 % – kein Signal",
-                            "BUY_FAILED":       "Kauf fehlgeschlagen",
-                            "SELL_FAILED":      "Verkauf fehlgeschlagen",
-                            "SKIP":             "Übersprungen (Fehler)",
-                        }
-                        for entry in log:
-                            decision = entry.get("decision", "?")
-                            pred     = entry.get("prediction", "?")
-                            conf     = entry.get("confidence", 0.0)
-                            price    = entry.get("current_price")
-                            pval     = entry.get("portfolio_value")
-
-                            if decision == "BUY":
-                                icon  = "🟢"
-                                label = f"**KAUF** · {pred} ({conf:.0%})"
-                            elif decision == "SELL":
-                                icon  = "🔴"
-                                pnl   = entry.get("pnl", 0.0)
-                                label = f"**VERKAUF** · {pred} ({conf:.0%}) · PnL {pnl:+.2f} €"
-                            elif decision == "SKIP":
-                                icon  = "❌"
-                                label = f"Fehler: {entry.get('reason', '?')}"
-                            else:
-                                icon  = "⚪"
-                                label = _HOLD_LABELS.get(decision, f"HALTEN ({decision})")
-                                if pred and pred != "?":
-                                    label += f" · Signal: {pred} ({conf:.0%})"
-
-                            price_str = f" · Kurs {price:.2f} €" if price else ""
-                            pval_str  = f" · Portfolio {pval:,.0f} €" if pval else ""
-                            st.write(
-                                f"{icon} Zyklus {entry.get('cycle','?')}: "
-                                f"{label}{price_str}{pval_str}"
+                        # Zyklus für Zyklus in der UI treiben → Live-Feedback
+                        # statt eines minutenlangen blockierenden Gesamtaufrufs
+                        for _ci in range(at_cycles):
+                            at_status.update(
+                                label=f"Auto-Trade: Zyklus {_ci + 1}/{at_cycles} läuft…"
                             )
+                            _cycle_log = pt.auto_trade(
+                                st.session_state.ticker,
+                                st.session_state.model,
+                                cycles=1,
+                                method=at_method,
+                                invest_pct=at_invest,
+                            )
+                            for entry in _cycle_log:
+                                entry["cycle"] = _ci + 1
+                                line = _at_log_line(entry)
+                                st.write(line)
+                                at_lines.append(line)
                         at_status.update(label="Auto-Trade abgeschlossen!",
                                          state="complete")
+                    # Protokoll persistieren – überlebt so den Rerun
+                    st.session_state.auto_trade_result = {"log": at_lines}
                     st.rerun()
+
+            # Persistiertes Protokoll rendern (auch nach Rerun sichtbar)
+            _at_res = st.session_state.auto_trade_result
+            if _at_res and _at_res.get("log"):
+                with st.expander("📋 Letzter Auto-Trade-Lauf", expanded=True):
+                    for line in _at_res["log"]:
+                        st.write(line)
         else:
             st.info("Bitte zuerst eine Aktie laden.")
 
@@ -1690,6 +1854,23 @@ with tab2:
             st.dataframe(
                 th[show].sort_values("timestamp", ascending=False),
                 width="stretch", hide_index=True,
+                column_config={
+                    "timestamp":  st.column_config.DatetimeColumn("Zeitpunkt", format="DD.MM.YYYY HH:mm"),
+                    "symbol":     st.column_config.TextColumn("Symbol"),
+                    "direction":  st.column_config.TextColumn("Richtung"),
+                    "quantity":   st.column_config.NumberColumn("Stück", format="%.4f"),
+                    "exec_price": st.column_config.NumberColumn("Ausführungskurs", format="%.2f €"),
+                    "pnl":        st.column_config.NumberColumn("PnL", format="%.2f €"),
+                    "pnl_pct":    st.column_config.NumberColumn("PnL %", format="%.2f %%"),
+                    "signal":     st.column_config.TextColumn("Signal"),
+                },
+            )
+            st.download_button(
+                "⬇️ Trade-Historie (CSV)",
+                th[show].to_csv(index=False).encode(),
+                file_name=f"trades_{st.session_state.portfolio_name}.csv",
+                mime="text/csv",
+                key="dl_trades",
             )
         else:
             st.info("Noch keine Trades.")
@@ -1704,7 +1885,7 @@ with tab2:
         if st.button("🔄 Portfolio zurücksetzen", type="secondary",
                      key="btn_pt_reset"):
             pt.reset(new_budget=reset_b)
-            st.success(f"Portfolio zurückgesetzt auf {reset_b:,.0f} €.")
+            st.toast(f"Portfolio zurückgesetzt auf {reset_b:,.0f} €.", icon="🔄")
             st.rerun()
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1725,16 +1906,14 @@ with tab3:
         key="llm_provider_sel",
         help="Wechsel gilt für diese Sitzung. Für dauerhafte Änderung LLM_PROVIDER in .env setzen.",
     )
-
-    # Env-Variable live aktualisieren damit get_provider() den richtigen Provider wählt
-    os.environ["LLM_PROVIDER"] = _selected_provider
-    _llm_status.clear()   # Cache leeren bei Provider-Wechsel
+    # Auswahl lebt in st.session_state["llm_provider_sel"] (siehe _current_provider) –
+    # bewusst KEIN os.environ-Write, der würde alle Sessions des Prozesses umstellen.
 
     # ── Provider-Status ───────────────────────────────────────────────────────
     st.divider()
     _section("🔌 Status")
 
-    _prov_st = _llm_status()
+    _prov_st = _llm_status(_selected_provider)
     running  = _prov_st["running"]
 
     if running:
@@ -1743,7 +1922,7 @@ with tab3:
             f'<div class="sm-card-accent">'
             f'<span class="sm-online">● ONLINE</span>'
             f'&nbsp;&nbsp;<span style="color:#8b949e;font-size:12px;">'
-            f'{_prov_st.get("url", "")} · '
+            f'{html.escape(str(_prov_st.get("url", "")))} · '
             f'{model_count} Modell(e) verfügbar</span>'
             f'</div>',
             unsafe_allow_html=True,
@@ -1753,7 +1932,7 @@ with tab3:
             f'<div class="sm-card" style="border-color:#ff4444;">'
             f'<span class="sm-offline">● OFFLINE / NICHT KONFIGURIERT</span>'
             f'&nbsp;&nbsp;<span style="color:#8b949e;font-size:12px;">'
-            f'{_prov_st.get("error", "Provider nicht erreichbar.")}</span>'
+            f'{html.escape(str(_prov_st.get("error", "Provider nicht erreichbar.")))}</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -1786,11 +1965,11 @@ with tab3:
                 st.markdown(
                     f'<div class="sm-model-row">'
                     f'<span style="font-family:IBM Plex Mono;font-weight:700;'
-                    f'color:#c9d1d9;min-width:120px;">{name}</span>'
+                    f'color:#c9d1d9;min-width:120px;">{html.escape(str(name))}</span>'
                     f'<span style="color:#8b949e;font-size:12px;min-width:70px;">'
                     f'{size:.1f} GB</span>'
                     f'<span style="color:#8b949e;font-size:12px;flex:1;">'
-                    f'{descr}</span>'
+                    f'{html.escape(str(descr))}</span>'
                     f'{badge}'
                     f'</div>',
                     unsafe_allow_html=True,
@@ -1846,17 +2025,21 @@ with tab3:
                 progress_slot = st.empty()
                 bar_slot      = st.empty()
                 done = False
+                pct  = 0.0
+                _pct_re = re.compile(r"(\d{1,3})%")
                 try:
-                    for i, line in enumerate(download_model(dl_model)):
+                    for line in download_model(dl_model):
                         if not line.strip():
                             continue
                         progress_slot.markdown(
                             f'<div class="sm-card" style="font-family:IBM Plex Mono;'
-                            f'font-size:11px;color:#8b949e;">{line}</div>',
+                            f'font-size:11px;color:#8b949e;">{html.escape(line.strip())}</div>',
                             unsafe_allow_html=True,
                         )
-                        # Einfacher Zähler als Fortschrittsindikator
-                        pct = min((i % 200) / 200, 1.0)
+                        # Echten Fortschritt aus der ollama-pull-Ausgabe parsen
+                        m = _pct_re.search(line)
+                        if m:
+                            pct = min(int(m.group(1)) / 100, 1.0)
                         bar_slot.progress(pct, text=f"Lade {dl_model}…")
                         done = True
                 except Exception as e:
@@ -1868,10 +2051,7 @@ with tab3:
                 if done:
                     _models_list.clear()   # Modell-Cache invalidieren → sofortige Anzeige
                     _models_info.clear()
-                    st.success(
-                        f"✅ **{dl_model}** erfolgreich heruntergeladen! "
-                        "Seite neu laden um das Modell zu nutzen."
-                    )
+                    st.toast(f"{dl_model} erfolgreich heruntergeladen", icon="✅")
                     st.rerun()
 
     # ── Modell-Vergleichstabelle ──────────────────────────────────────────────
@@ -1936,11 +2116,11 @@ with tab3:
         f'<td><code style="color:#00ff88;">{DUCB_GAMMA}</code>&nbsp;'
         f'<span style="color:#8b949e;font-size:11px;">Discount-Faktor; 1=kein Vergessen</span></td></tr>'
         f'<tr><td style="color:#8b949e;">Ollama Host</td>'
-        f'<td><code>{os.getenv("OLLAMA_HOST", "http://localhost:11434")}</code></td></tr>'
+        f'<td><code>{html.escape(os.getenv("OLLAMA_HOST", "http://localhost:11434"))}</code></td></tr>'
         f'<tr><td style="color:#8b949e;">Cache TTL</td>'
         f'<td><code>{CACHE_TTL_HOURS} h</code></td></tr>'
         f'<tr><td style="color:#8b949e;">Log-Level</td>'
-        f'<td><code>{os.getenv("LOG_LEVEL", "INFO")}</code></td></tr>'
+        f'<td><code>{html.escape(os.getenv("LOG_LEVEL", "INFO"))}</code></td></tr>'
         '</table>'
         '<div style="margin-top:8px;color:#8b949e;font-size:11px;">'
         'Werte aus <code>.env</code> änderbar – App neu starten zum Übernehmen.'
@@ -1970,4 +2150,3 @@ with tab3:
         f'</div>',
         unsafe_allow_html=True,
     )
-

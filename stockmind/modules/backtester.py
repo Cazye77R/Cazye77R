@@ -88,9 +88,10 @@ def _now() -> str:
 
 
 def _trade_id() -> str:
-    """Kurze eindeutige Trade-ID basierend auf UTC-Timestamp."""
-    import time
-    return f"T{int(time.time()*1000) % 10**10:010d}"
+    """Eindeutige Trade-ID – Timestamp allein kollidiert bei zwei Orders
+    in derselben Millisekunde und läuft nach ~116 Tagen über."""
+    import uuid
+    return f"T{uuid.uuid4().hex[:12]}"
 
 
 # ===========================================================================
@@ -144,8 +145,21 @@ class PaperTrader:
                 order_cost=self.order_cost,
                 spread_pct=self.spread_pct,
             )
-        with open(p) as f:
-            data = json.load(f)
+        try:
+            with open(p) as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.error(
+                f"Portfolio-Datei {p.name} unlesbar ({exc}) – "
+                f"starte mit leerem Portfolio. Datei bleibt zur Analyse erhalten."
+            )
+            return PortfolioState(
+                name=self.name,
+                start_budget=self.start_budget,
+                cash=self.start_budget,
+                order_cost=self.order_cost,
+                spread_pct=self.spread_pct,
+            )
         return PortfolioState(
             name=data.get("name", self.name),
             start_budget=data.get("start_budget", self.start_budget),
@@ -160,8 +174,13 @@ class PaperTrader:
         )
 
     def save(self, state: PortfolioState) -> None:
-        with open(self._path(), "w") as f:
+        # Atomar (tmp + replace) – ein Crash mitten im Schreiben zerstört
+        # sonst das gesamte Portfolio-JSON
+        p   = self._path()
+        tmp = p.with_suffix(".json.tmp")
+        with open(tmp, "w") as f:
             json.dump(asdict(state), f, indent=2, default=str)
+        os.replace(tmp, p)
 
     def reset(self, new_budget: float | None = None) -> PortfolioState:
         """Setzt das Portfolio zurück (altes Portfolio wird überschrieben)."""
@@ -227,27 +246,51 @@ class PaperTrader:
                         f"verfügbar {state.cash:.2f} €"
                     ),
                 }
+
+            # Risk-Management-Gate: Drawdown-Schutz + korrelierte Exposure
+            from modules.risk_manager import RiskManager
+            _pos_val = sum(
+                p["quantity"] * (p.get("last_price") or p["avg_price"])
+                for p in state.positions.values()
+            )
+            ok_risk, risk_reason = RiskManager().validate_trade(
+                direction="BUY",
+                ticker=symbol,
+                entry_price=price,
+                equity=state.cash + _pos_val,
+                cash=state.cash,
+                positions=state.positions,
+                equity_curve=[e["value"] for e in state.equity_ts],
+                order_value=gross,
+            )
+            if not ok_risk:
+                return {"ok": False, "error": f"Risk-Manager: {risk_reason}"}
             state.cash -= total_cost
 
-            # Position aktualisieren (avg-Price-Methode)
+            # Position aktualisieren (avg-Price-Methode).
+            # Ordergebühr fließt in die Kostenbasis ein – sonst ist der
+            # realisierte PnL pro Roundtrip um die Kaufgebühr überhöht.
+            per_share_cost = total_cost / quantity
             pos = state.positions.get(symbol)
             if pos:
                 old_qty   = pos["quantity"]
                 old_avg   = pos["avg_price"]
                 new_qty   = old_qty + quantity
-                new_avg   = (old_qty * old_avg + quantity * exec_price) / new_qty
+                new_avg   = (old_qty * old_avg + total_cost) / new_qty
                 state.positions[symbol] = {
+                    **pos,
                     "symbol":       symbol,
                     "quantity":     round(new_qty, 8),
                     "avg_price":    round(new_avg, 6),
-                    "opened_at":    pos["opened_at"],
+                    "last_price":   round(price, 6),
                     "last_updated": ts,
                 }
             else:
                 state.positions[symbol] = {
                     "symbol":       symbol,
                     "quantity":     round(quantity, 8),
-                    "avg_price":    round(exec_price, 6),
+                    "avg_price":    round(per_share_cost, 6),
+                    "last_price":   round(price, 6),
                     "opened_at":    ts,
                     "last_updated": ts,
                 }
@@ -269,7 +312,12 @@ class PaperTrader:
             state.cash += total_cost
             remaining   = pos["quantity"] - sell_qty
             if remaining > 1e-8:
-                state.positions[symbol] = {**pos, "quantity": round(remaining, 8), "last_updated": ts}
+                state.positions[symbol] = {
+                    **pos,
+                    "quantity":     round(remaining, 8),
+                    "last_price":   round(price, 6),
+                    "last_updated": ts,
+                }
             else:
                 del state.positions[symbol]
 
@@ -293,9 +341,11 @@ class PaperTrader:
         }
         state.trades.append(rec)
 
-        # Equity-Zeitreihe aktualisieren
+        # Equity-Zeitreihe aktualisieren – Mark-to-Market: zuletzt bekannter
+        # Marktpreis je Position statt Einstandskurs
         pos_val = sum(
-            p["quantity"] * price if p["symbol"] == symbol else p["quantity"] * p["avg_price"]
+            p["quantity"] * (price if p["symbol"] == symbol
+                             else p.get("last_price") or p["avg_price"])
             for p in state.positions.values()
         )
         state.equity_ts.append({"ts": ts, "value": round(state.cash + pos_val, 2)})
@@ -484,9 +534,11 @@ class PaperTrader:
             Liste der Auto-Log-Einträge dieser Session
         """
         from modules.data_fetcher import fetch_ohlcv
+        from modules.risk_manager import RiskManager
         from modules.trainer import StockTrainer
 
         trainer  = StockTrainer()
+        rm       = RiskManager()
         log      = []
 
         for i in range(cycles):
@@ -525,21 +577,65 @@ class PaperTrader:
             decision = "HOLD"
             trade_result: dict = {}
 
-            if prediction == "UP" and confidence >= 0.5:
-                # Kaufen falls kein offene Position UND genug Cash
-                if symbol not in state.positions and state.cash > self.order_cost * 3:
-                    invest_eur = state.cash * invest_pct
-                    quantity   = invest_eur / (current_price * (1 + state.spread_pct / 100))
-                    trade_result = self.place_order(
-                        symbol=symbol,
-                        direction="BUY",
-                        quantity=quantity,
-                        price=current_price,
-                        signal=f"UP/{confidence:.0%}",
-                        reasoning=reasoning,
-                        method=used_method,
+            # 0. Risk-Exits zuerst: Stop-Loss / Take-Profit der offenen Position
+            #    prüfen – unabhängig von der LLM-Vorhersage (begrenzt Verluste
+            #    auch wenn das Modell weiter UP sagt).
+            open_pos = state.positions.get(symbol)
+            if open_pos:
+                sl = open_pos.get("stop_loss")
+                tp = open_pos.get("take_profit")
+                if sl and current_price <= sl:
+                    trade_result = self.close_position(
+                        symbol=symbol, price=current_price,
+                        reasoning=f"Stop-Loss ausgelöst ({current_price:.2f} ≤ {sl:.2f})",
                     )
-                    decision = "BUY" if trade_result.get("ok") else "BUY_FAILED"
+                    decision = "STOP_LOSS" if trade_result.get("ok") else "SELL_FAILED"
+                elif tp and current_price >= tp:
+                    trade_result = self.close_position(
+                        symbol=symbol, price=current_price,
+                        reasoning=f"Take-Profit erreicht ({current_price:.2f} ≥ {tp:.2f})",
+                    )
+                    decision = "TAKE_PROFIT" if trade_result.get("ok") else "SELL_FAILED"
+
+            if decision != "HOLD":
+                pass  # Risk-Exit hat bereits gehandelt
+
+            elif prediction == "UP" and confidence >= 0.5:
+                # Kaufen falls keine offene Position UND genug Cash
+                if symbol not in state.positions and state.cash > self.order_cost * 3:
+                    # Stop-Loss/Take-Profit via ATR, Größe über Risk-Manager
+                    sl_price, tp_price = rm.compute_stops(df, current_price)
+                    _pos_val = sum(
+                        p["quantity"] * (p.get("last_price") or p["avg_price"])
+                        for p in state.positions.values()
+                    )
+                    equity    = state.cash + _pos_val
+                    risk_qty  = rm.position_size(equity, current_price, sl_price)
+                    # Budget-Cap: invest_pct des Cashs abzüglich Ordergebühr
+                    invest_eur = max(state.cash * invest_pct - self.order_cost, 0.0)
+                    cash_qty   = invest_eur / (current_price * (1 + state.spread_pct / 100))
+                    quantity   = min(risk_qty, cash_qty) if risk_qty > 0 else 0.0
+
+                    if quantity <= 0:
+                        decision = "HOLD_RISK_LIMIT"
+                    else:
+                        trade_result = self.place_order(
+                            symbol=symbol,
+                            direction="BUY",
+                            quantity=quantity,
+                            price=current_price,
+                            signal=f"UP/{confidence:.0%} SL:{sl_price:.2f} TP:{tp_price:.2f}",
+                            reasoning=reasoning,
+                            method=used_method,
+                        )
+                        decision = "BUY" if trade_result.get("ok") else "BUY_FAILED"
+                        if trade_result.get("ok"):
+                            # Stops an der Position persistieren (für Exits oben)
+                            st2 = self.load()
+                            if symbol in st2.positions:
+                                st2.positions[symbol]["stop_loss"]   = sl_price
+                                st2.positions[symbol]["take_profit"] = tp_price
+                                self.save(st2)
                 else:
                     decision = "HOLD_ALREADY_IN" if symbol in state.positions else "HOLD_LOW_CASH"
 
@@ -873,43 +969,50 @@ def backtest_signals(
 
     has_volume = "Volume" in df.columns
     if has_volume:
-        avg_vol = float(df["Volume"].replace(0, np.nan).mean())
-        if np.isnan(avg_vol) or avg_vol <= 0:
-            avg_vol = SLIPPAGE_DAILY_VOLUME_DEFAULT
+        # Trailing-Volumen (60 Tage, 1 Bar verzögert) statt Gesamtmittel –
+        # das Gesamtmittel würde Volumen NACH dem Handelstag einpreisen
+        vol_ma = (
+            df["Volume"].replace(0, np.nan)
+            .rolling(60, min_periods=5).mean().shift(1)
+        )
     else:
-        avg_vol = SLIPPAGE_DAILY_VOLUME_DEFAULT
+        vol_ma = None
 
     aligned           = df[["Close"]].copy()
-    aligned["signal"] = signals.reindex(df.index).fillna("HALTEN")
+    # Look-Ahead-Fix: Signal aus Bar i wird erst am Close von Bar i+1
+    # ausgeführt – sonst handelt die Strategie auf den Kurs, den sie zur
+    # Signalberechnung schon kannte
+    aligned["signal"] = signals.reindex(df.index).shift(1).fillna("HALTEN")
 
     for date, row in aligned.iterrows():
         price    = float(row["Close"])
         sig      = row["signal"]
-
         if has_volume:
-            buy_slip  = compute_slippage(price, max(shares, 1), avg_vol)
-            sell_slip = compute_slippage(price, max(shares, 1), avg_vol)
-            eff_buy   = price + buy_slip
-            eff_sell  = price - sell_slip
+            bar_vol = float(vol_ma.loc[date]) if pd.notna(vol_ma.loc[date]) \
+                      else SLIPPAGE_DAILY_VOLUME_DEFAULT
         else:
-            eff_buy  = _eff_price(price, "BUY",  spread_pct)
-            eff_sell = _eff_price(price, "SELL", spread_pct)
+            bar_vol = SLIPPAGE_DAILY_VOLUME_DEFAULT
 
         if sig == "KAUFEN" and cash > order_cost * 2 and shares == 0:
-            invest      = cash * 0.95
-            shares      = invest / eff_buy
-            if has_volume:
-                buy_slip  = compute_slippage(price, shares, avg_vol)
-                eff_buy   = price + buy_slip
-                shares    = invest / eff_buy
-            cash       -= invest + order_cost
-            avg_price   = eff_buy
-            trades.append({"date": str(date), "action": "BUY", "price": price, "shares": shares})
+            # Gebühr vor der Investition abziehen – sonst rutscht Cash ins Minus
+            invest = max(cash * 0.95 - order_cost, 0.0)
+            if invest > 0:
+                if has_volume:
+                    est_shares = invest / price
+                    eff_buy    = price + compute_slippage(price, est_shares, bar_vol)
+                else:
+                    eff_buy = _eff_price(price, "BUY", spread_pct)
+                shares     = invest / eff_buy
+                cash      -= invest + order_cost
+                # Ordergebühr in Kostenbasis (sonst PnL je Roundtrip überhöht)
+                avg_price  = (invest + order_cost) / shares
+                trades.append({"date": str(date), "action": "BUY", "price": price, "shares": shares})
 
         elif sig == "VERKAUFEN" and shares > 0:
             if has_volume:
-                sell_slip = compute_slippage(price, shares, avg_vol)
-                eff_sell  = price - sell_slip
+                eff_sell = price - compute_slippage(price, shares, bar_vol)
+            else:
+                eff_sell = _eff_price(price, "SELL", spread_pct)
             revenue = shares * eff_sell - order_cost
             pnl     = revenue - shares * avg_price
             cash   += revenue
@@ -919,10 +1022,25 @@ def backtest_signals(
 
         equity_curve.append(cash + shares * price)
 
-    # Letzte offene Position schließen
+    # Letzte offene Position schließen – gleiches Kostenmodell wie im Loop,
+    # Ergebnis fließt in Trades UND Equity-Kurve (sonst weichen Headline-
+    # Rendite und Chart voneinander ab)
     if shares > 0:
-        cash  += shares * _eff_price(float(aligned["Close"].iloc[-1]), "SELL", spread_pct) - order_cost
+        last_price = float(aligned["Close"].iloc[-1])
+        if has_volume:
+            last_vol = float(vol_ma.iloc[-1]) if pd.notna(vol_ma.iloc[-1]) \
+                       else SLIPPAGE_DAILY_VOLUME_DEFAULT
+            eff_sell = last_price - compute_slippage(last_price, shares, last_vol)
+        else:
+            eff_sell = _eff_price(last_price, "SELL", spread_pct)
+        revenue = shares * eff_sell - order_cost
+        pnl     = revenue - shares * avg_price
+        trades.append({"date": str(aligned.index[-1]), "action": "SELL",
+                       "price": last_price, "shares": shares, "pnl": pnl})
+        cash  += revenue
         shares = 0.0
+        if equity_curve:
+            equity_curve[-1] = cash
 
     total_return_pct  = (cash - initial_cash) / initial_cash * 100
     buy_and_hold_pct  = (float(aligned["Close"].iloc[-1]) / float(aligned["Close"].iloc[0]) - 1) * 100
