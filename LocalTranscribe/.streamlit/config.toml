@@ -1,0 +1,25 @@
+# Streamlit configuration for LocalTranscribe.
+#
+# These settings keep the app strictly local: no telemetry leaves the machine
+# and the server is not reachable from other devices on the network.
+
+[browser]
+# Streamlit reports anonymous usage statistics to its own servers by default.
+# A tool that advertises local, private processing must not do that.
+gatherUsageStats = false
+
+[server]
+# Bind to the loopback interface only. Without this Streamlit listens on all
+# interfaces, which makes uploaded audio and transcripts reachable from any
+# other device on the same network.
+address = "localhost"
+
+# Open the browser automatically on start.
+headless = false
+
+# MB. The default of 200 is tight for long recordings. Note that an upload is
+# held in RAM once and written to a temp file once, so peak usage is roughly
+# twice the file size.
+maxUploadSize = 500
+
+enableXsrfProtection = true

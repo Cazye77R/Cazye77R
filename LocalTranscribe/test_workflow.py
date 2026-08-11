@@ -67,14 +67,18 @@ section("1. config.py")
 
 import config
 
+check("DEFAULT_LANGUAGE is a LANGUAGES key", config.DEFAULT_LANGUAGE in config.LANGUAGES, config.DEFAULT_LANGUAGE)
 check("WHISPER_MODEL == 'large-v3'",         config.WHISPER_MODEL == "large-v3",  config.WHISPER_MODEL)
 check("WHISPER_COMPUTE_TYPE == 'int8'",      config.WHISPER_COMPUTE_TYPE == "int8", config.WHISPER_COMPUTE_TYPE)
 check("WHISPER_COMPUTE_TYPE_FALLBACK == 'int8'", config.WHISPER_COMPUTE_TYPE_FALLBACK == "int8")
 check("WHISPER_DEVICE in {cuda, cpu}",       config.WHISPER_DEVICE in ("cuda", "cpu"), config.WHISPER_DEVICE)
 check("OLLAMA_BASE_URL starts with http",    config.OLLAMA_BASE_URL.startswith("http"))
 check("SUPPORTED_FORMATS not empty",         len(config.SUPPORTED_FORMATS) >= 5)
-check("OUTPUT_DIR defined",                  bool(config.OUTPUT_DIR))
 check(".wav in SUPPORTED_FORMATS",           ".wav" in config.SUPPORTED_FORMATS)
+check("Ollama URL is loopback",              "localhost" in config.OLLAMA_BASE_URL
+                                             or "127.0.0.1" in config.OLLAMA_BASE_URL)
+check("OLLAMA_GET_TIMEOUT is positive",      config.OLLAMA_GET_TIMEOUT > 0)
+check("OLLAMA_GENERATE_TIMEOUT is positive", config.OLLAMA_GENERATE_TIMEOUT > 0)
 
 # CUDA presence check (optional – gracefully skipped if torch absent)
 try:
@@ -92,6 +96,74 @@ except ImportError:
     _has_torch = False
     _cuda = False
     skip("CUDA detection", "torch not installed")
+
+# ---------------------------------------------------------------------------
+# Section 1b – utils.py (no heavy dependencies)
+# ---------------------------------------------------------------------------
+
+section("1b. utils.py – timestamps, speaker colours, output sanitising")
+
+import subprocess
+
+from utils import format_timestamp, speaker_color, strip_remote_images
+
+for secs, expected in [
+    (0.0, "00:00:00"), (59.0, "00:00:59"), (60.0, "00:01:00"),
+    (3661.0, "01:01:01"), (-5.0, "00:00:00"),
+]:
+    got = format_timestamp(secs)
+    check(f"format_timestamp({secs!r}) == '{expected}'", got == expected, got)
+
+# faster-whisper can report a None duration – must not raise.
+check("format_timestamp(None) == '00:00:00'",   format_timestamp(None) == "00:00:00")
+check("format_timestamp('abc') == '00:00:00'",  format_timestamp("abc") == "00:00:00")  # type: ignore[arg-type]
+
+# Colours must be identical across separate processes (hash() is randomised).
+_PALETTE = ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7"]
+_snippet = (
+    "import sys; sys.path.insert(0, '.');"
+    "from utils import speaker_color;"
+    f"p={_PALETTE!r};"
+    "print(','.join(speaker_color(f'Sprecher {n}', p) for n in range(1, 9)))"
+)
+_runs = {
+    subprocess.run([sys.executable, "-c", _snippet], capture_output=True, text=True).stdout.strip()
+    for _ in range(3)
+}
+check("speaker_color stable across 3 processes", len(_runs) == 1, next(iter(_runs), ""))
+
+_colors = [speaker_color(f"Sprecher {n}", _PALETTE) for n in range(1, 9)]
+check("speaker_color: 8 speakers → 8 distinct colours", len(set(_colors)) == 8,
+      f"{len(set(_colors))} distinct")
+check("speaker_color: numbering starts at palette[0]", _colors[0] == _PALETTE[0], _colors[0])
+check("speaker_color: wraps past palette end",
+      speaker_color("Sprecher 9", _PALETTE) == _PALETTE[0])
+check("speaker_color: unnumbered label still works",
+      speaker_color("Unbekannt", _PALETTE) in _PALETTE)
+check("speaker_color deterministic in-process",
+      _colors == [speaker_color(f"Sprecher {n}", _PALETTE) for n in range(1, 9)])
+try:
+    speaker_color("x", [])
+    check("speaker_color([]) raises ValueError", False)
+except ValueError:
+    check("speaker_color([]) raises ValueError", True)
+
+# Remote images would trigger an outbound browser request.
+check("strip: markdown http image removed",
+      "http://evil" not in strip_remote_images("vor ![alt](http://evil/x.png) nach"))
+check("strip: markdown https image removed",
+      "https://evil" not in strip_remote_images("![](https://evil/x.png)"))
+check("strip: protocol-relative image removed",
+      "//evil" not in strip_remote_images("![a](//evil/x.png)"))
+check("strip: html img removed",
+      "http://evil" not in strip_remote_images('<img src="http://evil/x.png">'))
+check("strip: surrounding text kept",
+      strip_remote_images("vor ![a](http://e/x.png) nach").startswith("vor "))
+check("strip: links are left alone",
+      "http://ok" in strip_remote_images("[klick](http://ok/seite)"))
+check("strip: plain text unchanged",
+      strip_remote_images("nur text") == "nur text")
+check("strip: empty string safe",             strip_remote_images("") == "")
 
 # ---------------------------------------------------------------------------
 # Section 2 – transcriber.py (static methods, no model download)
@@ -290,6 +362,48 @@ try:
         check("unknown task raises ValueError", False)
     except ValueError:
         check("unknown task raises ValueError", True)
+
+    # --- get_available_models() robustness (no network needed) ---
+    import llm_processor as _lp
+
+    class _FakeResponse:
+        def __init__(self, payload, raises=False):
+            self._payload, self._raises = payload, raises
+        def raise_for_status(self):
+            return None
+        def json(self):
+            if self._raises:
+                raise ValueError("Expecting value: line 1 column 1 (char 0)")
+            return self._payload
+
+    _orig_get = _lp.requests.get
+    try:
+        # Invalid JSON must surface as LLMError, not ValueError.
+        _lp.requests.get = lambda *a, **k: _FakeResponse(None, raises=True)
+        try:
+            LLMProcessor("http://localhost:11434").get_available_models()
+            check("get_available_models: invalid JSON → LLMError", False)
+        except LLMError:
+            check("get_available_models: invalid JSON → LLMError", True)
+        except ValueError:
+            check("get_available_models: invalid JSON → LLMError", False, "raw ValueError leaked")
+
+        # An entry without "name" must be skipped, not raise KeyError.
+        _lp.requests.get = lambda *a, **k: _FakeResponse(
+            {"models": [{"name": "llama3"}, {"size": 42}, {"name": "mistral"}]}
+        )
+        try:
+            got = LLMProcessor("http://localhost:11434").get_available_models()
+            check("get_available_models: nameless entry skipped", got == ["llama3", "mistral"], str(got))
+        except KeyError:
+            check("get_available_models: nameless entry skipped", False, "KeyError raised")
+
+        # Missing "models" key → empty list.
+        _lp.requests.get = lambda *a, **k: _FakeResponse({})
+        check("get_available_models: no models key → []",
+              LLMProcessor("http://localhost:11434").get_available_models() == [])
+    finally:
+        _lp.requests.get = _orig_get
 
 except ImportError as exc:
     skip("llm_processor.py tests", f"missing dependency: {exc}")

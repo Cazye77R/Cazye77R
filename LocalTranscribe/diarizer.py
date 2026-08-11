@@ -22,11 +22,25 @@ import torch
 import torchaudio
 
 # torchaudio 2.5+ removed list_audio_backends(); pyannote.audio 3.x calls it
-# unconditionally at import time and then does backends[0] if "soundfile" is
-# not in the list – so returning [] causes an IndexError. Return the Windows
-# default backend name so pyannote picks "soundfile" without crashing.
+# unconditionally at import time and then does backends[0] when "soundfile" is
+# not in the list – so an empty list raises IndexError. Prefer whatever the
+# installed torchaudio really reports and only fall back to a fixed answer.
+# "soundfile" is guaranteed to work because requirements.txt pins the package.
 if not hasattr(torchaudio, "list_audio_backends"):
-    torchaudio.list_audio_backends = lambda: ["soundfile"]  # type: ignore[attr-defined]
+    def _list_audio_backends() -> list[str]:
+        for attr in ("list_audio_backends", "_backend"):
+            probe = getattr(torchaudio, attr, None)
+            lister = getattr(probe, "list_audio_backends", None) if probe else None
+            if callable(lister):
+                try:
+                    backends = list(lister())
+                    if backends:
+                        return backends
+                except Exception:  # noqa: BLE001 – probing only, never fatal
+                    pass
+        return ["soundfile"]
+
+    torchaudio.list_audio_backends = _list_audio_backends  # type: ignore[attr-defined]
 
 from dotenv import load_dotenv
 from pyannote.audio import Pipeline
@@ -108,7 +122,9 @@ class SpeakerDiarizer:
             raise DiarizationError(f"Audio file not found: {audio_path}")
 
         self._ensure_pipeline_loaded()
-        assert self._pipeline is not None, "Pipeline failed to load"
+        # A plain raise, not an assert: asserts are stripped under python -O.
+        if self._pipeline is None:
+            raise DiarizationError("Diarization pipeline failed to load.")
 
         pipeline_kwargs: dict = {}
         if num_speakers is not None:
@@ -184,9 +200,10 @@ class SpeakerDiarizer:
 
         The speaker is determined by which diarization turn contains the
         *midpoint* of each transcription segment.  This is intentionally
-        simpler than full overlap integration: midpoint lookup is O(n·m) but
-        avoids splitting segments that straddle a speaker boundary, which
-        would make the transcript harder to read.
+        simpler than full overlap integration: it avoids splitting segments
+        that straddle a speaker boundary, which would make the transcript
+        harder to read.  Turns are sorted once and looked up by binary search,
+        so the cost is O(n log m) rather than O(n·m).
 
         pyannote labels like "SPEAKER_00" are renamed to "Sprecher 1",
         "SPEAKER_01" → "Sprecher 2", etc., in order of first appearance.

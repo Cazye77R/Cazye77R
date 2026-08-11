@@ -24,7 +24,6 @@ from config import (
     DEFAULT_LANGUAGE,
     LANGUAGES,
     OLLAMA_BASE_URL,
-    OLLAMA_GET_TIMEOUT,
     SUPPORTED_FORMATS,
     WHISPER_COMPUTE_TYPE,
     WHISPER_DEVICE,
@@ -33,6 +32,7 @@ from config import (
 from diarizer import DiarizationError, SpeakerDiarizer
 from llm_processor import LLMError, LLMProcessor
 from transcriber import TranscriptionEngine, TranscriptionError
+from utils import speaker_color, strip_remote_images
 
 # st.set_page_config must be the very first Streamlit call in the script.
 st.set_page_config(
@@ -47,6 +47,8 @@ logging.basicConfig(level=logging.INFO)
 logging.getLogger("faster_whisper").setLevel(logging.WARNING)
 logging.getLogger("pyannote").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -113,6 +115,7 @@ def _init_state() -> None:
         "last_file_id": None,       # (name, size) tuple – detects new uploads
         "rec_audio_bytes": None,    # bytes | None – persisted browser recording
         "rec_audio_id": None,       # int | None  – len(bytes), detects new recordings
+        "active_source": None,      # "upload" | "record" – which input to run
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -120,14 +123,18 @@ def _init_state() -> None:
 
 
 def _reset_results() -> None:
-    """Clear all pipeline results and audio-source tracking atomically."""
+    """
+    Clear pipeline results only.
+
+    Deliberately leaves the audio-source tracking keys (last_file_id,
+    rec_audio_id) alone. Clearing another source's key here made the upload and
+    recording blocks invalidate each other on every rerun, which wiped results
+    in a loop. Which input is active is tracked by "active_source" instead.
+    """
     st.session_state.update(
         segments=None,
         transcription_meta=None,
         llm_output=None,
-        rec_audio_bytes=None,
-        rec_audio_id=None,
-        last_file_id=None,
     )
 
 
@@ -266,12 +273,6 @@ def _render_vram_info() -> None:
     free_gb = total_gb - reserved_gb
     used_pct = reserved_gb / total_gb if total_gb > 0 else 0.0
 
-    color = "normal"
-    if used_pct > 0.85:
-        color = "inverse"   # red bar
-    elif used_pct > 0.65:
-        color = "off"       # yellow-ish
-
     st.sidebar.markdown(f"**GPU:** {props.name}")
     st.sidebar.progress(
         used_pct,
@@ -375,8 +376,8 @@ def _run_pipeline(audio_path: Path, settings: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def _speaker_color(speaker: str) -> str:
-    """Return a stable color for a speaker name, determined by its hash."""
-    return _SPEAKER_COLORS[hash(speaker) % len(_SPEAKER_COLORS)]
+    """Return a colour for a speaker that stays the same across app restarts."""
+    return speaker_color(speaker, _SPEAKER_COLORS)
 
 
 def _render_transcript_tab(segments: list[dict]) -> None:
@@ -421,7 +422,9 @@ def _render_transcript_tab(segments: list[dict]) -> None:
 
 def _render_llm_tab(llm_output: str, segments: list[dict], settings: dict) -> None:
     if llm_output:
-        st.markdown(llm_output)
+        # Remote image references in the model output would make the browser
+        # fetch them – an outbound request nobody asked for.
+        st.markdown(strip_remote_images(llm_output))
     else:
         st.info("Kein KI-Ergebnis vorhanden. Starte die Analyse unten neu.")
 
@@ -538,9 +541,10 @@ def main() -> None:
         if uploaded is not None:
             file_id = (uploaded.name, uploaded.size)
             if file_id != st.session_state["last_file_id"]:
-                # New file: clear all previous results and any stored recording.
+                # New file: drop stale results and make the upload the active
+                # input. The recording's own tracking key stays untouched.
                 _reset_results()
-                st.session_state["last_file_id"] = file_id
+                st.session_state.update(last_file_id=file_id, active_source="upload")
             _upload_bytes = uploaded.getvalue()
             _upload_name = uploaded.name
 
@@ -566,10 +570,14 @@ def main() -> None:
             if wav_bytes is not None and len(wav_bytes) > 100:  # 100 B > bare WAV header
                 rec_id = len(wav_bytes)
                 if rec_id != st.session_state["rec_audio_id"]:
-                    # New recording: clear previous results and upload state.
+                    # New recording: drop stale results and make the recording
+                    # the active input. The upload's tracking key stays as is.
                     _reset_results()
-                    st.session_state["rec_audio_bytes"] = wav_bytes
-                    st.session_state["rec_audio_id"] = rec_id
+                    st.session_state.update(
+                        rec_audio_bytes=wav_bytes,
+                        rec_audio_id=rec_id,
+                        active_source="record",
+                    )
 
             stored_rec: bytes | None = st.session_state["rec_audio_bytes"]
             if stored_rec is not None:
@@ -578,16 +586,19 @@ def main() -> None:
             elif wav_bytes is None:
                 st.info("Noch keine Aufnahme. Drücke **Start** oben.")
 
-    # ── Resolve active audio source (upload takes priority over recording) ─
-    if _upload_bytes is not None:
-        audio_bytes: bytes | None = _upload_bytes
-        audio_name: str = _upload_name or "audio"
-    elif st.session_state["rec_audio_bytes"] is not None:
-        audio_bytes = st.session_state["rec_audio_bytes"]
-        audio_name = "browser-aufnahme.wav"
-    else:
-        audio_bytes = None
-        audio_name = ""
+    # ── Resolve active audio source ────────────────────────────────────────
+    # Whichever input the user touched last wins; if that one is gone, fall
+    # back to the other. No block ever clears the other's state.
+    _rec_bytes: bytes | None = st.session_state["rec_audio_bytes"]
+    audio_bytes: bytes | None = None
+    audio_name: str = ""
+
+    if st.session_state["active_source"] == "record" and _rec_bytes is not None:
+        audio_bytes, audio_name = _rec_bytes, "browser-aufnahme.wav"
+    elif _upload_bytes is not None:
+        audio_bytes, audio_name = _upload_bytes, (_upload_name or "audio")
+    elif _rec_bytes is not None:
+        audio_bytes, audio_name = _rec_bytes, "browser-aufnahme.wav"
 
     # ── Pipeline trigger ───────────────────────────────────────────────────
     if audio_bytes is not None:
@@ -607,10 +618,14 @@ def main() -> None:
                     fh.write(audio_bytes)
                 fd = -1  # fdopen took ownership; fd is now closed
                 _run_pipeline(tmp_path, settings)
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 – surface, never crash the UI
                 if fd != -1:
                     os.close(fd)  # safety net if fdopen itself raised
-                raise
+                logger.exception("Pipeline failed for '%s'", audio_name)
+                st.error(
+                    f"**Verarbeitung fehlgeschlagen:** {exc}\n\n"
+                    "Details stehen im Konsolenfenster."
+                )
             finally:
                 tmp_path.unlink(missing_ok=True)
     else:

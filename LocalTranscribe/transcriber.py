@@ -17,6 +17,7 @@ from faster_whisper import WhisperModel
 from faster_whisper.transcribe import Segment
 
 from config import WHISPER_COMPUTE_TYPE, WHISPER_COMPUTE_TYPE_FALLBACK, WHISPER_DEVICE, WHISPER_MODEL
+from utils import format_timestamp as _format_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +55,11 @@ class TranscriptionEngine:
             device = "cpu"
             compute_type = WHISPER_COMPUTE_TYPE_FALLBACK
 
-        self.device = device
-        self.compute_type = compute_type
-
-        self.model: WhisperModel | None = self._load_model(model_size, device, compute_type)
+        # _load_model may move us to the CPU when the GPU runs out of memory,
+        # so the effective device/compute type come back from the loader.
+        self.model, self.device, self.compute_type = self._load_model(
+            model_size, device, compute_type
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -91,6 +93,12 @@ class TranscriptionEngine:
         Raises:
             TranscriptionError: If the file is unreadable or transcription fails.
         """
+        if self.model is None:
+            raise TranscriptionError(
+                "Whisper model was unloaded – create a new TranscriptionEngine "
+                "before transcribing again."
+            )
+
         audio_path = Path(audio_path)
         if not audio_path.is_file():
             raise TranscriptionError(f"Audio file not found: {audio_path}")
@@ -165,24 +173,28 @@ class TranscriptionEngine:
     @staticmethod
     def _load_model(
         model_size: str, device: str, compute_type: str
-    ) -> WhisperModel:
+    ) -> tuple[WhisperModel, str, str]:
         """
-        Load WhisperModel with automatic int8 retry on CUDA out-of-memory.
+        Load WhisperModel, falling back to the CPU on a CUDA out-of-memory.
 
-        If the requested compute_type triggers a CUDA OOM (common with
-        float16 on 6 GB GPUs for large-v3), the cache is cleared and the
-        model is reloaded with int8 quantisation.
+        int8 is already the most memory-frugal GPU precision this project uses,
+        so there is no lighter precision to retry with – the meaningful escape
+        from an OOM is to move off the GPU entirely.
+
+        Returns:
+            (model, effective_device, effective_compute_type)
         """
         try:
             logger.info("Loading Whisper '%s' on %s (%s)…", model_size, device, compute_type)
             model = WhisperModel(model_size, device=device, compute_type=compute_type)
             logger.info("Whisper model ready.")
-            return model
+            return model, device, compute_type
         except RuntimeError as exc:
             oom = "out of memory" in str(exc).lower()
-            if oom and device == "cuda" and compute_type != WHISPER_COMPUTE_TYPE_FALLBACK:
+            if oom and device == "cuda":
                 logger.warning(
-                    "CUDA OOM with compute_type='%s' – retrying with '%s'.",
+                    "CUDA OOM loading '%s' (%s) – retrying on CPU with '%s'.",
+                    model_size,
                     compute_type,
                     WHISPER_COMPUTE_TYPE_FALLBACK,
                 )
@@ -190,35 +202,35 @@ class TranscriptionEngine:
                 try:
                     model = WhisperModel(
                         model_size,
-                        device=device,
+                        device="cpu",
                         compute_type=WHISPER_COMPUTE_TYPE_FALLBACK,
                     )
-                    logger.info("Whisper model ready (fallback compute_type).")
-                    return model
+                    logger.info("Whisper model ready on CPU (slower, but it fits).")
+                    return model, "cpu", WHISPER_COMPUTE_TYPE_FALLBACK
                 except Exception as inner:
                     raise TranscriptionError(
-                        f"Whisper OOM even with '{WHISPER_COMPUTE_TYPE_FALLBACK}': {inner}"
+                        f"Whisper failed on GPU (out of memory) and on CPU: {inner}"
                     ) from inner
             raise TranscriptionError(f"Failed to load Whisper model '{model_size}': {exc}") from exc
         except Exception as exc:
             raise TranscriptionError(f"Failed to load Whisper model '{model_size}': {exc}") from exc
 
     @staticmethod
-    def format_timestamp(seconds: float) -> str:
+    def format_timestamp(seconds: float | None) -> str:
         """
         Convert a duration in seconds to "HH:MM:SS".
 
+        Delegates to utils.format_timestamp so the LLM layer can format
+        timestamps identically without importing torch.
+
         Args:
-            seconds: Non-negative duration in seconds.
+            seconds: Duration in seconds; None and negative values yield
+                     "00:00:00".
 
         Returns:
             Zero-padded timestamp string, e.g. "01:23:45".
         """
-        seconds = max(0.0, seconds)
-        total_s = int(seconds)
-        hours, remainder = divmod(total_s, 3600)
-        minutes, secs = divmod(remainder, 60)
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        return _format_timestamp(seconds)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -262,10 +274,10 @@ if __name__ == "__main__":
         bar = "#" * filled + "-" * (bar_len - filled)
         print(f"\r[{bar}] {fraction * 100:5.1f}%  {message}", end="", flush=True)
 
-    engine = TranscriptionEngine(model_size="large-v3", device="cuda", compute_type="float16")
+    engine = TranscriptionEngine()  # uses the configured model/device/precision
 
     print(f"Transcribing: {wav_path}\n")
-    result = engine.transcribe(wav_path, language="auto", progress_callback=on_progress)
+    result = engine.transcribe(wav_path, language="de", progress_callback=on_progress)
     print()  # newline after progress bar
 
     print(f"\nDetected language : {result['language']}")

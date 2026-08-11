@@ -6,3 +6,6 @@ python-dotenv>=1.0,<2.0
 requests>=2.31,<3.0
 torch>=2.0
 torchaudio>=2.0
+# Audio backend pyannote falls back to on torchaudio 2.5+, where the old
+# backend-listing API was removed. Pinned explicitly so the fallback is real.
+soundfile>=0.12

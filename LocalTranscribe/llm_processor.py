@@ -10,12 +10,17 @@ from __future__ import annotations
 
 import logging
 from typing import Literal
+from urllib.parse import urlparse
 
 import requests
 
 from config import OLLAMA_BASE_URL, OLLAMA_GENERATE_TIMEOUT, OLLAMA_GET_TIMEOUT
+from utils import format_timestamp as _format_timestamp
 
 logger = logging.getLogger(__name__)
+
+# Hosts that keep transcript text on this machine.
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 Task = Literal[
     "zusammenfassung",
@@ -99,6 +104,18 @@ class LLMProcessor:
         """
         self.base_url = base_url.rstrip("/")
 
+        # The transcript is sent to this host verbatim. Anything other than a
+        # loopback address means the recording leaves the machine, so make that
+        # impossible to miss rather than silently accepting it.
+        host = (urlparse(self.base_url).hostname or "").lower()
+        if host not in _LOOPBACK_HOSTS:
+            logger.warning(
+                "Ollama base URL '%s' is not a loopback address – transcript "
+                "text would be sent off this machine. Set OLLAMA_BASE_URL back "
+                "to http://localhost:11434 unless this is intentional.",
+                self.base_url,
+            )
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -125,8 +142,13 @@ class LLMProcessor:
         except requests.HTTPError as exc:
             raise LLMError(f"Ollama /api/tags returned an error: {exc}") from exc
 
-        models = [m["name"] for m in response.json().get("models", [])]
-        return sorted(models)
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise LLMError(f"Ollama /api/tags returned invalid JSON: {exc}") from exc
+
+        # Skip entries without a name rather than raising KeyError on them.
+        return sorted(m["name"] for m in payload.get("models", []) if m.get("name"))
 
     def process(
         self,
@@ -260,8 +282,10 @@ class LLMProcessor:
                 "Try a smaller model or shorten the transcript."
             ) from exc
         except requests.HTTPError as exc:
-            body = exc.response.text[:300] if exc.response is not None else ""
-            raise LLMError(f"Ollama returned HTTP {exc.response.status_code}: {body}") from exc
+            resp = exc.response
+            status = resp.status_code if resp is not None else "?"
+            body = resp.text[:300] if resp is not None else ""
+            raise LLMError(f"Ollama returned HTTP {status}: {body}") from exc
 
         try:
             result: str = response.json().get("response", "")
@@ -269,18 +293,6 @@ class LLMProcessor:
             raise LLMError(f"Ollama response is not valid JSON: {exc}") from exc
         logger.info("LLM response received (%d chars).", len(result))
         return result.strip()
-
-
-# ---------------------------------------------------------------------------
-# Timestamp helper (mirrors TranscriptionEngine.format_timestamp)
-# ---------------------------------------------------------------------------
-
-def _format_timestamp(seconds: float) -> str:
-    seconds = max(0.0, seconds)
-    total_s = int(seconds)
-    hours, remainder = divmod(total_s, 3600)
-    minutes, secs = divmod(remainder, 60)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
 # ---------------------------------------------------------------------------

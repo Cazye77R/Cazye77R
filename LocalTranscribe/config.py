@@ -29,7 +29,9 @@ except ImportError:
 # on large-v3.  On CPU, int8 is also the fastest compute type.
 WHISPER_COMPUTE_TYPE = "int8"
 
-# Fallback compute type used when the primary type causes a CUDA OOM.
+# Compute type used when falling back to the CPU.  int8 is already the most
+# memory-frugal option on the GPU, so there is no lighter GPU precision to
+# retry with – a CUDA OOM is escaped by moving to the CPU instead.
 WHISPER_COMPUTE_TYPE_FALLBACK = "int8"
 
 # ---------------------------------------------------------------------------
@@ -41,9 +43,14 @@ LANGUAGES = {"Deutsch": "de", "English": "en"}
 
 # Display-key (must match a key in LANGUAGES) used when no language is selected.
 DEFAULT_LANGUAGE = "Deutsch"
-assert DEFAULT_LANGUAGE in LANGUAGES, (
-    f"DEFAULT_LANGUAGE '{DEFAULT_LANGUAGE}' not found in LANGUAGES keys"
-)
+
+# A plain raise, not an assert: assert statements are stripped when Python runs
+# with -O, which would silently remove this guard.
+if DEFAULT_LANGUAGE not in LANGUAGES:
+    raise ValueError(
+        f"DEFAULT_LANGUAGE '{DEFAULT_LANGUAGE}' is not a key of LANGUAGES "
+        f"({sorted(LANGUAGES)})"
+    )
 
 # ---------------------------------------------------------------------------
 # Ollama timeouts
@@ -64,6 +71,3 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 
 # Supported audio/video formats
 SUPPORTED_FORMATS = [".mp3", ".wav", ".m4a", ".ogg", ".flac", ".wma"]
-
-# Output directory for transcription results
-OUTPUT_DIR = "outputs"
