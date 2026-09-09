@@ -1141,27 +1141,31 @@
       if (mGes) results.gesamt = num(mGes[1]);
       else missing.push("Verbrauch");
 
-      // PV-Strom: Menge (kWh) und Preis (ct/kWh)
-      const mPV = text.match(/PV-Strom[\s\S]{5,80}?([\d.,]+)\s+kWh\s+([\d.,]+)\s+ct\/kWh/);
-      if (mPV) {
-        results.solar      = num(mPV[1]);
-        results.solarpreis = Math.round(num(mPV[2]) / 100 * 10000) / 10000;
-      } else missing.push("PV-Strom");
+      // PV-Strom: nur Menge (kWh) – Preis wird aus Brutto-Zwischensumme berechnet
+      const mPV = text.match(/PV-Strom[\s\S]{5,80}?([\d.,]+)\s+kWh\s+[\d.,]+\s+ct\/kWh/);
+      if (mPV) results.solar = num(mPV[1]);
+      else missing.push("PV-Strom");
 
-      // Grundpreis €/Monat (erstes Vorkommen)
-      const mGP = text.match(/([\d.,]+)\s+€\/Monat/);
-      if (mGP) results.grundpreis = num(mGP[1]);
-      else missing.push("Grundpreis");
+      // Brutto-Zwischensummen: Muster "Zwischensumme X  <netto> €  <ust> €  <brutto>"
+      const mNetzB = text.match(/Zwischensumme Netzstrom\s+[\d.,]+\s+\S+\s+[\d.,]+\s+\S+\s+([\d.,]+)/);
+      const mPVB   = text.match(/Zwischensumme Photovoltaik\s+[\d.,]+\s+\S+\s+[\d.,]+\s+\S+\s+([\d.,]+)/);
+      const mGPB   = text.match(/Zwischensumme Grundpreis\s+[\d.,]+\s+\S+\s+[\d.,]+\s+\S+\s+([\d.,]+)/);
 
-      // Effektiver Netzpreis: Zwischensumme Netzstrom / Netzanteil-kWh
-      const mNetz = text.match(/Zwischensumme Netzstrom\s+([\d.,]+)/);
-      if (mNetz && results.gesamt != null && results.solar != null) {
+      // Solarpreis brutto = PV-Brutto / Solar-kWh
+      if (mPVB && results.solar) {
+        results.solarpreis = Math.round(num(mPVB[1]) / results.solar * 10000) / 10000;
+      } else missing.push("Solarpreis");
+
+      // Effektiver Netzpreis brutto = Netzstrom-Brutto / Netzanteil-kWh
+      if (mNetzB && results.gesamt != null && results.solar != null) {
         const netzKwh = results.gesamt - results.solar;
-        if (netzKwh > 0) {
-          results.netzpreis = Math.round(num(mNetz[1]) / netzKwh * 1000) / 1000;
-        }
+        if (netzKwh > 0) results.netzpreis = Math.round(num(mNetzB[1]) / netzKwh * 1000) / 1000;
       }
       if (!results.netzpreis) missing.push("Netzpreis");
+
+      // Grundpreis brutto
+      if (mGPB) results.grundpreis = num(mGPB[1]);
+      else missing.push("Grundpreis");
 
       return { results, missing };
     }
