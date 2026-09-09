@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Thundervolt – Mieterstrom</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    :root {
+      --bg: #0b0d13;
+      --bg-card: #171924;
+      --accent: #2f7dff;
+      --accent-soft: rgba(47,125,255,0.25);
+      --text: #e8eaf2;
+      --text-soft: #a6aec7;
+      --danger: #ff4d6a;
+      --radius: 14px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      background: radial-gradient(circle at top, #1d2440 0, #05060a 55%);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 1.5rem;
+    }
+
+    .logo {
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 20%, #ffe66d, #ff9f43 55%, #ff4d6a 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+    }
+
+    .subtitle {
+      color: var(--text-soft);
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+      gap: 16px;
+    }
+
+    @media(max-width: 900px) {
+      .layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .card {
+      background: rgba(23,25,36,0.95);
+      border-radius: var(--radius);
+      padding: 14px 16px 16px;
+      border: 1px solid rgba(255,255,255,0.05);
+      box-shadow: 0 16px 36px rgba(0,0,0,0.6);
+      margin-bottom: 12px;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .card-sub {
+      font-size: 0.8rem;
+      color: var(--text-soft);
+    }
+
+    label {
+      font-size: 0.8rem;
+      color: var(--text-soft);
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    input, select {
+      width: 100%;
+      padding: 7px 9px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: #151824;
+      color: var(--text);
+      font-size: 0.9rem;
+      margin-bottom: 10px;
+      outline: none;
+    }
+
+    input:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-soft);
+    }
+
+    .row2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0,1fr));
+      gap: 10px;
+    }
+
+    .row3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0,1fr));
+      gap: 10px;
+    }
+
+    button {
+      border-radius: 999px;
+      border: none;
+      padding: 7px 14px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      background: var(--accent);
+      color: #fff;
+    }
+
+    button.secondary {
+      background: rgba(255,255,255,0.05);
+      color: var(--text-soft);
+    }
+
+    button.danger {
+      background: rgba(255,77,106,0.15);
+      color: var(--danger);
+      border: 1px solid rgba(255,77,106,0.3);
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0,1fr));
+      gap: 8px;
+      margin-top: 6px;
+      margin-bottom: 6px;
+    }
+
+    .metrics-2x2 {
+      grid-template-columns: repeat(2, minmax(0,1fr));
+    }
+
+    @media(max-width: 600px) {
+      .metrics, .metrics-2x2 {
+        grid-template-columns: minmax(0,1fr);
+      }
+    }
+
+    .metric-green {
+      border-color: rgba(46,213,115,0.25);
+      background: rgba(46,213,115,0.07);
+    }
+
+    .metric-green .metric-value {
+      color: #2ed573;
+    }
+
+    .metric {
+      background: #1e2130;
+      border-radius: 10px;
+      padding: 6px 8px;
+      border: 1px solid rgba(255,255,255,0.04);
+    }
+
+    .metric-label {
+      font-size: 0.75rem;
+      color: var(--text-soft);
+      margin-bottom: 2px;
+    }
+
+    .metric-value {
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+
+    .metric-hint {
+      font-size: 0.7rem;
+      color: var(--text-soft);
+      margin-top: 1px;
+    }
+
+    /* Icon-Kostenmodus-Buttons */
+    .cost-mode-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .cost-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    }
+
+    .cost-btn:hover {
+      border-color: var(--accent);
+      box-shadow: 0 0 8px var(--accent-soft);
+    }
+
+    .cost-btn.active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      box-shadow: 0 0 10px var(--accent-soft);
+    }
+
+    /* Tabelle */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    th, td {
+      text-align: center;
+      padding: 6px 4px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    th {
+      font-weight: 500;
+      color: var(--text-soft);
+      font-size: 0.8rem;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr.year-summary td {
+      background: rgba(47,125,255,0.08);
+      font-weight: 600;
+      font-size: 0.82rem;
+      color: var(--accent);
+      border-top: 1px solid rgba(47,125,255,0.2);
+    }
+
+    td[data-share="high"] { color: #2ed573; }
+    td[data-share="mid"]  { color: #ff9f43; }
+    td[data-share="low"]  { color: #ff4d6a; }
+
+    /* Jahresbuttons */
+    #yearButtons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .year-btn {
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: none;
+      font-size: 0.75rem;
+      cursor: pointer;
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+    }
+
+    .year-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0,1fr));
+      gap: 10px;
+      margin-top: 6px;
+    }
+
+    @media(max-width: 900px) {
+      .chart-grid {
+        grid-template-columns: minmax(0,1fr);
+      }
+    }
+
+    canvas {
+      width: 100% !important;
+      height: 220px !important;
+      background: #141722;
+      border-radius: 10px;
+    }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 14px;
+      right: 14px;
+      padding: 9px 12px;
+      border-radius: 999px;
+      background: #1e2230;
+      color: var(--text);
+      font-size: 0.85rem;
+      display: none;
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 12px 30px rgba(0,0,0,0.7);
+      z-index: 999;
+      transition: opacity 0.28s ease;
+    }
+
+    /* Jahresbericht-Kacheln */
+    .year-report-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0,1fr));
+      gap: 8px;
+    }
+
+    @media(max-width: 700px) {
+      .year-report-grid {
+        grid-template-columns: repeat(2, minmax(0,1fr));
+      }
+    }
+
+    .yr-tile {
+      background: #1a1d2e;
+      border-radius: 10px;
+      padding: 8px 10px;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .yr-tile-label {
+      font-size: 0.72rem;
+      color: var(--text-soft);
+      margin-bottom: 3px;
+    }
+
+    .yr-tile-value {
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .yr-tile-hint {
+      font-size: 0.68rem;
+      color: var(--text-soft);
+      margin-top: 2px;
+    }
+
+    /* Versteckter File-Input für Import */
+    #importInput {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>
+    <span class="logo" aria-hidden="true">⚡</span>
+    Thundervolt – Mieterstrom
+  </h1>
+  <div class="subtitle">
+    Erfassung von Stromverbrauch, Mieterstrom-Solaranteil, Kosten &amp; CO₂ – alles lokal im Browser, ohne Server.
+  </div>
+
+  <div class="layout">
+    <!-- ==================== LINKER BEREICH ==================== -->
+    <div>
+      <!-- Monatsdaten -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Monatsdaten</div>
+            <div class="card-sub">Jahr, Monat und Verbrauchsdaten eingeben</div>
+          </div>
+          <button class="secondary" id="btnPdfImport" style="font-size:0.78rem;padding:5px 10px;white-space:nowrap;" aria-label="Rechnung als PDF einlesen">📄 Rechnung einlesen</button>
+        </div>
+        <input type="file" id="pdfInput" accept=".pdf" style="display:none" aria-hidden="true">
+
+        <div class="row2">
+          <div>
+            <label for="yearSelect">Jahr</label>
+            <select id="yearSelect" aria-label="Jahr auswählen"></select>
+          </div>
+          <div>
+            <label for="monthSelect">Monat</label>
+            <select id="monthSelect" aria-label="Monat auswählen"></select>
+          </div>
+        </div>
+
+        <div class="row2">
+          <div>
+            <label for="gesamt">Gesamtverbrauch (kWh)</label>
+            <input type="number" id="gesamt" step="0.01" min="0" placeholder="z.B. 300">
+          </div>
+          <div>
+            <label for="solar">Solarproduktion (kWh)</label>
+            <input type="number" id="solar" step="0.01" min="0" placeholder="z.B. 120">
+          </div>
+        </div>
+
+        <div class="row3">
+          <div>
+            <label for="netzpreis">Netzpreis (€/kWh)</label>
+            <input type="number" id="netzpreis" step="0.001" min="0">
+          </div>
+          <div>
+            <label for="solarpreis">Solarpreis (€/kWh)</label>
+            <input type="number" id="solarpreis" step="0.001" min="0">
+          </div>
+          <div>
+            <label for="grundpreis">Grundpreis pro Monat (€)</label>
+            <input type="number" id="grundpreis" step="0.01" min="0">
+          </div>
+        </div>
+
+        <div class="metrics metrics-2x2" aria-live="polite">
+          <div class="metric">
+            <div class="metric-label">Solaranteil</div>
+            <div class="metric-value" id="previewSolarShare">–</div>
+            <div class="metric-hint">Solar kWh / Gesamt kWh</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Monatskosten (Gesamt)</div>
+            <div class="metric-value" id="previewTotalCost">–</div>
+            <div class="metric-hint">Netz + Solar + Grundpreis</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">CO₂ Netz</div>
+            <div class="metric-value" id="previewCO2">–</div>
+            <div class="metric-hint">Netzanteil · CO₂-Faktor</div>
+          </div>
+          <div class="metric metric-green">
+            <div class="metric-label">CO₂ gespart</div>
+            <div class="metric-value" id="previewCO2Save">–</div>
+            <div class="metric-hint">Solaranteil · CO₂-Faktor</div>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button id="btnSave">💾 Monat speichern</button>
+          <button id="btnDelete" class="danger" disabled aria-label="Gespeicherten Monat löschen">🗑️ Löschen</button>
+        </div>
+      </div>
+
+      <!-- Einstellungen -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Einstellungen</div>
+            <div class="card-sub">Standardpreise &amp; CO₂-Faktor</div>
+          </div>
+        </div>
+
+        <div class="row2">
+          <div>
+            <label for="sNetzpreis">Standard-Netzpreis (€/kWh)</label>
+            <input type="number" id="sNetzpreis" step="0.001" min="0" value="0.32">
+          </div>
+          <div>
+            <label for="sSolarpreis">Standard-Solarpreis (€/kWh)</label>
+            <input type="number" id="sSolarpreis" step="0.001" min="0" value="0.24">
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label for="sGrundpreis">Standard-Grundpreis (€ / Monat)</label>
+            <input type="number" id="sGrundpreis" step="0.01" min="0" value="12">
+          </div>
+          <div>
+            <label for="sCO2">CO₂-Faktor Netz (kg/kWh)</label>
+            <input type="number" id="sCO2" step="0.01" min="0" value="0.40">
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="secondary" id="btnSaveSettings">⚙️ Einstellungen speichern</button>
+          <button class="secondary" id="btnExport" aria-label="Daten als JSON exportieren">⬇️ JSON</button>
+          <button class="secondary" id="btnExportCSV" aria-label="Daten als CSV exportieren">⬇️ CSV</button>
+          <button class="secondary" id="btnImport" aria-label="Daten aus JSON importieren">⬆️ Importieren</button>
+        </div>
+        <input type="file" id="importInput" accept=".json" aria-hidden="true">
+      </div>
+    </div>
+
+    <!-- ==================== RECHTER BEREICH ==================== -->
+    <div>
+      <!-- Kostenmodus & Jahresfilter & Tabelle -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Übersicht</div>
+            <div class="card-sub">Kostenansicht &amp; Jahresfilter</div>
+          </div>
+        </div>
+
+        <div class="cost-mode-bar" role="group" aria-label="Kostenansicht wählen">
+          <div class="cost-btn" id="modeSolar" role="button" tabindex="0" title="Nur Solarkosten anzeigen" aria-label="Nur Solarkosten anzeigen" aria-pressed="false">🔆</div>
+          <div class="cost-btn" id="modeNetz"  role="button" tabindex="0" title="Nur Netzkosten anzeigen"  aria-label="Nur Netzkosten anzeigen"  aria-pressed="false">⚡</div>
+          <div class="cost-btn" id="modeGesamt" role="button" tabindex="0" title="Gesamtkosten anzeigen"   aria-label="Gesamtkosten anzeigen"   aria-pressed="false">💰</div>
+        </div>
+
+        <div id="yearButtons" role="group" aria-label="Jahresfilter"></div>
+
+        <div id="yearReport" style="display:none; margin-bottom:10px;"></div>
+
+        <table id="dataTable" aria-label="Monatsübersicht"></table>
+      </div>
+
+      <!-- Diagramme -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Kosten-Diagramme</div>
+            <div class="card-sub">Gesamtkosten &amp; Solar vs. Netz</div>
+          </div>
+        </div>
+        <div class="chart-grid">
+          <div>
+            <label style="font-size:0.8rem; color:var(--text-soft);">Gesamtkosten je Zeitraum</label>
+            <canvas id="chartCostLine" aria-label="Liniendiagramm Gesamtkosten" role="img"></canvas>
+          </div>
+          <div>
+            <label style="font-size:0.8rem; color:var(--text-soft);">Solarkosten vs. Netzkosten</label>
+            <canvas id="chartCostStack" aria-label="Stapelbalkendiagramm Solar vs Netz" role="img"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    // ─── Konstanten ──────────────────────────────────────────────────────────
+    const YEAR_MIN = 2020;
+    const YEAR_MAX = 2050;
+
+    const STORAGE_DATA     = "thundervolt_mieterstrom_v1_data";
+    const STORAGE_SETTINGS = "thundervolt_mieterstrom_v1_settings";
+    const STORAGE_MODE     = "thundervolt_mieterstrom_v1_mode";
+    const STORAGE_FILTER   = "thundervolt_mieterstrom_v1_filter";
+
+    const monthNames = ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+
+    // ─── Zustand ─────────────────────────────────────────────────────────────
+    let data = {};
+    let settings = {
+      netzpreisDefault: 0.32,
+      solarpreisDefault: 0.24,
+      grundpreisDefault: 12,
+      co2Factor: 0.4
+    };
+
+    let editYear  = new Date().getFullYear();
+    let editMonth = new Date().getMonth();
+
+    const savedFilter = localStorage.getItem(STORAGE_FILTER);
+    let filterYear = savedFilter === "all" ? "all"
+                   : savedFilter != null    ? parseInt(savedFilter, 10)
+                   : "all";
+
+    let costMode = localStorage.getItem(STORAGE_MODE) || "gesamt";
+
+    // Chart.js Dark-Theme-Defaults
+    Chart.defaults.color       = "#a6aec7";
+    Chart.defaults.borderColor = "rgba(255,255,255,0.07)";
+
+    let chartCostLine  = null;
+    let chartCostStack = null;
+
+    // ─── Toast ───────────────────────────────────────────────────────────────
+    function showToast(msg) {
+      const t = document.getElementById("toast");
+      t.textContent = msg;
+      t.style.display = "block";
+      t.style.opacity = "1";
+      setTimeout(() => {
+        t.style.opacity = "0";
+        setTimeout(() => t.style.display = "none", 280);
+      }, 2000);
+    }
+
+    // ─── LocalStorage ────────────────────────────────────────────────────────
+    function loadStorage() {
+      try {
+        const raw = localStorage.getItem(STORAGE_DATA);
+        if (raw) data = JSON.parse(raw) || {};
+      } catch (e) { data = {}; }
+
+      try {
+        const rawS = localStorage.getItem(STORAGE_SETTINGS);
+        if (rawS) {
+          const loaded = JSON.parse(rawS) || {};
+          settings = Object.assign(settings, loaded);
+        }
+      } catch (e) {}
+
+      document.getElementById("sNetzpreis").value  = settings.netzpreisDefault;
+      document.getElementById("sSolarpreis").value = settings.solarpreisDefault;
+      document.getElementById("sGrundpreis").value = settings.grundpreisDefault;
+      document.getElementById("sCO2").value        = settings.co2Factor;
+    }
+
+    function saveStorage() {
+      localStorage.setItem(STORAGE_DATA, JSON.stringify(data));
+    }
+
+    function saveSettings() {
+      settings.netzpreisDefault  = parseFloat(document.getElementById("sNetzpreis").value)  || 0;
+      settings.solarpreisDefault = parseFloat(document.getElementById("sSolarpreis").value) || 0;
+      settings.grundpreisDefault = parseFloat(document.getElementById("sGrundpreis").value) || 0;
+      settings.co2Factor         = parseFloat(document.getElementById("sCO2").value)         || 0;
+      localStorage.setItem(STORAGE_SETTINGS, JSON.stringify(settings));
+      showToast("Einstellungen gespeichert");
+      loadEditMonthIntoInputs();
+      updateAll();
+    }
+
+    // ─── Export / Import ─────────────────────────────────────────────────────
+    function exportData() {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      const ts   = new Date().toISOString().slice(0, 10);
+      a.download = `thundervolt_daten_${ts}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function importData(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const parsed = JSON.parse(e.target.result);
+          if (typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+          // Mergen: importierte Daten gewinnen bei Konflikt
+          for (const y of Object.keys(parsed)) {
+            if (!data[y]) data[y] = {};
+            Object.assign(data[y], parsed[y]);
+          }
+          saveStorage();
+          showToast("Import erfolgreich");
+          updateAll();
+        } catch (_) {
+          showToast("Fehler: Ungültige JSON-Datei");
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function exportCSV() {
+      const rows = buildRows();
+      const sep  = ";";
+      const lines = [
+        ["Zeitraum","Verbrauch kWh","Solar kWh","Netz kWh","Solaranteil %","Solarkosten EUR","Netzkosten EUR","Gesamtkosten EUR","CO2 Netz kg"].join(sep),
+        ...rows.map(r => [
+          r.label,
+          r.g.toFixed(2),
+          r.s.toFixed(2),
+          r.netz.toFixed(2),
+          r.share.toFixed(1),
+          r.kostenSolar.toFixed(2),
+          r.kostenNetz.toFixed(2),
+          r.kostenGesamt.toFixed(2),
+          r.co2Netz.toFixed(2)
+        ].join(sep))
+      ];
+      const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      const ts   = new Date().toISOString().slice(0, 10);
+      a.download = `thundervolt_daten_${ts}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // ─── Selects befüllen ────────────────────────────────────────────────────
+    function initYearSelect() {
+      const sel = document.getElementById("yearSelect");
+      sel.innerHTML = "";
+      for (let y = YEAR_MIN; y <= YEAR_MAX; y++) {
+        const opt = document.createElement("option");
+        opt.value       = y;
+        opt.textContent = y;
+        sel.appendChild(opt);
+      }
+      sel.value = editYear;
+    }
+
+    function initMonthSelect() {
+      const sel = document.getElementById("monthSelect");
+      sel.innerHTML = "";
+      monthNames.forEach((m, i) => {
+        const opt       = document.createElement("option");
+        opt.value       = i;
+        const hasData   = !!(data[editYear] && data[editYear][i]);
+        opt.textContent = hasData ? "✓ " + m : m;
+        sel.appendChild(opt);
+      });
+      sel.value = editMonth;
+    }
+
+    // ─── Eingabefelder befüllen ───────────────────────────────────────────────
+    function loadEditMonthIntoInputs() {
+      const d = (data[editYear] || {})[editMonth] || null;
+
+      document.getElementById("gesamt").value    = d ? (d.gesamt    ?? "") : "";
+      document.getElementById("solar").value     = d ? (d.solar     ?? "") : "";
+      document.getElementById("netzpreis").value = d ? (d.netzpreis ?? settings.netzpreisDefault) : settings.netzpreisDefault;
+      document.getElementById("solarpreis").value= d ? (d.solarpreis?? settings.solarpreisDefault): settings.solarpreisDefault;
+      document.getElementById("grundpreis").value= d ? (d.grundpreis?? settings.grundpreisDefault): settings.grundpreisDefault;
+
+      document.getElementById("btnDelete").disabled = !d;
+      updatePreview();
+    }
+
+    // ─── Eingabewerte lesen (kein DOM-Seiteneffekt) ───────────────────────────
+    function getCurrentInputs() {
+      const g     = parseFloat(document.getElementById("gesamt").value) || 0;
+      const s     = Math.min(parseFloat(document.getElementById("solar").value) || 0, g);
+      const npRaw = parseFloat(document.getElementById("netzpreis").value);
+      const spRaw = parseFloat(document.getElementById("solarpreis").value);
+      const gpRaw = parseFloat(document.getElementById("grundpreis").value);
+      const np    = isNaN(npRaw) ? settings.netzpreisDefault  : npRaw;
+      const sp    = isNaN(spRaw) ? settings.solarpreisDefault : spRaw;
+      const gp    = isNaN(gpRaw) ? settings.grundpreisDefault : gpRaw;
+
+      const netz         = Math.max(0, g - s);
+      const kostenSolar  = s    * sp;
+      const kostenNetz   = netz * np + gp;
+      const kostenGesamt = kostenSolar + kostenNetz;
+      const co2Netz      = netz * settings.co2Factor;
+
+      return { g, s, np, sp, gp, netz, kostenSolar, kostenNetz, kostenGesamt, co2Netz };
+    }
+
+    function updatePreview(warnOnOverflow = false) {
+      const rawSolar  = parseFloat(document.getElementById("solar").value)  || 0;
+      const rawGesamt = parseFloat(document.getElementById("gesamt").value) || 0;
+
+      if (warnOnOverflow && rawSolar > rawGesamt && rawGesamt > 0) {
+        showToast("Solar darf nicht größer als Gesamt sein");
+      }
+
+      const v   = getCurrentInputs();
+      const fmt = (n, dec = 1) => isFinite(n) ? n.toFixed(dec).replace(".", ",") : "–";
+
+      const share = v.g > 0 ? v.s / v.g * 100 : 0;
+      document.getElementById("previewSolarShare").textContent =
+        v.g > 0 ? fmt(share, 1) + " %" : "–";
+      document.getElementById("previewTotalCost").textContent =
+        v.g > 0 ? fmt(v.kostenGesamt, 2) + " €" : "–";
+      document.getElementById("previewCO2").textContent =
+        v.g > 0 ? fmt(v.co2Netz, 1) + " kg" : "–";
+      const co2Save = v.s * settings.co2Factor;
+      document.getElementById("previewCO2Save").textContent =
+        v.g > 0 ? fmt(co2Save, 1) + " kg" : "–";
+    }
+
+    // ─── Monat speichern / löschen ────────────────────────────────────────────
+    function saveMonth() {
+      const rawSolar  = parseFloat(document.getElementById("solar").value)  || 0;
+      const rawGesamt = parseFloat(document.getElementById("gesamt").value) || 0;
+
+      if (rawGesamt <= 0) {
+        showToast("Bitte Gesamtverbrauch > 0 eingeben.");
+        return;
+      }
+      if (rawSolar > rawGesamt) {
+        document.getElementById("solar").value = rawGesamt;
+        showToast("Solar darf nicht größer als Gesamt sein – korrigiert");
+      }
+
+      const v = getCurrentInputs();
+      if (!data[editYear]) data[editYear] = {};
+      data[editYear][editMonth] = {
+        gesamt:     v.g,
+        solar:      v.s,
+        netzpreis:  v.np,
+        solarpreis: v.sp,
+        grundpreis: v.gp
+      };
+      saveStorage();
+      showToast("Monat gespeichert");
+      initMonthSelect();
+      document.getElementById("btnDelete").disabled = false;
+      updateAll();
+    }
+
+    function deleteMonth() {
+      if (!data[editYear] || data[editYear][editMonth] == null) return;
+      delete data[editYear][editMonth];
+      if (Object.keys(data[editYear]).length === 0) delete data[editYear];
+      saveStorage();
+      showToast("Monat gelöscht");
+      loadEditMonthIntoInputs();
+      initMonthSelect();
+      updateAll();
+    }
+
+    // ─── Kostenmodus ─────────────────────────────────────────────────────────
+    function setCostMode(mode) {
+      costMode = mode;
+      localStorage.setItem(STORAGE_MODE, mode);
+      ["modeSolar","modeNetz","modeGesamt"].forEach(id => {
+        const el      = document.getElementById(id);
+        const isActive = id === "mode" + mode.charAt(0).toUpperCase() + mode.slice(1);
+        el.classList.toggle("active", isActive);
+        el.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+      updateAll();
+    }
+
+    // ─── Jahresfilter-Buttons (nur Jahre mit Daten) ────────────────────────────
+    function initYearButtons() {
+      const box = document.getElementById("yearButtons");
+      box.innerHTML = "";
+
+      const yearsWithData = Object.keys(data).map(Number).sort((a, b) => a - b);
+
+      if (filterYear !== "all" && !yearsWithData.includes(filterYear)) {
+        filterYear = "all";
+        localStorage.setItem(STORAGE_FILTER, "all");
+      }
+
+      const allBtn        = document.createElement("button");
+      allBtn.textContent  = "Alle";
+      allBtn.className    = "year-btn" + (filterYear === "all" ? " active" : "");
+      allBtn.setAttribute("aria-pressed", filterYear === "all" ? "true" : "false");
+      allBtn.onclick = () => {
+        filterYear = "all";
+        localStorage.setItem(STORAGE_FILTER, "all");
+        updateAll();
+      };
+      box.appendChild(allBtn);
+
+      yearsWithData.forEach(y => {
+        const b        = document.createElement("button");
+        b.textContent  = y;
+        b.className    = "year-btn" + (filterYear === y ? " active" : "");
+        b.setAttribute("aria-pressed", filterYear === y ? "true" : "false");
+        b.onclick = () => {
+          filterYear = y;
+          localStorage.setItem(STORAGE_FILTER, y);
+          updateAll();
+        };
+        box.appendChild(b);
+      });
+    }
+
+    // ─── Zeilen berechnen ────────────────────────────────────────────────────
+    function calcRow(y, m, d, multiYear) {
+      const g    = d.gesamt || 0;
+      const s    = Math.min(d.solar || 0, g);
+      const np   = d.netzpreis  ?? settings.netzpreisDefault;
+      const sp   = d.solarpreis ?? settings.solarpreisDefault;
+      const gp   = d.grundpreis ?? settings.grundpreisDefault;
+      const netz = Math.max(0, g - s);
+      return {
+        label:        multiYear ? y + "-" + monthNames[m] : monthNames[m],
+        year:         y,
+        month:        m,
+        g, s, netz, np, sp, gp,
+        kostenSolar:  s    * sp,
+        kostenNetz:   netz * np + gp,
+        kostenGesamt: s    * sp + netz * np + gp,
+        co2Netz:      netz * settings.co2Factor,
+        share:        g > 0 ? (s / g) * 100 : 0
+      };
+    }
+
+    function buildRows() {
+      const multiYear = filterYear === "all";
+      const years     = multiYear
+        ? Object.keys(data).map(y => parseInt(y, 10)).sort((a, b) => a - b)
+        : [filterYear];
+      const rows = [];
+      years.forEach(y => {
+        const yearData = data[y] || {};
+        for (let m = 0; m < 12; m++) {
+          if (yearData[m]) rows.push(calcRow(y, m, yearData[m], multiYear));
+        }
+      });
+      return rows;
+    }
+
+    // ─── Jahresbericht-Kacheln ────────────────────────────────────────────
+    function updateYearReport(rows) {
+      const box = document.getElementById("yearReport");
+      if (filterYear === "all" || rows.length === 0) {
+        box.style.display = "none";
+        return;
+      }
+      const fmt = (n, d) => n.toFixed(d).replace(".", ",");
+
+      const totalKosten   = rows.reduce((s, r) => s + r.kostenGesamt, 0);
+      const totalVerbrauch= rows.reduce((s, r) => s + r.g, 0);
+      const avgShare      = rows.reduce((s, r) => s + r.share, 0) / rows.length;
+      const maxR = rows.reduce((a, b) => a.kostenGesamt > b.kostenGesamt ? a : b);
+      const minR = rows.reduce((a, b) => a.kostenGesamt < b.kostenGesamt ? a : b);
+
+      const tiles = [
+        { label: "Jahreskosten gesamt",   value: fmt(totalKosten, 2) + " €", hint: rows.length + " Monate erfasst" },
+        { label: "Jahresverbrauch",        value: fmt(totalVerbrauch, 0) + " kWh", hint: "Ø " + fmt(totalVerbrauch / rows.length, 0) + " kWh/Monat" },
+        { label: "Ø Solaranteil",          value: fmt(avgShare, 1) + " %", hint: "Aller erfassten Monate" },
+        { label: "Teuerster Monat",        value: monthNames[maxR.month], hint: fmt(maxR.kostenGesamt, 2) + " €" },
+      ];
+
+      box.innerHTML = "";
+      const grid = document.createElement("div");
+      grid.className = "year-report-grid";
+      tiles.forEach(t => {
+        const tile = document.createElement("div");
+        tile.className = "yr-tile";
+        tile.innerHTML = `<div class="yr-tile-label">${t.label}</div><div class="yr-tile-value">${t.value}</div><div class="yr-tile-hint">${t.hint}</div>`;
+        grid.appendChild(tile);
+      });
+      box.appendChild(grid);
+      box.style.display = "block";
+    }
+
+    // ─── Tabelle aufbauen (createElement statt innerHTML) ────────────────────
+    function buildTable() {
+      const table = document.getElementById("dataTable");
+      table.innerHTML = "";
+
+      const thead = document.createElement("thead");
+      const hr    = document.createElement("tr");
+      ["Zeitraum","Verbrauch (kWh)","Solaranteil %","Kosten (€)","CO₂ Netz (kg)"].forEach(text => {
+        const th = document.createElement("th");
+        th.textContent = text;
+        hr.appendChild(th);
+      });
+      thead.appendChild(hr);
+      table.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      const rows  = buildRows();
+      const fmt   = (n, d) => n.toFixed(d).replace(".", ",");
+
+      const appendSummaryRow = (y, t) => {
+        const cost =
+          costMode === "solar" ? t.kostenSolar :
+          costMode === "netz"  ? t.kostenNetz  :
+          t.kostenGesamt;
+        const tr = document.createElement("tr");
+        tr.className = "year-summary";
+        ["Σ " + y, fmt(t.g, 1), "–", fmt(cost, 2), fmt(t.co2Netz, 1)].forEach(v => {
+          const td = document.createElement("td");
+          td.textContent = v;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      };
+
+      let currentYear = null;
+      let yearAcc     = null;
+
+      rows.forEach((r, idx) => {
+        const cost =
+          costMode === "solar" ? r.kostenSolar :
+          costMode === "netz"  ? r.kostenNetz  :
+          r.kostenGesamt;
+
+        if (filterYear === "all" && r.year !== currentYear) {
+          if (currentYear !== null) appendSummaryRow(currentYear, yearAcc);
+          currentYear = r.year;
+          yearAcc = { g: 0, kostenSolar: 0, kostenNetz: 0, kostenGesamt: 0, co2Netz: 0 };
+        }
+
+        if (yearAcc) {
+          yearAcc.g            += r.g;
+          yearAcc.kostenSolar  += r.kostenSolar;
+          yearAcc.kostenNetz   += r.kostenNetz;
+          yearAcc.kostenGesamt += r.kostenGesamt;
+          yearAcc.co2Netz      += r.co2Netz;
+        }
+
+        const tr = document.createElement("tr");
+        const shareCell = fmt(r.share, 1) + " %";
+        [r.label, fmt(r.g, 1), shareCell, fmt(cost, 2), fmt(r.co2Netz, 1)].forEach((v, ci) => {
+          const td = document.createElement("td");
+          td.textContent = v;
+          if (ci === 2) {
+            td.dataset.share = r.share >= 50 ? "high" : r.share >= 20 ? "mid" : "low";
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+
+      if (filterYear === "all" && currentYear !== null) appendSummaryRow(currentYear, yearAcc);
+
+      if (rows.length === 0) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 5;
+        td.textContent = "Noch keine Daten vorhanden – bitte Monat erfassen und speichern.";
+        td.style.cssText = "text-align:center; padding:16px 8px; color:var(--text-soft); font-style:italic;";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+      }
+
+      table.appendChild(tbody);
+      return rows;
+    }
+
+    // ─── Charts ──────────────────────────────────────────────────────────────
+    function initCharts() {
+      const ctxLine  = document.getElementById("chartCostLine").getContext("2d");
+      const ctxStack = document.getElementById("chartCostStack").getContext("2d");
+
+      chartCostLine = new Chart(ctxLine, {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [
+            { label: "Gesamtkosten (€)", data: [], tension: 0.3, borderColor: "#2f7dff", backgroundColor: "rgba(47,125,255,0.15)", fill: true, order: 1 },
+            { label: "Ø Durchschnitt",   data: [], borderColor: "rgba(255,255,255,0.3)", borderDash: [5,4], borderWidth: 1.5, pointRadius: 0, fill: false, order: 2 }
+          ]
+        },
+        options: {
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+
+      chartCostStack = new Chart(ctxStack, {
+        type: "bar",
+        data: {
+          labels: [],
+          datasets: [
+            { label: "Solarkosten (€)",  data: [], stack: "costs", backgroundColor: "#ff9f43" },
+            { label: "Netzkosten (€)",   data: [], stack: "costs", backgroundColor: "#2f7dff" }
+          ]
+        },
+        options: {
+          plugins: { legend: { display: true } },
+          scales: {
+            x: { stacked: true },
+            y: { stacked: true, beginAtZero: true }
+          }
+        }
+      });
+    }
+
+    function updateCharts(rows) {
+      const labels     = rows.map(r => r.label);
+      const solarCosts = rows.map(r => r.kostenSolar);
+      const netzCosts  = rows.map(r => r.kostenNetz);
+      const totalCosts = rows.map(r => r.kostenGesamt);
+
+      const avg     = totalCosts.length > 0
+        ? totalCosts.reduce((a, b) => a + b, 0) / totalCosts.length
+        : 0;
+      const avgLine = totalCosts.map(() => avg);
+
+      chartCostLine.data.labels           = labels;
+      chartCostLine.data.datasets[0].data = totalCosts;
+      chartCostLine.data.datasets[1].data = avgLine;
+      chartCostLine.update();
+
+      chartCostStack.data.labels              = labels;
+      chartCostStack.data.datasets[0].data    = solarCosts;
+      chartCostStack.data.datasets[1].data    = netzCosts;
+      chartCostStack.update();
+    }
+
+    // ─── PDF-Rechnungsimport ─────────────────────────────────────────────────
+    let _pdfjsLib = null;
+
+    async function loadPdfJs() {
+      if (_pdfjsLib) return _pdfjsLib;
+      try {
+        _pdfjsLib = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs");
+        _pdfjsLib.GlobalWorkerOptions.workerSrc =
+          "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs";
+        return _pdfjsLib;
+      } catch (e) {
+        showToast("⚠️ PDF.js konnte nicht geladen werden (Internetverbindung prüfen)");
+        throw e;
+      }
+    }
+
+    async function extractPdfText(arrayBuffer) {
+      const lib = await loadPdfJs();
+      const pdf = await lib.getDocument({ data: arrayBuffer }).promise;
+      let text = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const tc   = await page.getTextContent();
+        text += tc.items.map(it => it.str).join(" ") + "\n";
+      }
+      return text;
+    }
+
+    function parseInvoiceText(text) {
+      const num = s => parseFloat(s.replace(/\./g, "").replace(",", "."));
+      const results = {};
+      const missing = [];
+
+      // Lieferzeitraum: Datumsbereich "DD.MM.YYYY - DD.MM.YYYY" (nicht das Rechnungsdatum)
+      const mDate = text.match(/(\d{2})\.(\d{2})\.(\d{4})\s*[-–]\s*\d{2}\.\d{2}\.\d{4}/);
+      if (mDate) {
+        results.monat = parseInt(mDate[2], 10) - 1;
+        results.jahr  = parseInt(mDate[3], 10);
+      } else missing.push("Zeitraum");
+
+      // Gesamtverbrauch: "Verbrauch 177,700 kWh" (kein Doppelpunkt davor)
+      const mGes = text.match(/(?<![:\w])Verbrauch\s+([\d.,]+)\s+kWh/);
+      if (mGes) results.gesamt = num(mGes[1]);
+      else missing.push("Verbrauch");
+
+      // PV-Strom: nur Menge (kWh) – Preis wird aus Brutto-Zwischensumme berechnet
+      const mPV = text.match(/PV-Strom[\s\S]{5,80}?([\d.,]+)\s+kWh\s+[\d.,]+\s+ct\/kWh/);
+      if (mPV) results.solar = num(mPV[1]);
+      else missing.push("PV-Strom");
+
+      // Brutto-Zwischensummen: Muster "Zwischensumme X  <netto> €  <ust> €  <brutto>"
+      const mNetzB = text.match(/Zwischensumme Netzstrom\s+[\d.,]+\s+\S+\s+[\d.,]+\s+\S+\s+([\d.,]+)/);
+      const mPVB   = text.match(/Zwischensumme Photovoltaik\s+[\d.,]+\s+\S+\s+[\d.,]+\s+\S+\s+([\d.,]+)/);
+      const mGPB   = text.match(/Zwischensumme Grundpreis\s+[\d.,]+\s+\S+\s+[\d.,]+\s+\S+\s+([\d.,]+)/);
+
+      // Solarpreis brutto = PV-Brutto / Solar-kWh
+      if (mPVB && results.solar) {
+        results.solarpreis = Math.round(num(mPVB[1]) / results.solar * 10000) / 10000;
+      } else missing.push("Solarpreis");
+
+      // Effektiver Netzpreis brutto = Netzstrom-Brutto / Netzanteil-kWh
+      if (mNetzB && results.gesamt != null && results.solar != null) {
+        const netzKwh = results.gesamt - results.solar;
+        if (netzKwh > 0) results.netzpreis = Math.round(num(mNetzB[1]) / netzKwh * 1000) / 1000;
+      }
+      if (!results.netzpreis) missing.push("Netzpreis");
+
+      // Grundpreis brutto
+      if (mGPB) results.grundpreis = num(mGPB[1]);
+      else missing.push("Grundpreis");
+
+      return { results, missing };
+    }
+
+    async function handlePdfImport(file) {
+      if (!file) return;
+      const btn = document.getElementById("btnPdfImport");
+      btn.textContent = "⏳ Lese…";
+      btn.disabled = true;
+
+      try {
+        const buffer = await file.arrayBuffer();
+        const text   = await extractPdfText(buffer);
+        const { results, missing } = parseInvoiceText(text);
+
+        let filled = 0;
+
+        if (results.jahr != null) {
+          const sel = document.getElementById("yearSelect");
+          if ([...sel.options].some(o => parseInt(o.value) === results.jahr)) {
+            sel.value = results.jahr;
+            editYear  = results.jahr;
+            filled++;
+          }
+        }
+        if (results.monat != null) {
+          document.getElementById("monthSelect").value = results.monat;
+          editMonth = results.monat;
+          filled++;
+        }
+        if (results.gesamt != null) {
+          document.getElementById("gesamt").value = results.gesamt;
+          filled++;
+        }
+        if (results.solar != null) {
+          document.getElementById("solar").value = results.solar;
+          filled++;
+        }
+        if (results.netzpreis != null) {
+          document.getElementById("netzpreis").value = results.netzpreis;
+          filled++;
+        }
+        if (results.solarpreis != null) {
+          document.getElementById("solarpreis").value = results.solarpreis;
+          filled++;
+        }
+        if (results.grundpreis != null) {
+          document.getElementById("grundpreis").value = results.grundpreis;
+          filled++;
+        }
+
+        initMonthSelect();
+        updatePreview();
+
+        if (missing.length === 0) {
+          showToast(`✅ ${filled} Felder eingelesen – bitte prüfen und speichern`);
+        } else {
+          showToast(`⚠️ Teilweise eingelesen (fehlend: ${missing.join(", ")})`);
+        }
+      } catch (e) {
+        if (e.message !== "PDF.js load failed") {
+          showToast("❌ Rechnung konnte nicht gelesen werden");
+        }
+      } finally {
+        btn.textContent = "📄 Rechnung einlesen";
+        btn.disabled = false;
+        document.getElementById("pdfInput").value = "";
+      }
+    }
+
+    // ─── Alles aktualisieren ──────────────────────────────────────────────────
+    function updateAll() {
+      initYearButtons();
+      const rows = buildTable();
+      updateYearReport(rows);
+      updateCharts(rows);
+    }
+
+    // ─── Events ──────────────────────────────────────────────────────────────
+    window.addEventListener("load", () => {
+      loadStorage();
+      initYearSelect();
+      initMonthSelect();
+      initCharts();
+      loadEditMonthIntoInputs();
+
+      ["gesamt","solar","netzpreis","solarpreis","grundpreis"].forEach(id => {
+        document.getElementById(id).addEventListener("input", () => updatePreview(false));
+      });
+      ["gesamt","solar"].forEach(id => {
+        document.getElementById(id).addEventListener("blur", () => updatePreview(true));
+      });
+
+      document.getElementById("yearSelect").addEventListener("change", e => {
+        editYear = parseInt(e.target.value, 10);
+        initMonthSelect();
+        loadEditMonthIntoInputs();
+      });
+
+      document.getElementById("monthSelect").addEventListener("change", e => {
+        editMonth = parseInt(e.target.value, 10);
+        loadEditMonthIntoInputs();
+      });
+
+      document.getElementById("btnPdfImport").addEventListener("click", () => {
+        document.getElementById("pdfInput").value = "";
+        document.getElementById("pdfInput").click();
+      });
+      document.getElementById("pdfInput").addEventListener("change", e => handlePdfImport(e.target.files[0]));
+
+      document.getElementById("btnSave").addEventListener("click", saveMonth);
+      document.getElementById("btnDelete").addEventListener("click", deleteMonth);
+      document.getElementById("btnSaveSettings").addEventListener("click", saveSettings);
+
+      document.getElementById("btnExport").addEventListener("click", exportData);
+      document.getElementById("btnExportCSV").addEventListener("click", exportCSV);
+      document.getElementById("btnImport").addEventListener("click", () => {
+        document.getElementById("importInput").value = "";
+        document.getElementById("importInput").click();
+      });
+      document.getElementById("importInput").addEventListener("change", e => importData(e.target.files[0]));
+
+      document.getElementById("modeSolar").addEventListener("click",  () => setCostMode("solar"));
+      document.getElementById("modeNetz").addEventListener("click",   () => setCostMode("netz"));
+      document.getElementById("modeGesamt").addEventListener("click", () => setCostMode("gesamt"));
+
+      // Keyboard-Unterstützung für Icon-Buttons
+      ["modeSolar","modeNetz","modeGesamt"].forEach(id => {
+        document.getElementById(id).addEventListener("keydown", e => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            document.getElementById(id).click();
+          }
+        });
+      });
+
+      setCostMode(costMode);
+      updateAll();
+    });
+  </script>
+</body>
+</html>
