@@ -1129,8 +1129,8 @@
       const results = {};
       const missing = [];
 
-      // Lieferzeitraum → erster vollständiger Datumsstring mit Jahr
-      const mDate = text.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+      // Lieferzeitraum: Datumsbereich "DD.MM.YYYY - DD.MM.YYYY" (nicht das Rechnungsdatum)
+      const mDate = text.match(/(\d{2})\.(\d{2})\.(\d{4})\s*[-–]\s*\d{2}\.\d{2}\.\d{4}/);
       if (mDate) {
         results.monat = parseInt(mDate[2], 10) - 1;
         results.jahr  = parseInt(mDate[3], 10);
