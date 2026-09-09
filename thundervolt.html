@@ -398,7 +398,9 @@
             <div class="card-title">Monatsdaten</div>
             <div class="card-sub">Jahr, Monat und Verbrauchsdaten eingeben</div>
           </div>
+          <button class="secondary" id="btnPdfImport" style="font-size:0.78rem;padding:5px 10px;white-space:nowrap;" aria-label="Rechnung als PDF einlesen">📄 Rechnung einlesen</button>
         </div>
+        <input type="file" id="pdfInput" accept=".pdf" style="display:none" aria-hidden="true">
 
         <div class="row2">
           <div>
@@ -1094,6 +1096,142 @@
       chartCostStack.update();
     }
 
+    // ─── PDF-Rechnungsimport ─────────────────────────────────────────────────
+    let _pdfjsLib = null;
+
+    async function loadPdfJs() {
+      if (_pdfjsLib) return _pdfjsLib;
+      try {
+        _pdfjsLib = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs");
+        _pdfjsLib.GlobalWorkerOptions.workerSrc =
+          "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs";
+        return _pdfjsLib;
+      } catch (e) {
+        showToast("⚠️ PDF.js konnte nicht geladen werden (Internetverbindung prüfen)");
+        throw e;
+      }
+    }
+
+    async function extractPdfText(arrayBuffer) {
+      const lib = await loadPdfJs();
+      const pdf = await lib.getDocument({ data: arrayBuffer }).promise;
+      let text = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const tc   = await page.getTextContent();
+        text += tc.items.map(it => it.str).join(" ") + "\n";
+      }
+      return text;
+    }
+
+    function parseInvoiceText(text) {
+      const num = s => parseFloat(s.replace(/\./g, "").replace(",", "."));
+      const results = {};
+      const missing = [];
+
+      // Lieferzeitraum → erster vollständiger Datumsstring mit Jahr
+      const mDate = text.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+      if (mDate) {
+        results.monat = parseInt(mDate[2], 10) - 1;
+        results.jahr  = parseInt(mDate[3], 10);
+      } else missing.push("Zeitraum");
+
+      // Gesamtverbrauch: "Verbrauch 177,700 kWh" (kein Doppelpunkt davor)
+      const mGes = text.match(/(?<![:\w])Verbrauch\s+([\d.,]+)\s+kWh/);
+      if (mGes) results.gesamt = num(mGes[1]);
+      else missing.push("Verbrauch");
+
+      // PV-Strom: Menge (kWh) und Preis (ct/kWh)
+      const mPV = text.match(/PV-Strom[\s\S]{5,80}?([\d.,]+)\s+kWh\s+([\d.,]+)\s+ct\/kWh/);
+      if (mPV) {
+        results.solar      = num(mPV[1]);
+        results.solarpreis = Math.round(num(mPV[2]) / 100 * 10000) / 10000;
+      } else missing.push("PV-Strom");
+
+      // Grundpreis €/Monat (erstes Vorkommen)
+      const mGP = text.match(/([\d.,]+)\s+€\/Monat/);
+      if (mGP) results.grundpreis = num(mGP[1]);
+      else missing.push("Grundpreis");
+
+      // Effektiver Netzpreis: Zwischensumme Netzstrom / Netzanteil-kWh
+      const mNetz = text.match(/Zwischensumme Netzstrom\s+([\d.,]+)/);
+      if (mNetz && results.gesamt != null && results.solar != null) {
+        const netzKwh = results.gesamt - results.solar;
+        if (netzKwh > 0) {
+          results.netzpreis = Math.round(num(mNetz[1]) / netzKwh * 1000) / 1000;
+        }
+      }
+      if (!results.netzpreis) missing.push("Netzpreis");
+
+      return { results, missing };
+    }
+
+    async function handlePdfImport(file) {
+      if (!file) return;
+      const btn = document.getElementById("btnPdfImport");
+      btn.textContent = "⏳ Lese…";
+      btn.disabled = true;
+
+      try {
+        const buffer = await file.arrayBuffer();
+        const text   = await extractPdfText(buffer);
+        const { results, missing } = parseInvoiceText(text);
+
+        let filled = 0;
+
+        if (results.jahr != null) {
+          const sel = document.getElementById("yearSelect");
+          if ([...sel.options].some(o => parseInt(o.value) === results.jahr)) {
+            sel.value = results.jahr;
+            editYear  = results.jahr;
+            filled++;
+          }
+        }
+        if (results.monat != null) {
+          document.getElementById("monthSelect").value = results.monat;
+          editMonth = results.monat;
+          filled++;
+        }
+        if (results.gesamt != null) {
+          document.getElementById("gesamt").value = results.gesamt;
+          filled++;
+        }
+        if (results.solar != null) {
+          document.getElementById("solar").value = results.solar;
+          filled++;
+        }
+        if (results.netzpreis != null) {
+          document.getElementById("netzpreis").value = results.netzpreis;
+          filled++;
+        }
+        if (results.solarpreis != null) {
+          document.getElementById("solarpreis").value = results.solarpreis;
+          filled++;
+        }
+        if (results.grundpreis != null) {
+          document.getElementById("grundpreis").value = results.grundpreis;
+          filled++;
+        }
+
+        initMonthSelect();
+        updatePreview();
+
+        if (missing.length === 0) {
+          showToast(`✅ ${filled} Felder eingelesen – bitte prüfen und speichern`);
+        } else {
+          showToast(`⚠️ Teilweise eingelesen (fehlend: ${missing.join(", ")})`);
+        }
+      } catch (e) {
+        if (e.message !== "PDF.js load failed") {
+          showToast("❌ Rechnung konnte nicht gelesen werden");
+        }
+      } finally {
+        btn.textContent = "📄 Rechnung einlesen";
+        btn.disabled = false;
+        document.getElementById("pdfInput").value = "";
+      }
+    }
+
     // ─── Alles aktualisieren ──────────────────────────────────────────────────
     function updateAll() {
       initYearButtons();
@@ -1127,6 +1265,12 @@
         editMonth = parseInt(e.target.value, 10);
         loadEditMonthIntoInputs();
       });
+
+      document.getElementById("btnPdfImport").addEventListener("click", () => {
+        document.getElementById("pdfInput").value = "";
+        document.getElementById("pdfInput").click();
+      });
+      document.getElementById("pdfInput").addEventListener("change", e => handlePdfImport(e.target.files[0]));
 
       document.getElementById("btnSave").addEventListener("click", saveMonth);
       document.getElementById("btnDelete").addEventListener("click", deleteMonth);
