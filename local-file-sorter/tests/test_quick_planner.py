@@ -69,16 +69,104 @@ def test_recognised_commands(cmd: str) -> None:
 
 
 @pytest.mark.parametrize("cmd", [
-    "sortiere nach Datum",
-    "nach Größe sortieren",
     "älteste Dateien zuerst",
-    "alphabetisch ordnen",
-    "sort by name",
+    "wichtigste zuerst",
     "Bilder nach Inhalt sortieren",
+    "räume auf",
 ])
 def test_unrecognised_commands_return_none(cmd: str) -> None:
     plan = try_quick_plan(cmd, FILES, TARGET)
     assert plan is None, f"Expected None for: {cmd!r}"
+
+
+# ---------------------------------------------------------------------------
+# Date-based planner
+# ---------------------------------------------------------------------------
+
+def _dated_files() -> list[FileInfo]:
+    return [
+        FileInfo(path=TARGET / "a.txt", name="a.txt", extension=".txt",
+                 size_bytes=100, created=datetime(2024, 3, 5), modified=datetime(2024, 3, 5),
+                 is_dir=False),
+        FileInfo(path=TARGET / "b.txt", name="b.txt", extension=".txt",
+                 size_bytes=100, created=datetime(2024, 11, 20), modified=datetime(2024, 11, 20),
+                 is_dir=False),
+        FileInfo(path=TARGET / "c.txt", name="c.txt", extension=".txt",
+                 size_bytes=100, created=datetime(2025, 1, 2), modified=datetime(2025, 1, 2),
+                 is_dir=False),
+    ]
+
+
+@pytest.mark.parametrize("cmd", [
+    "sortiere nach Datum", "sort by date", "nach Jahr sortieren", "sort by year",
+])
+def test_date_year_recognised(cmd: str) -> None:
+    plan = try_quick_plan(cmd, _dated_files(), TARGET)
+    assert plan is not None
+    folders = {a.destination.name for a in plan.actions if a.op_type == OpType.create_folder}
+    assert folders == {"2024", "2025"}
+
+
+@pytest.mark.parametrize("cmd", ["nach Monat sortieren", "sort by month"])
+def test_date_month_granularity(cmd: str) -> None:
+    plan = try_quick_plan(cmd, _dated_files(), TARGET)
+    assert plan is not None
+    folders = {a.destination.name for a in plan.actions if a.op_type == OpType.create_folder}
+    assert folders == {"2024-03", "2024-11", "2025-01"}
+
+
+# ---------------------------------------------------------------------------
+# Size-based planner
+# ---------------------------------------------------------------------------
+
+def _sized_files() -> list[FileInfo]:
+    return [
+        FileInfo(path=TARGET / "small.txt", name="small.txt", extension=".txt",
+                 size_bytes=500, created=datetime(2024, 1, 1), modified=datetime(2024, 1, 1),
+                 is_dir=False),
+        FileInfo(path=TARGET / "mid.bin", name="mid.bin", extension=".bin",
+                 size_bytes=10_000_000, created=datetime(2024, 1, 1), modified=datetime(2024, 1, 1),
+                 is_dir=False),
+        FileInfo(path=TARGET / "big.iso", name="big.iso", extension=".iso",
+                 size_bytes=500_000_000, created=datetime(2024, 1, 1), modified=datetime(2024, 1, 1),
+                 is_dir=False),
+    ]
+
+
+@pytest.mark.parametrize("cmd", ["nach Größe sortieren", "sort by size"])
+def test_size_recognised(cmd: str) -> None:
+    plan = try_quick_plan(cmd, _sized_files(), TARGET)
+    assert plan is not None
+    folders = {a.destination.name for a in plan.actions if a.op_type == OpType.create_folder}
+    assert folders == {"Klein (unter 1 MB)", "Mittel (1-100 MB)", "Groß (über 100 MB)"}
+
+
+# ---------------------------------------------------------------------------
+# Alphabetical planner
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("cmd", ["alphabetisch ordnen", "sort by name", "sortiere nach Namen"])
+def test_alphabetical_recognised(cmd: str) -> None:
+    plan = try_quick_plan(cmd, FILES, TARGET)
+    assert plan is not None
+    folders = {a.destination.name for a in plan.actions if a.op_type == OpType.create_folder}
+    # report.pdf, photo.jpg, notes.txt, data.csv, image.jpg
+    assert folders == {"R", "P", "N", "D", "I"}
+
+
+def test_alphabetical_digit_and_symbol_buckets() -> None:
+    files = [
+        FileInfo(path=TARGET / "1file.txt", name="1file.txt", extension=".txt",
+                 size_bytes=10, created=datetime(2024, 1, 1), modified=datetime(2024, 1, 1),
+                 is_dir=False),
+        FileInfo(path=TARGET / "_hidden.txt", name="_hidden.txt", extension=".txt",
+                 size_bytes=10, created=datetime(2024, 1, 1), modified=datetime(2024, 1, 1),
+                 is_dir=False),
+    ]
+    plan = try_quick_plan("alphabetisch sortieren", files, TARGET)
+    assert plan is not None
+    folders = {a.destination.name for a in plan.actions if a.op_type == OpType.create_folder}
+    assert folders == {"0-9", "Sonstige"}
 
 
 # ---------------------------------------------------------------------------

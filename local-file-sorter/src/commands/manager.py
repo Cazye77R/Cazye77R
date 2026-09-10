@@ -31,6 +31,7 @@ class CommandMeta:
     slug: str
     description: str
     created_at: str
+    target_folder: str = ""
 
 
 @dataclass
@@ -40,6 +41,7 @@ class Command:
     prompt_text: str = ""
     default_recursive: bool = False
     created_at: str = ""
+    target_folder: str = ""   # optional – makes this a full "Regelprofil"
 
 
 class CommandManager:
@@ -59,6 +61,7 @@ class CommandManager:
                     slug=path.stem,
                     description=data.get("description", ""),
                     created_at=str(data.get("created_at", "")),
+                    target_folder=data.get("target_folder", ""),
                 ))
             except Exception:
                 continue
@@ -73,6 +76,7 @@ class CommandManager:
             prompt_text=data.get("prompt_text", ""),
             default_recursive=bool(data.get("default_recursive", False)),
             created_at=str(data.get("created_at", "")),
+            target_folder=data.get("target_folder", ""),
         )
 
     def save_command(self, command: Command) -> Path:
@@ -86,6 +90,7 @@ class CommandManager:
             "prompt_text":       command.prompt_text,
             "default_recursive": command.default_recursive,
             "created_at":        command.created_at,
+            "target_folder":     command.target_folder,
         }
         path.write_text(
             yaml.dump(payload, allow_unicode=True, default_flow_style=False),

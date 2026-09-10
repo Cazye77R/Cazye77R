@@ -34,6 +34,7 @@ class OperationLogger:
                 "destination": str(result.destination_final),
                 "status": status,
                 "error": result.error,
+                "is_duplicate": result.is_duplicate,
             }
         )
 

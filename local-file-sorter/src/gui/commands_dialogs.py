@@ -19,15 +19,17 @@ class SaveCommandDialog(ctk.CTkToplevel):
         cmd_mgr: CommandManager,
         prompt_text: str = "",
         recursive: bool = False,
+        target_folder: str = "",
         on_saved: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(parent)
-        self._cmd_mgr  = cmd_mgr
-        self._prompt   = prompt_text
-        self._on_saved = on_saved
+        self._cmd_mgr      = cmd_mgr
+        self._prompt       = prompt_text
+        self._target_folder = target_folder
+        self._on_saved     = on_saved
 
         self.title("Befehl speichern")
-        self.geometry("480x290")
+        self.geometry("480x330")
         self.resizable(False, False)
         self.configure(fg_color=theme.BG_DEEP)
         self.grab_set()
@@ -52,6 +54,23 @@ class SaveCommandDialog(ctk.CTkToplevel):
         ctk.CTkCheckBox(rec_row, text="", variable=self._rec_var,
                         fg_color=theme.ACCENT_PRIMARY,
                         checkmark_color=theme.BG_DEEP).pack(side="right")
+
+        folder_row = ctk.CTkFrame(self, fg_color="transparent")
+        folder_row.pack(fill="x", padx=24, pady=6)
+        label = "Zielordner mit speichern (Regelprofil)"
+        if not self._target_folder:
+            label += " – kein Ordner gewählt"
+        ctk.CTkLabel(folder_row, text=label,
+                     text_color=theme.TEXT if self._target_folder else theme.TEXT_MUTED,
+                     font=theme.FONT_BODY, wraplength=300, justify="left",
+                     ).pack(side="left")
+        self._folder_var = ctk.BooleanVar(value=bool(self._target_folder))
+        folder_cb = ctk.CTkCheckBox(folder_row, text="", variable=self._folder_var,
+                        fg_color=theme.ACCENT_PRIMARY,
+                        checkmark_color=theme.BG_DEEP)
+        folder_cb.pack(side="right")
+        if not self._target_folder:
+            folder_cb.configure(state="disabled")
 
         btn_row = ctk.CTkFrame(self, fg_color="transparent")
         btn_row.pack(fill="x", padx=24, pady=(16, 12))
@@ -81,6 +100,7 @@ class SaveCommandDialog(ctk.CTkToplevel):
             description=self._desc_var.get().strip(),
             prompt_text=self._prompt,
             default_recursive=self._rec_var.get(),
+            target_folder=self._target_folder if self._folder_var.get() else "",
         )
         try:
             self._cmd_mgr.save_command(cmd)
@@ -161,11 +181,16 @@ class ManageCommandsDialog(ctk.CTkToplevel):
 
         info = ctk.CTkFrame(card, fg_color="transparent")
         info.grid(row=0, column=0, sticky="ew", padx=12, pady=8)
-        ctk.CTkLabel(info, text=meta.name, font=theme.FONT_MONO_BOLD,
+        name_text = f"📁  {meta.name}" if meta.target_folder else meta.name
+        ctk.CTkLabel(info, text=name_text, font=theme.FONT_MONO_BOLD,
                      text_color=theme.TEXT, anchor="w").pack(anchor="w")
         if meta.description:
             ctk.CTkLabel(info, text=meta.description, font=theme.FONT_MONO_SM,
                          text_color=theme.TEXT_MUTED, anchor="w").pack(anchor="w")
+        if meta.target_folder:
+            ctk.CTkLabel(info, text=f"Regelprofil → {meta.target_folder}",
+                         font=theme.FONT_MONO_SM, text_color=theme.ACCENT_DIM,
+                         anchor="w").pack(anchor="w")
 
         btns = ctk.CTkFrame(card, fg_color="transparent")
         btns.grid(row=0, column=1, padx=8, pady=8)

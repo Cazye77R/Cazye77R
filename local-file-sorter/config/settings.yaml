@@ -26,3 +26,6 @@ vision:
     - .gif
     - .bmp
     - .webp
+
+watcher:
+  poll_interval_seconds: 5

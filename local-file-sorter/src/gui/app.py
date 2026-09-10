@@ -206,6 +206,7 @@ class SorterApp(ctk.CTk):
         self._last_log_path: Path | None = self._find_latest_log()
         self._busy = False
         self._vision_mode = False
+        self._watcher = None
 
         # Animation engine (created before UI so widgets can register)
         self._engine  = AnimationEngine(self._cfg)
@@ -228,6 +229,13 @@ class SorterApp(ctk.CTk):
         # Block Enter from triggering execution
         self.bind_all("<Return>",   lambda e: "break" if self._busy else None)
         self.bind_all("<KP_Enter>", lambda e: "break" if self._busy else None)
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self) -> None:
+        if self._watcher is not None:
+            self._watcher.stop()
+        self.destroy()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -392,6 +400,11 @@ class SorterApp(ctk.CTk):
                       command=self._open_log_viewer,
                       **theme.btn_ghost()).pack(side="left", padx=(10, 0))
 
+        self._watch_btn = ctk.CTkButton(row, text="👁  Watcher starten", width=180,
+                                         command=self._on_toggle_watcher,
+                                         **theme.btn_ghost())
+        self._watch_btn.pack(side="left", padx=(10, 0))
+
     def _build_activity_log(self) -> None:
         card = ctk.CTkFrame(self, **theme.card())
         card.grid(row=5, column=0, sticky="ew", padx=16, pady=(0, 4))
@@ -530,9 +543,18 @@ class SorterApp(ctk.CTk):
     # Event handlers
     # ------------------------------------------------------------------
 
+    def _stop_watcher_if_running(self, reason: str) -> None:
+        if self._watcher is not None and self._watcher.is_running:
+            self._watcher.stop()
+            self._watcher = None
+            self._watch_btn.configure(text="👁  Watcher starten",
+                                       fg_color=theme.SURFACE_HI, text_color=theme.TEXT)
+            self._log(f"Ordner-Watcher gestoppt ({reason}).")
+
     def _choose_folder(self) -> None:
         folder = filedialog.askdirectory(title="Zielverzeichnis wählen")
         if folder:
+            self._stop_watcher_if_running("Ordner gewechselt")
             self._folder = Path(folder)
             self._path_label.configure(text=str(self._folder),
                                         text_color=theme.TEXT)
@@ -570,6 +592,15 @@ class SorterApp(ctk.CTk):
         self._cmd_box.delete("1.0", "end")
         self._cmd_box.insert("end", cmd.prompt_text)
         self._recursive_var.set(cmd.default_recursive)
+        if cmd.target_folder:
+            folder = Path(cmd.target_folder)
+            if folder.is_dir():
+                self._stop_watcher_if_running("Regelprofil geladen")
+                self._folder = folder
+                self._path_label.configure(text=str(folder), text_color=theme.TEXT)
+                self._log(f"Regelprofil geladen: Zielordner → {folder}")
+            else:
+                self._log(f"⚠ Regelprofil-Ordner nicht gefunden: {folder}")
 
     def _open_save_command_dialog(self) -> None:
         from src.gui.commands_dialogs import SaveCommandDialog
@@ -577,6 +608,7 @@ class SorterApp(ctk.CTk):
             self, self._cmd_mgr,
             prompt_text=self._cmd_box.get("1.0", "end").strip(),
             recursive=self._recursive_var.get(),
+            target_folder=str(self._folder) if self._folder else "",
             on_saved=self._refresh_command_dropdown,
         )
 
@@ -783,6 +815,61 @@ class SorterApp(ctk.CTk):
             color=color, progress=1.0)
         self._set_engine_state(AnimState.SUCCESS)
         self.after(600, lambda: self._set_engine_state(AnimState.IDLE))
+
+    # ------------------------------------------------------------------
+    # Folder watcher
+    # ------------------------------------------------------------------
+
+    def _on_toggle_watcher(self) -> None:
+        if self._watcher is not None and self._watcher.is_running:
+            self._watcher.stop()
+            self._watcher = None
+            self._watch_btn.configure(text="👁  Watcher starten",
+                                       fg_color=theme.SURFACE_HI, text_color=theme.TEXT)
+            self._log("Ordner-Watcher gestoppt.")
+            return
+
+        if self._folder is None or not self._folder.is_dir():
+            self._set_status("⚠  Kein gültiger Ordner für Watcher gewählt.", color=theme.WARNING)
+            return
+
+        from src.core.watcher import FolderWatcher
+        interval = self._cfg.get("watcher", {}).get("poll_interval_seconds", 5)
+        self._watcher = FolderWatcher(
+            folder=self._folder,
+            on_new_files=self._on_watcher_new_files,
+            recursive=self._recursive_var.get(),
+            poll_interval=interval,
+        )
+        self._watcher.start()
+        self._watch_btn.configure(text="⏹  Watcher stoppen",
+                                   fg_color=theme.ACCENT_PRIMARY, text_color=theme.BG_DEEP)
+        self._log(f"Ordner-Watcher gestartet: {self._folder}  (alle {interval}s)")
+
+    def _on_watcher_new_files(self, new_files: list) -> None:
+        """Called from the watcher's background thread — marshal to the main thread."""
+        self.after(0, lambda: self._handle_watcher_new_files(new_files))
+
+    def _handle_watcher_new_files(self, new_files: list) -> None:
+        if not self.winfo_exists():
+            return
+        n = len(new_files)
+        self._log(f"🔔 Watcher: {n} neue Datei(en) erkannt.")
+
+        if self._busy:
+            self._log("Watcher: übersprungen (Programm gerade beschäftigt).")
+            return
+        if self._vision_mode:
+            self._log("Watcher: Vision-Modus aktiv – bitte manuell 'Plan generieren' klicken.")
+            return
+        command = self._cmd_box.get("1.0", "end").strip()
+        if not command:
+            self._log("Watcher: kein Befehl gesetzt – bitte manuell 'Plan generieren' klicken.")
+            return
+
+        self._set_status(f"👁  Watcher: {n} neue Datei(en) – erstelle Plan …",
+                         color=theme.ACCENT_PRIMARY)
+        self._on_generate_plan()
 
     # ------------------------------------------------------------------
     # Undo

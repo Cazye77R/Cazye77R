@@ -126,11 +126,58 @@ Beim ersten Start erscheint die Boot-Sequenz (ESC oder Klick zum Überspringen).
 5. **Bestätigen** – `✓ Ausführen` klicken; Bestätigungs-Dialog erscheint
 6. **Undo** – `↩ Undo letzte Session` macht alle Moves der letzten Session rückgängig
 
-### Gespeicherte Befehle
+### Schnellpläne (ohne LLM)
+
+Für gängige Sortiermuster erkennt das Programm den Befehl per Stichwort und erstellt
+den Plan sofort in Python – **ohne Ollama-Aufruf**. Das spart bei einfachen Anfragen
+mehrere Minuten Wartezeit. Erkannte Muster:
+
+| Befehl enthält (DE/EN) | Ergebnis |
+|------------------------|----------|
+| „Endung", „Dateityp", „Format", "extension", "type" | Ein Ordner pro Dateiendung (`PDF/`, `JPG/`, …) |
+| „Datum", „Jahr", "date", "year" | Ein Ordner pro Jahr (`2024/`, `2025/`, …) |
+| „Monat", "month" | Ein Ordner pro Jahr-Monat (`2024-11/`, …) |
+| „Größe", "size" | Klein (< 1 MB) / Mittel (1–100 MB) / Groß (> 100 MB) |
+| „alphabetisch", "by name" | Ein Ordner pro Anfangsbuchstabe (`A/`, `B/`, `0-9/`, …) |
+
+Passt kein Muster, läuft die Anfrage wie gewohnt über das LLM. Im Aktivitätslog
+erscheint bei einem Schnellplan `Schnellplan (kein LLM-Aufruf)`.
+
+### Vorschau-Baum & Duplikat-Erkennung
+
+Die Preview zeigt die Aktionen gruppiert als Baum: jeder Zielordner ist ein
+aufklappbarer Knoten, darunter die einzelnen Dateien, die dorthin verschoben werden
+(„Vorher → Nachher"). Existiert am Ziel bereits eine Datei mit demselben Namen:
+
+- **Identischer Inhalt** (Größe + SHA256-Hash gleich) → gilt als **Duplikat** und
+  landet automatisch in einem `_Duplikate/`-Unterordner statt überschrieben oder
+  umbenannt zu werden.
+- **Unterschiedlicher Inhalt** → die neue Datei wird wie bisher umbenannt
+  (`datei_1.txt`, `datei_2.txt`, …).
+
+Während der Ausführung zeigt eine Statuszeile die aktuell bearbeitete Datei sowie
+laufend Erfolge/Fehler/Duplikate.
+
+### Gespeicherte Befehle & Regelprofile
 
 - **💾 Speichern** – Aktuellen Befehl mit Namen speichern
-- **📂 Verwalten** – Befehle umbenennen oder entfernen
+- Häkchen „Zielordner mit speichern" macht daraus ein **Regelprofil**: Der aktuell
+  gewählte Ordner wird mit gespeichert. Beim erneuten Laden aus dem Dropdown werden
+  Befehl **und** Zielordner automatisch gesetzt – ein Klick auf `▶ PLAN GENERIEREN`
+  genügt.
+- **📂 Verwalten** – Befehle umbenennen oder entfernen (Regelprofile sind mit 📁
+  gekennzeichnet)
 - Befehle werden als YAML in `config/commands/` gespeichert
+
+### Ordner-Watcher
+
+`👁 Watcher starten` beobachtet den gewählten Ordner im Hintergrund (Polling,
+Standard-Intervall 5 s, konfigurierbar in `config/settings.yaml` unter
+`watcher.poll_interval_seconds`). Erscheinen neue Dateien, wird automatisch mit dem
+aktuellen Befehl ein Plan erstellt und die Vorschau geöffnet – **verschoben wird
+weiterhin erst nach expliziter Bestätigung**, wie bei jedem anderen Plan. Der
+Watcher stoppt automatisch, sobald ein anderer Ordner gewählt oder das Fenster
+geschlossen wird.
 
 ### Dry-Run-Modus
 
@@ -252,15 +299,17 @@ local-file-sorter/
 ├── src/
 │   ├── core/
 │   │   ├── scanner.py             # Verzeichnis-Scanner
-│   │   ├── mover.py               # move_file, resolve_conflict, is_safe_destination
+│   │   ├── mover.py               # move_file, resolve_conflict, is_duplicate, is_safe_destination
 │   │   ├── logger.py              # OperationLogger (JSON-Lines)
-│   │   └── undo.py                # Session-Undo
+│   │   ├── undo.py                # Session-Undo
+│   │   └── watcher.py             # FolderWatcher (Polling, meldet neue Dateien)
 │   ├── llm/
 │   │   ├── schemas.py             # SortPlan, SortAction, OpType
 │   │   ├── prompts.py             # System-Prompt + few-shot Beispiele
+│   │   ├── quick_planner.py       # Deterministische Schnellpläne ohne LLM
 │   │   └── ollama_client.py       # OllamaClient + validate_plan
 │   ├── commands/
-│   │   └── manager.py             # CommandManager
+│   │   └── manager.py             # CommandManager (inkl. Regelprofile: target_folder)
 │   └── gui/
 │       ├── theme.py
 │       ├── app.py
@@ -273,7 +322,11 @@ local-file-sorter/
     ├── test_path_safety.py
     ├── test_name_conflict.py
     ├── test_undo_roundtrip.py
-    └── test_plan_validation.py
+    ├── test_plan_validation.py
+    ├── test_quick_planner.py
+    ├── test_duplicate_detection.py
+    ├── test_command_manager.py
+    └── test_folder_watcher.py
 ```
 
 ---
