@@ -3,15 +3,28 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { useWatchlistStore } from "@/store/watchlist-store";
-import { STOCKS } from "@/lib/mock-data";
+import { getAllStocks } from "@/lib/api/stocks";
 import StockCard from "@/components/stock/StockCard";
 
 export default function WatchlistPreview() {
-  const { tickers } = useWatchlistStore();
+  // Selectors: subscribe only to the slices this component actually uses.
+  const tickers = useWatchlistStore((s) => s.tickers);
+  const hasHydrated = useWatchlistStore((s) => s.hasHydrated);
   const stocks = tickers
-    .map((t) => STOCKS.find((s) => s.ticker === t))
+    .map((t) => getAllStocks().find((s) => s.ticker === t))
     .filter((s): s is NonNullable<typeof s> => s !== undefined)
     .slice(0, 3);
+
+  // Before rehydration completes, `tickers` is still the store's default
+  // seed list — render nothing rather than that placeholder list, to
+  // avoid a visible flash from (default 3 stocks) → (real watchlist).
+  if (!hasHydrated) {
+    return (
+      <div className="space-y-2" aria-hidden>
+        <div className="h-16 rounded-xl border border-border bg-surface animate-pulse" />
+      </div>
+    );
+  }
 
   if (!stocks.length) {
     return (

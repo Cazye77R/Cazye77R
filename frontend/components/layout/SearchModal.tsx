@@ -11,7 +11,7 @@ import {
   CommandItem,
 } from "cmdk";
 import { TrendingUp, TrendingDown, Star } from "lucide-react";
-import { STOCKS, TRENDING_STOCKS }        from "@/lib/mock-data";
+import { getAllStocks, getTrendingStocks } from "@/lib/api/stocks";
 import { formatPrice }                    from "@/lib/format";
 import { cn }                             from "@/lib/utils";
 import { useWatchlistStore }              from "@/store/watchlist-store";
@@ -22,7 +22,13 @@ export const OPEN_SEARCH_EVENT = "stockmind:open-search";
 export default function SearchModal() {
   const [open, setOpen] = useState(false);
   const router          = useRouter();
-  const { has }         = useWatchlistStore();
+  // Selector: subscribe to the tickers array (needed for membership
+  // checks below), not the whole store. A Set gives O(1) lookups per
+  // item instead of an O(n) `.includes()` scan for every row rendered.
+  const tickers         = useWatchlistStore((s) => s.tickers);
+  const watchlistSet    = new Set(tickers);
+  const stocks          = getAllStocks();
+  const trendingStocks  = getTrendingStocks();
 
   // Global keyboard shortcut + custom event listener
   useEffect(() => {
@@ -93,7 +99,7 @@ export default function SearchModal() {
             </span>
           }
         >
-          {TRENDING_STOCKS.slice(0, 3).map((s) => (
+          {trendingStocks.slice(0, 3).map((s) => (
             <SearchItem
               key={s.ticker}
               ticker={s.ticker}
@@ -101,7 +107,7 @@ export default function SearchModal() {
               logo={s.logo}
               price={s.price}
               changePercent={s.changePercent}
-              inWatchlist={has(s.ticker)}
+              inWatchlist={watchlistSet.has(s.ticker)}
               onSelect={navigate}
             />
           ))}
@@ -115,7 +121,7 @@ export default function SearchModal() {
             </span>
           }
         >
-          {STOCKS.map((s) => (
+          {stocks.map((s) => (
             <SearchItem
               key={s.ticker}
               ticker={s.ticker}
@@ -123,7 +129,7 @@ export default function SearchModal() {
               logo={s.logo}
               price={s.price}
               changePercent={s.changePercent}
-              inWatchlist={has(s.ticker)}
+              inWatchlist={watchlistSet.has(s.ticker)}
               onSelect={navigate}
             />
           ))}

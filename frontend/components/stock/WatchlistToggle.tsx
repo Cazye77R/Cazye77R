@@ -12,8 +12,10 @@ interface WatchlistToggleProps {
 }
 
 export default function WatchlistToggle({ ticker, className }: WatchlistToggleProps) {
-  const { has, toggle } = useWatchlistStore();
-  const inList = has(ticker);
+  // Selectors: only re-render when THIS ticker's membership changes, not
+  // on every watchlist mutation anywhere in the app.
+  const inList = useWatchlistStore((s) => s.tickers.includes(ticker));
+  const toggle = useWatchlistStore((s) => s.toggle);
 
   function handleClick() {
     toggle(ticker);

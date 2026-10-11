@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link         from "next/link";
 import { Plus, Trash2, ArrowUpDown } from "lucide-react";
 import { useWatchlistStore } from "@/store/watchlist-store";
-import { STOCKS }            from "@/lib/mock-data";
+import { getAllStocks }      from "@/lib/api/stocks";
 import type { Stock }        from "@/lib/types";
 import { formatPrice }       from "@/lib/format";
 import { cn }                from "@/lib/utils";
@@ -14,11 +14,15 @@ import { Button }            from "@/components/ui/button";
 type SortMode = "alpha" | "perf";
 
 export default function WatchlistPage() {
-  const { tickers, remove, clear } = useWatchlistStore();
+  // Selectors: subscribe only to the slices this page actually uses.
+  const tickers = useWatchlistStore((s) => s.tickers);
+  const hasHydrated = useWatchlistStore((s) => s.hasHydrated);
+  const remove = useWatchlistStore((s) => s.remove);
+  const clear = useWatchlistStore((s) => s.clear);
   const [sort, setSort] = useState<SortMode>("perf");
 
   const stocks = tickers
-    .map((t) => STOCKS.find((s) => s.ticker === t))
+    .map((t) => getAllStocks().find((s) => s.ticker === t))
     .filter((s): s is Stock => s !== undefined);
 
   const sorted = [...stocks].sort((a, b) =>
@@ -26,6 +30,18 @@ export default function WatchlistPage() {
       ? a.ticker.localeCompare(b.ticker)
       : b.changePercent - a.changePercent
   );
+
+  // Before rehydration completes, `tickers` is still the store's default
+  // seed list — render nothing rather than briefly showing that list or
+  // (worse) the "leer" empty-state for a watchlist that isn't actually empty.
+  if (!hasHydrated) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-6 space-y-2" aria-hidden>
+        <div className="h-20 rounded-xl border border-border bg-surface animate-pulse" />
+        <div className="h-20 rounded-xl border border-border bg-surface animate-pulse" />
+      </div>
+    );
+  }
 
   // ── Empty state ────────────────────────────────────────────────────────────
   if (tickers.length === 0) {

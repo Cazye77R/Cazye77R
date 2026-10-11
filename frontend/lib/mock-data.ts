@@ -7,6 +7,16 @@
 
 import type { Stock, Candle, Prediction, MarketOutlook, NewsItem } from "./types";
 
+// Fixed "current time" anchor for all mock data (candles, news timestamps).
+// Deliberately NOT Date.now(): a module-level Date.now() would be evaluated
+// once per bundle (server bundle and client bundle each at a different
+// wall-clock moment), causing a React hydration mismatch the first time
+// this module's output is rendered, and would freeze at whatever moment
+// the process/bundle happened to start rather than ever refreshing like a
+// real "time ago" label — misleadingly implying it's live. A fixed anchor
+// keeps every consumer byte-for-byte identical on server and client.
+const MOCK_NOW = new Date("2026-04-26T12:00:00Z");
+
 // ─── Seeded PRNG (mulberry32) ───────────────────────────────────────────────
 function seededRng(seed: number) {
   let s = seed;
@@ -25,7 +35,7 @@ function generateCandles(ticker: string, startPrice: number, drift = 0.0003): Ca
   const candles: Candle[] = [];
   let price = startPrice;
 
-  const today = new Date("2026-04-26");
+  const today = MOCK_NOW;
   for (let i = 89; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
@@ -224,7 +234,7 @@ export const NEWS: Record<string, NewsItem[]> = Object.fromEntries(
       ...n,
       id:          `${s.ticker}-news-${i}`,
       ticker:      s.ticker,
-      publishedAt: new Date(Date.now() - (i + 1) * 3_600_000 * (i + 2)).toISOString(),
+      publishedAt: new Date(MOCK_NOW.getTime() - (i + 1) * 3_600_000 * (i + 2)).toISOString(),
     })),
   ])
 );

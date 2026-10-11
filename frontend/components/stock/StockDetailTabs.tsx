@@ -30,7 +30,8 @@ const PredictionOverlay = dynamic(
 interface StockDetailTabsProps {
   stock:      Stock;
   candles:    Candle[];
-  prediction: Prediction;
+  /** Undefined when no AI prediction exists for this ticker/horizon. */
+  prediction: Prediction | undefined;
   news:       NewsItem[];
 }
 
@@ -84,17 +85,25 @@ export default function StockDetailTabs({
 
       {/* ── AI Signal ── */}
       <TabsContent value="prediction" className="space-y-4">
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs text-foreground-muted mb-3">
-            Kursverlauf + KI-Prognose (30 Tage)
-          </p>
-          <PredictionOverlay
-            candles={candles}
-            prediction={prediction}
-            ticker={stock.ticker}
-          />
-        </div>
-        <PredictionCard prediction={prediction} />
+        {prediction ? (
+          <>
+            <div className="rounded-xl border border-border bg-card p-4">
+              <p className="text-xs text-foreground-muted mb-3">
+                Kursverlauf + KI-Prognose (30 Tage)
+              </p>
+              <PredictionOverlay
+                candles={candles}
+                prediction={prediction}
+                ticker={stock.ticker}
+              />
+            </div>
+            <PredictionCard prediction={prediction} />
+          </>
+        ) : (
+          <div className="rounded-xl border border-border bg-surface p-6 text-center text-sm text-foreground-muted">
+            Für {stock.ticker} liegt aktuell keine KI-Prognose vor.
+          </div>
+        )}
       </TabsContent>
 
       {/* ── News ── */}

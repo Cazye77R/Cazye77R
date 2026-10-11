@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { STOCKS, TRENDING_STOCKS, MARKET_OUTLOOK } from "@/lib/mock-data";
+import { getAllStocks, getTrendingStocks, getMarketOutlook } from "@/lib/api/stocks";
 import MarketOutlookCard from "@/components/ai/MarketOutlookCard";
 import StockCard         from "@/components/stock/StockCard";
 import WatchlistPreview  from "@/components/home/WatchlistPreview";
@@ -8,6 +8,10 @@ import TopMovers         from "@/components/home/TopMovers";
 export const metadata: Metadata = { title: "Dashboard" };
 
 export default function HomePage() {
+  const stocks   = getAllStocks();
+  const trending = getTrendingStocks();
+  const outlook  = getMarketOutlook();
+
   return (
     <div className="mx-auto max-w-2xl px-4 py-6 space-y-8">
 
@@ -19,7 +23,7 @@ export default function HomePage() {
         >
           Marktlage
         </h2>
-        <MarketOutlookCard outlook={MARKET_OUTLOOK} />
+        <MarketOutlookCard outlook={outlook} />
       </section>
 
       {/* ── Watchlist preview ── */}
@@ -42,7 +46,7 @@ export default function HomePage() {
           Trending Now
         </h2>
         <div className="grid grid-cols-2 gap-3">
-          {TRENDING_STOCKS.slice(0, 4).map((s) => (
+          {trending.slice(0, 4).map((s) => (
             <StockCard key={s.ticker} stock={s} variant="trending" />
           ))}
         </div>
@@ -56,7 +60,7 @@ export default function HomePage() {
         >
           Top Movers
         </h2>
-        <TopMovers stocks={STOCKS} />
+        <TopMovers stocks={stocks} />
       </section>
 
     </div>

@@ -2,12 +2,13 @@
 
 import { useMemo, useState } from "react";
 import type { Stock } from "@/lib/types";
-import { STOCKS } from "@/lib/mock-data";
+import { getAllStocks } from "@/lib/api/stocks";
 import { Input }     from "@/components/ui/input";
 import { cn }        from "@/lib/utils";
 import StockList     from "@/components/stock/StockList";
 import { Search, ArrowUpDown } from "lucide-react";
 
+const STOCKS = getAllStocks();
 const SECTORS = Array.from(new Set(STOCKS.map((s) => s.sector))).sort();
 
 type SortKey = "name" | "price" | "change" | "marketCap" | "volume";

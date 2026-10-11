@@ -7,6 +7,7 @@ import TopHeader          from "@/components/layout/TopHeader";
 import BottomNav          from "@/components/layout/BottomNav";
 import PageTransition     from "@/components/layout/PageTransition";
 import SearchModal        from "@/components/layout/SearchModal";
+import WatchlistHydrator  from "@/components/layout/WatchlistHydrator";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -39,6 +40,8 @@ export default function RootLayout({
     >
       <body className="bg-background text-foreground">
         <ThemeProvider>
+          <WatchlistHydrator />
+
           {/* Global Cmd+K search modal */}
           <SearchModal />
 

@@ -103,13 +103,32 @@ export default function PriceChart({ candles, ticker }: PriceChartProps) {
 
   const color = isUp ? "#00FF88" : "#FF3B3B";
 
-  // Y-axis price domain with 3% padding
-  const closes = data.map((d) => d.close);
-  const priceMin = Math.min(...closes) * 0.97;
-  const priceMax = Math.max(...closes) * 1.03;
+  // Y-axis domains with padding. Memoized (was recomputed every render)
+  // and guarded against empty data: Math.min/max(...[]) is ±Infinity,
+  // which Recharts silently turns into a broken/invisible chart instead
+  // of erroring — currently unreachable since every mock ticker always
+  // has candle history, but a real backend could return a ticker with no
+  // (or partial) history.
+  const { priceMin, priceMax, volMax } = useMemo(() => {
+    if (data.length === 0) {
+      return { priceMin: 0, priceMax: 1, volMax: 1 };
+    }
+    const closes = data.map((d) => d.close);
+    const volumes = data.map((d) => d.volume);
+    return {
+      priceMin: Math.min(...closes) * 0.97,
+      priceMax: Math.max(...closes) * 1.03,
+      volMax: Math.max(...volumes) * 4, // volume bars in lower 25%
+    };
+  }, [data]);
 
-  const volumes = data.map((d) => d.volume);
-  const volMax = Math.max(...volumes) * 4; // volume bars in lower 25%
+  if (data.length === 0) {
+    return (
+      <div className="flex h-[340px] items-center justify-center rounded-xl border border-border bg-surface text-sm text-foreground-muted">
+        Keine Kursdaten für diesen Zeitraum verfügbar.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">
@@ -190,13 +209,16 @@ export default function PriceChart({ candles, ticker }: PriceChartProps) {
             isAnimationActive={false}
           />
 
-          {/* Price area */}
+          {/* Price area. strokeDasharray gives a non-color cue (solid =
+              up, dashed = down) alongside the green/red stroke, since the
+              line itself has no icon/text pairing like the badges do. */}
           <Area
             yAxisId="price"
             type="monotone"
             dataKey="close"
             stroke={color}
             strokeWidth={2}
+            strokeDasharray={isUp ? undefined : "6 3"}
             fill={`url(#price-grad-${ticker})`}
             dot={false}
             activeDot={{ r: 4, fill: color, stroke: "#0B0F1A", strokeWidth: 2 }}

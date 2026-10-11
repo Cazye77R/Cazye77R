@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound }   from "next/navigation";
-import { getStock, getCandles, getPrediction, NEWS } from "@/lib/mock-data";
+import { getStock, getCandles, getPrediction, getNews } from "@/lib/api/stocks";
 import { formatPrice } from "@/lib/format";
 import ChangeBadge     from "@/components/shared/ChangeBadge";
 import WatchlistToggle from "@/components/stock/WatchlistToggle";
@@ -31,8 +31,11 @@ export default async function StockPage({
   if (!stock) notFound();
 
   const candles    = getCandles(ticker);
-  const prediction = getPrediction(ticker, "30d")!;
-  const news       = NEWS[ticker] ?? [];
+  // No non-null assertion: a valid ticker can legitimately have no
+  // prediction for this horizon (e.g. not yet computed by a real
+  // backend). StockDetailTabs renders a fallback state when undefined.
+  const prediction = getPrediction(ticker, "30d");
+  const news       = getNews(ticker);
 
   const isUp = stock.changePercent >= 0;
 

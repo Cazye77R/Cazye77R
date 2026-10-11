@@ -1,11 +1,12 @@
 "use client";
 
+import { useMemo } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { formatPrice, formatLargeNumber } from "@/lib/format";
 import type { Stock } from "@/lib/types";
-import { getCandles } from "@/lib/mock-data";
+import { getCandles } from "@/lib/api/stocks";
 import GlowCard     from "@/components/shared/GlowCard";
 import ChangeBadge  from "@/components/shared/ChangeBadge";
 
@@ -30,7 +31,9 @@ export default function StockCard({
   variant = "compact",
   className,
 }: StockCardProps) {
-  const candles = getCandles(stock.ticker, 30);
+  // The same ticker is often rendered 2-3× across different sections
+  // (Trending/Watchlist/Top-Movers) — avoid re-slicing on every render.
+  const candles = useMemo(() => getCandles(stock.ticker, 30), [stock.ticker]);
   const isUp    = stock.changePercent >= 0;
 
   // ── Compact (Watchlist / list rows) ──────────────────────────────────────

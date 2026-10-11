@@ -131,17 +131,36 @@ export default function PredictionOverlay({
 
   const nowLabel = data.find((d) => d.isNow)?.label ?? "";
 
-  const allPrices = data.flatMap((d) =>
-    [d.close, d.confUpper, d.confLower].filter((v): v is number => v !== undefined)
-  );
-  const priceMin = Math.min(...allPrices) * 0.97;
-  const priceMax = Math.max(...allPrices) * 1.03;
+  // Memoized + guarded against empty data: Math.min/max(...[]) is
+  // ±Infinity, which Recharts silently turns into a broken/invisible
+  // chart — currently unreachable with mock data (every ticker has
+  // candles) but a real backend could return a ticker with no history.
+  const { priceMin, priceMax } = useMemo(() => {
+    const allPrices = data.flatMap((d) =>
+      [d.close, d.confUpper, d.confLower].filter((v): v is number => v !== undefined)
+    );
+    if (allPrices.length === 0) {
+      return { priceMin: 0, priceMax: 1 };
+    }
+    return {
+      priceMin: Math.min(...allPrices) * 0.97,
+      priceMax: Math.max(...allPrices) * 1.03,
+    };
+  }, [data]);
 
   const histColor    = "#00D4FF";
   const predColor    = "#6C63FF";
   const confColor    = "#6C63FF";
 
   const isUp = prediction.predictedChangePercent >= 0;
+
+  if (data.length === 0) {
+    return (
+      <div className="flex h-[300px] items-center justify-center rounded-xl border border-border bg-surface text-sm text-foreground-muted">
+        Keine Kursdaten für eine Prognose-Übersicht verfügbar.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">

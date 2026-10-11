@@ -2,6 +2,7 @@
  * Milestone 2 & 4 – Component showcase.
  * Visible at /demo during development only.
  */
+import { notFound }     from "next/navigation";
 import { Separator }    from "@/components/ui/separator";
 import { Badge }        from "@/components/ui/badge";
 import AnimatedNumber   from "@/components/shared/AnimatedNumber";
@@ -14,17 +15,39 @@ import StockList        from "@/components/stock/StockList";
 import PriceChart       from "@/components/charts/PriceChart";
 import PredictionOverlay from "@/components/charts/PredictionOverlay";
 import {
-  STOCKS,
-  MARKET_OUTLOOK,
-  TRENDING_STOCKS,
+  getAllStocks,
+  getMarketOutlook,
+  getTrendingStocks,
   getCandles,
   getPrediction,
-} from "@/lib/mock-data";
+} from "@/lib/api/stocks";
 
 export default function DemoPage() {
-  const aapl       = STOCKS.find((s) => s.ticker === "AAPL")!;
+  // Was "visible only during development" in intent but had no actual
+  // gate — stayed reachable in production. Enforce that here instead of
+  // just in a comment.
+  if (process.env.NODE_ENV === "production") {
+    notFound();
+  }
+
+  const STOCKS = getAllStocks();
+  const MARKET_OUTLOOK = getMarketOutlook();
+  const TRENDING_STOCKS = getTrendingStocks();
+
+  const aapl       = STOCKS.find((s) => s.ticker === "AAPL");
   const aaplCandles = getCandles("AAPL");
-  const aaplPred30  = getPrediction("AAPL", "30d")!;
+  const aaplPred30  = getPrediction("AAPL", "30d");
+
+  // No non-null assertions: this showcase page hardcodes "AAPL", which
+  // exists in the current mock data, but doesn't crash the whole page if
+  // that ever stops being true.
+  if (!aapl || !aaplPred30) {
+    return (
+      <main className="min-h-screen p-6 text-sm text-foreground-muted">
+        Demo-Daten für AAPL nicht verfügbar.
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen p-6 space-y-12 max-w-2xl mx-auto">

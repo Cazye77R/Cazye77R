@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Prediction } from "@/lib/types";
-import { STOCKS, getPrediction } from "@/lib/mock-data";
+import { getAllStocks, getPrediction } from "@/lib/api/stocks";
 import { cn } from "@/lib/utils";
 import { Button }       from "@/components/ui/button";
 import { Sparkles }     from "lucide-react";
@@ -18,6 +18,7 @@ const HORIZON_OPTS: { value: Horizon; label: string; desc: string }[] = [
 ];
 
 export default function AiPage() {
+  const STOCKS = getAllStocks();
   const [ticker,  setTicker]  = useState("AAPL");
   const [horizon, setHorizon] = useState<Horizon>("7d");
   const [loading, setLoading] = useState(false);
@@ -31,7 +32,18 @@ export default function AiPage() {
     setLoading(false);
   }
 
-  const selectedStock = STOCKS.find((s) => s.ticker === ticker)!;
+  // No non-null assertion: `ticker` is currently always sourced from
+  // STOCKS itself, so this can't miss today, but falls back instead of
+  // crashing once STOCKS can come from a real API that might omit one.
+  const selectedStock = STOCKS.find((s) => s.ticker === ticker) ?? STOCKS[0];
+
+  if (!selectedStock) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-16 text-center text-sm text-foreground-muted">
+        Keine Aktiendaten verfügbar.
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-md px-4 py-6 space-y-6">
