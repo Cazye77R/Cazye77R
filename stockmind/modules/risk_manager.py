@@ -276,7 +276,15 @@ class RiskManager:
             cash:            Verfügbares Cash
             positions:       Offene Positionen
             equity_curve:    Portfoliowert-Zeitreihe
-            stop_loss_price: Optionaler geplanter Stop-Loss (für Size-Check)
+            stop_loss_price: Optionaler geplanter Stop-Loss (für Size-Check).
+                              Der Größen-Check unter Punkt 3 läuft NUR wenn
+                              dieser Wert übergeben wird – aktuell tut das
+                              nur modules.backtester.PaperTrader.auto_trade
+                              (dort via RiskManager.compute_stops ermittelt).
+                              Manuelle Orders (Tab "Manuelle Order" in app.py)
+                              haben keinen Stop-Loss und überspringen diesen
+                              Check bewusst; sie werden stattdessen nur über
+                              Drawdown-Schutz und Exposure-Limit begrenzt.
 
         Returns:
             (True, "")              → Trade genehmigt

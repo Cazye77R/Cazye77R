@@ -501,6 +501,7 @@ class StockTrainer:
         symbol: str,
         method: str,
         model_name: str,
+        provider: str | None = None,
     ) -> dict:
         """
         Führt einen Trainingszyklus durch:
@@ -509,6 +510,11 @@ class StockTrainer:
         - Holt Vorhersage vom LLM (UP / DOWN / NEUTRAL)
         - Validiert gegen tatsächliche letzte Kerze
         - Aktualisiert State und gibt Ergebnis zurück
+
+        Args:
+            provider: Optionaler LLM-Provider-Name ("ollama"|"nvidia"); wird
+                an is_llm_ready()/query_model() durchgereicht. None fällt auf
+                den .env-Default zurück (siehe get_provider()).
 
         Returns:
             {"prediction": "UP", "confidence": 0.73, "reasoning": "...",
@@ -546,13 +552,13 @@ class StockTrainer:
             actual_dir = "UP" if close_now > close_prev else "DOWN"
 
         # --- LLM-Anfrage ---
-        if not is_llm_ready():
+        if not is_llm_ready(provider):
             return self._error_result("KI-Anbieter nicht erreichbar", symbol, method)
 
         prompt = self._build_prompt(symbol, train_df, method)
         system = self._system_prompt()
         try:
-            raw_response = query_model(model_name, prompt, system, temperature=0.1)
+            raw_response = query_model(model_name, prompt, system, temperature=0.1, provider=provider)
         except Exception as exc:
             logger.error(f"LLM-Anfrage fehlgeschlagen ({symbol}, {method}): {exc}")
             return self._error_result(str(exc), symbol, method)
@@ -651,6 +657,7 @@ class StockTrainer:
         symbol:      str,
         model_name:  str,
         bandit_name: str = "UCB1",
+        provider:    str | None = None,
     ) -> dict:
         """
         Wählt automatisch die nächste zu testende Methode nach dem gewählten
@@ -660,6 +667,8 @@ class StockTrainer:
             symbol:      Aktien-Symbol.
             model_name:  LLM-Modellname.
             bandit_name: "UCB1" | "D-UCB" | "Thompson"
+            provider:    Optionaler LLM-Provider-Name, durchgereicht an
+                         run_training_cycle().
 
         Returns:
             run_training_cycle-Ergebnis + {"selected_method", "preferred_method",
@@ -668,7 +677,7 @@ class StockTrainer:
         bandit          = get_bandit(bandit_name)
         state           = self.load_state(symbol)
         selected_method = self._select_next_method(state, bandit=bandit)
-        result          = self.run_training_cycle(symbol, selected_method, model_name)
+        result          = self.run_training_cycle(symbol, selected_method, model_name, provider=provider)
 
         updated_state = self.load_state(symbol)
         result["selected_method"]  = selected_method
@@ -706,7 +715,9 @@ class StockTrainer:
     # 5. get_next_prediction
     # ------------------------------------------------------------------
 
-    def get_next_prediction(self, symbol: str, model_name: str) -> dict:
+    def get_next_prediction(
+        self, symbol: str, model_name: str, provider: str | None = None
+    ) -> dict:
         """
         Gibt eine neue Vorhersage mit der bisher besten Methode zurück.
         Fällt auf die erste verfügbare Methode zurück wenn kein Training vorliegt.
@@ -718,7 +729,7 @@ class StockTrainer:
         best_method = state.get("best_method")
         if not best_method or best_method not in state.get("method_scores", {}):
             best_method = _METHODS[0]
-        result = self.run_training_cycle(symbol, best_method, model_name)
+        result = self.run_training_cycle(symbol, best_method, model_name, provider=provider)
         result["is_best_method_prediction"] = True
         return result
 
@@ -1244,13 +1255,26 @@ def train(ticker: str, df: pd.DataFrame, horizon: int = 5) -> dict:
     model  = GradientBoostingClassifier(n_estimators=100, max_depth=3, random_state=42)
     model.fit(X_all, y, sample_weight=sw_all)
 
+    # Atomar schreiben (tmp + os.replace): verhindert, dass ein paralleler
+    # load_model() eine nur halb geschriebene große .joblib-Datei liest.
+    # Reihenfolge Modell-Rename vor Hash-Rename lässt zwischen beiden
+    # Schritten ein kurzes Fenster offen, in dem load_model() die ALTE
+    # Prüfsumme gegen das NEUE Modell prüft und (korrekt, fail-closed)
+    # ablehnt – siehe die entsprechende Hinweis-Formulierung in load_model().
+    model_path     = _model_path(ticker)
+    model_tmp_path = model_path.with_suffix(model_path.suffix + ".tmp")
     joblib.dump(
         {"model": model, "scaler": scaler, "feature_names": list(features.columns)},
-        _model_path(ticker),
+        model_tmp_path,
         compress=3,
     )
-    # Prüfsumme für sichere Verifikation beim Laden (siehe load_model)
-    _model_hash_path(ticker).write_text(_file_sha256(_model_path(ticker)))
+    model_hash = _file_sha256(model_tmp_path)
+    os.replace(model_tmp_path, model_path)
+
+    hash_path     = _model_hash_path(ticker)
+    hash_tmp_path = hash_path.with_suffix(hash_path.suffix + ".tmp")
+    hash_tmp_path.write_text(model_hash)
+    os.replace(hash_tmp_path, hash_path)
 
     # State aktualisieren (neues + Legacy-Schema)
     state["symbol"]           = ticker.upper()
@@ -1303,7 +1327,10 @@ def load_model(ticker: str) -> Optional[dict]:
     if actual != expected:
         logger.error(
             f"Prüfsummen-Mismatch für {p.name} (erwartet {expected[:12]}…, "
-            f"ist {actual[:12]}…) – Datei manipuliert oder beschädigt, wird nicht geladen."
+            f"ist {actual[:12]}…) – wird nicht geladen. Mögliche Ursachen: "
+            f"Datei manipuliert/beschädigt, ODER ein gleichzeitiger "
+            f"train()-Lauf für denselben Ticker war mitten im Schreiben "
+            f"(dann hilft ein erneuter Ladeversuch nach Trainingsende)."
         )
         return None
 

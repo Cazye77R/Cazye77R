@@ -144,6 +144,7 @@ def query_model(
     system_prompt: str = "",
     temperature: float = 0.2,
     max_retries: int = 2,
+    provider: str | None = None,
 ) -> str:
     """
     Sendet eine Prompt-Anfrage an den konfigurierten LLM-Provider.
@@ -154,6 +155,10 @@ def query_model(
         system_prompt: Optionaler System-Prompt
         temperature:   Kreativität 0.0–1.0
         max_retries:   Anzahl Wiederholungsversuche nach Fehlern
+        provider:      Provider-Name ("ollama"|"nvidia"); None → .env-Default
+                       (siehe get_provider()). Wird von der UI explizit
+                       gesetzt, damit die Sitzungs-Auswahl nicht durch den
+                       Prozess-weiten LLM_PROVIDER-Fallback überschrieben wird.
 
     Returns:
         Modell-Antwort als String
@@ -161,12 +166,12 @@ def query_model(
     Raises:
         RuntimeError: nach Erschöpfung aller Versuche
     """
-    provider = get_provider()
+    provider_obj = get_provider(provider)
     last_exc: Exception = RuntimeError("Unbekannter Fehler")
 
     for attempt in range(max_retries + 1):
         try:
-            return provider.query(model_name, prompt, system_prompt, temperature)
+            return provider_obj.query(model_name, prompt, system_prompt, temperature)
         except Exception as exc:
             last_exc = exc
             logger.warning(

@@ -31,6 +31,7 @@ from config import (
     ENABLE_EASTER_EGGS,
     EXPLORATION_CONSTANT,
     LAMBO_PRICE_EUR,
+    MAX_CORRELATED_EXPOSURE_PCT,
     MODEL_DESCRIPTIONS,
     ORDER_COST_EUR,
     SPREAD_PERCENT,
@@ -66,6 +67,7 @@ from modules.model_manager import (
     is_llm_ready,
 )
 from modules.predictor import SIGNAL_FUNCTIONS, predict
+from modules.risk_manager import _ticker_market
 from modules.sentiment_analyzer import analyze_news
 from modules.trainer import (
     _BANDIT_NAMES,
@@ -778,7 +780,14 @@ with st.sidebar:
                     st.session_state.analysis_text = ""
                     st.session_state.sentiment_result = None
                     st.session_state.explanation_text = ""
+                    st.session_state.explanation_error = ""
                     st.session_state.data_quality = get_data_quality_report(df_h)
+                    # Trainings-/Trading-Ergebnisse gehören zum vorigen Ticker –
+                    # sonst bleiben sie unter dem neuen Ticker sichtbar, ohne
+                    # Hinweis, dass sie veraltet/falsch zugeordnet sind.
+                    st.session_state.cycle_result = None
+                    st.session_state.auto_result = None
+                    st.session_state.auto_trade_result = None
                     st.rerun()
     else:
         st.caption("Noch keine Aktien analysiert.")
@@ -792,7 +801,7 @@ with st.sidebar:
         st.markdown(
             f'{badge} &nbsp; '
             f'<span style="color:#8b949e;font-size:11px;">'
-            f'{st.session_state.last_pred_ticker} · '
+            f'{html.escape(st.session_state.last_pred_ticker)} · '
             f'{st.session_state.last_pred_conf:.0%}</span>',
             unsafe_allow_html=True,
         )
@@ -927,7 +936,14 @@ with tab1:
                 st.session_state.analysis_text = ""
                 st.session_state.sentiment_result = None
                 st.session_state.explanation_text = ""
+                st.session_state.explanation_error = ""
                 st.session_state.data_quality = get_data_quality_report(df_new)
+                # Trainings-/Trading-Ergebnisse gehören zum vorigen Ticker –
+                # sonst bleiben sie unter dem neuen Ticker sichtbar, ohne
+                # Hinweis, dass sie veraltet/falsch zugeordnet sind.
+                st.session_state.cycle_result = None
+                st.session_state.auto_result = None
+                st.session_state.auto_trade_result = None
                 # Verlauf aktualisieren
                 hist = st.session_state.history
                 if actual_ticker not in hist:
@@ -1224,6 +1240,7 @@ with tab1:
                                 st.session_state.ticker,
                                 t_method,
                                 st.session_state.model,
+                                provider=_current_provider(),
                             )
                         anim_slot.empty()
                         if result.get("error"):
@@ -1326,6 +1343,7 @@ with tab1:
                                     st.session_state.ticker,
                                     st.session_state.model,
                                     bandit_name=selected_bandit,
+                                    provider=_current_provider(),
                                 )
                                 last_res = res
                                 if res.get("error"):
@@ -1541,7 +1559,7 @@ with tab1:
                     f'<div class="sm-card" style="text-align:center;">'
                     f'<div class="sm-label">Beste Methode</div>'
                     f'<div style="font-family:IBM Plex Mono;font-size:15px;'
-                    f'font-weight:700;color:#f0b429;margin-top:8px;">{best}</div>'
+                    f'font-weight:700;color:#f0b429;margin-top:8px;">{html.escape(str(best))}</div>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
@@ -1706,6 +1724,38 @@ with tab2:
                 qty_est = invest / price_pt if price_pt > 0 else 0
                 st.metric("Menge (ca.)", f"{qty_est:.4f}")
 
+            # Live-Vorschau des Risk-Manager-Limits für BUY-Orders: der
+            # Slider erlaubt bis zu 100% Cash-Anteil, aber place_order()
+            # lehnt Orders ab, die das korrelierte Exposure-Limit je
+            # Markt-Gruppe überschreiten (siehe modules/risk_manager.py
+            # check_exposure). Diese Warnung zeigt das VOR dem Klick an,
+            # statt die Order erst danach mit einer kryptischen
+            # Fehlermeldung abzulehnen.
+            if pt_dir == "BUY":
+                _pos_val_now = sum(
+                    p["quantity"] * (p.get("last_price") or p["avg_price"])
+                    for p in pt_state_now.positions.values()
+                )
+                _equity_now = pt_state_now.cash + _pos_val_now
+                if _equity_now > 0:
+                    _market = _ticker_market(ticker_pt)
+                    _already_correlated = sum(
+                        p["quantity"] * (p.get("last_price") or p["avg_price"])
+                        for sym, p in pt_state_now.positions.items()
+                        if _ticker_market(sym) == _market
+                    )
+                    _order_value = invest  # Spread/Gebühr sind hier vernachlässigbar für die Vorschau
+                    _correlated_pct = (_already_correlated + _order_value) / _equity_now * 100
+                    if _correlated_pct >= MAX_CORRELATED_EXPOSURE_PCT:
+                        _max_order_value = max(0.0, _equity_now * MAX_CORRELATED_EXPOSURE_PCT / 100 - _already_correlated)
+                        _max_frac = min(1.0, _max_order_value / pt_state_now.cash) if pt_state_now.cash > 0 else 0.0
+                        st.warning(
+                            f"⚠️ Diese Order ({_correlated_pct:.0f}% Exposure in Markt-Gruppe "
+                            f"'{_market}') überschreitet das Risk-Manager-Limit von "
+                            f"{MAX_CORRELATED_EXPOSURE_PCT:.0f}% und wird beim Kauf abgelehnt. "
+                            f"Reduziere den Cash-Anteil auf max. ca. {_max_frac:.0%}."
+                        )
+
             pred_pt = st.session_state.prediction
             sig_str = pred_pt.signal if pred_pt else "MANUELL"
 
@@ -1824,6 +1874,7 @@ with tab2:
                                 cycles=1,
                                 method=at_method,
                                 invest_pct=at_invest,
+                                provider=_current_provider(),
                             )
                             for entry in _cycle_log:
                                 entry["cycle"] = _ci + 1

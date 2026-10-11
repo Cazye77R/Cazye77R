@@ -398,7 +398,10 @@ class PaperTrader:
 
         Args:
             current_prices: {symbol: kurs} – wird für offene Positionen benötigt.
-                            Fällt auf avg_price zurück wenn nicht angegeben.
+                            Fällt pro Position auf den zuletzt bekannten
+                            Handelspreis (place_order setzt "last_price" bei
+                            jedem Trade) und erst danach auf avg_price zurück,
+                            falls für ein Symbol kein aktueller Kurs übergeben wird.
 
         Returns:
             {
@@ -419,7 +422,7 @@ class PaperTrader:
         unrealized  = 0.0
         positions_d = []
         for sym, pos in state.positions.items():
-            curr  = prices.get(sym, pos["avg_price"])
+            curr  = prices.get(sym) or pos.get("last_price") or pos["avg_price"]
             val   = pos["quantity"] * curr
             unrlz = (curr - pos["avg_price"]) * pos["quantity"]
             pos_value  += val
@@ -514,14 +517,24 @@ class PaperTrader:
         cycles:     int = 5,
         method:     str = "Auto (KI wählt)",
         invest_pct: float = 0.2,   # Anteil des Cashs je BUY-Signal
+        provider:   str | None = None,
     ) -> list[dict[str, object]]:
         """
         Automatischer Trading-Modus:
         - Holt KI-Vorhersage via StockTrainer
-        - Kauft bei UP-Signal (invest_pct des verfügbaren Cashs)
+        - Kauft bei UP-Signal (invest_pct des verfügbaren Cashs), setzt dabei
+          ATR-basierte Stop-Loss/Take-Profit-Marken auf der Position
+        - Prüft bei jedem Zyklus zuerst diese Stops (unabhängig von der
+          nächsten LLM-Vorhersage), bevor es neue UP/DOWN-Signale auswertet
         - Schließt offene Position bei DOWN-Signal
         - Ignoriert NEUTRAL
         - Loggt alle Entscheidungen mit Begründung
+
+        Hinweis: Stop-Loss/Take-Profit werden NUR für Positionen gesetzt,
+        die auto_trade() selbst eröffnet hat. Über den Tab "Manuelle Order"
+        gekaufte Positionen haben keine Stops und werden von dieser
+        Risiko-Prüfung nicht automatisch geschlossen, selbst wenn sie
+        gleichzeitig offen sind.
 
         Args:
             symbol:     Aktien-Symbol
@@ -529,6 +542,9 @@ class PaperTrader:
             cycles:     Anzahl Trainingszyklen / Vorhersagen
             method:     Analysemethode ("Auto (KI wählt)" → StockTrainer.auto_mode)
             invest_pct: Anteil des Cashs der pro BUY investiert wird (0.0–1.0)
+            provider:   Optionaler LLM-Provider-Name, durchgereicht an den
+                        Trainer, damit die UI-Auswahl auch hier gilt statt
+                        stillschweigend auf den .env-Default zu fallen.
 
         Returns:
             Liste der Auto-Log-Einträge dieser Session
@@ -544,9 +560,9 @@ class PaperTrader:
         for i in range(cycles):
             # Vorhersage holen
             if method == "Auto (KI wählt)":
-                result = trainer.auto_mode(symbol, model_name)
+                result = trainer.auto_mode(symbol, model_name, provider=provider)
             else:
-                result = trainer.run_training_cycle(symbol, method, model_name)
+                result = trainer.run_training_cycle(symbol, method, model_name, provider=provider)
 
             if result.get("error"):
                 entry = {
@@ -564,8 +580,10 @@ class PaperTrader:
             reasoning  = result.get("reasoning", "")
             used_method = result.get("method", method)
 
-            # Aktuellen Kurs laden
-            df = fetch_ohlcv(symbol, period="5d")
+            # Aktuellen Kurs laden. "1mo" statt "5d", damit compute_stops()
+            # unten tatsächlich ein ATR(14) berechnen kann (mind. 14
+            # Handelstage Historie) statt eines faktischen ATR(3-5).
+            df = fetch_ohlcv(symbol, period="1mo")
             if df.empty:
                 log.append({"cycle": i+1, "decision": "SKIP", "reason": "Kein Kurs abrufbar"})
                 continue
