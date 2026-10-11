@@ -15,6 +15,10 @@
 # Standard-Library-Module (kein Install nötig):
 #   dataclasses, datetime, hashlib, json, logging, math,
 #   os, pathlib, pickle, random, re, subprocess, sys, time, typing
+#
+# Zusätzlich benötigt für stock_model/ (PyTorch-LSTM-Forecaster, siehe
+# stock_model/README.md bzw. die Projekt-README): streamlit, pandas, numpy,
+# plotly (bereits oben gelistet) sowie torch (unten).
 
 # ── Dashboard ────────────────────────────────────────────────────────────────
 streamlit>=1.33.0
@@ -33,6 +37,10 @@ scikit-learn>=1.2.0       # GradientBoostingClassifier, StandardScaler
 
 # ── Charts ───────────────────────────────────────────────────────────────────
 plotly>=5.20.0            # graph_objects + make_subplots
+
+# ── PyTorch LSTM-Forecaster (stock_model/) ──────────────────────────────────
+torch>=2.2.0               # ReturnLSTM-Training/Inferenz; stock_model/model.py,
+                            # data.py, train.py, inference.py, app.py
 
 # ── Technische Indikatoren ───────────────────────────────────────────────────
 ta>=0.10.0                # ta.momentum.RSIIndicator, ta.trend.MACD, etc.
