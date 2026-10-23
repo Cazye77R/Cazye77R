@@ -1,8 +1,8 @@
 """Streamlit UI for training and forecasting stock prices with a dark theme."""
+
 from __future__ import annotations
 
-from pathlib import Path
-from tempfile import NamedTemporaryFile
+import io
 from typing import Tuple
 
 import numpy as np
@@ -12,16 +12,31 @@ import streamlit as st
 import torch
 from torch.utils.data import DataLoader
 
-from .data import PriceWindowDataset, load_prices
-from .inference import denormalize_returns, iterative_forecast, load_model_from_checkpoint, project_prices
+from .data import (
+    PriceData,
+    PriceWindowDataset,
+    chronological_split,
+    compute_norm_stats,
+    load_prices,
+    naive_baseline_loss,
+    skill_score,
+)
+from .inference import (
+    denormalize_returns,
+    iterative_forecast,
+    load_model_from_checkpoint,
+    project_prices,
+)
 from .model import ReturnLSTM
+from .train import fit_model
 
 
-def _persist_upload(upload) -> Path:
-    tmp = NamedTemporaryFile(delete=False)
-    tmp.write(upload.getbuffer())
-    tmp.flush()
-    return Path(tmp.name)
+@st.cache_data(show_spinner=False)
+def _load_prices_cached(file_bytes: bytes, date_col: str, price_col: str) -> PriceData:
+    """Cached CSV parse (normalize=False — callers normalize per their own split)."""
+    return load_prices(
+        io.BytesIO(file_bytes), date_col=date_col, price_col=price_col, normalize=False
+    )
 
 
 def train_lightweight_model(
@@ -33,28 +48,34 @@ def train_lightweight_model(
     num_layers: int,
     dropout: float,
     device: str,
-) -> Tuple[ReturnLSTM, float]:
-    dataset = PriceWindowDataset(returns, window=window)
-    loader = DataLoader(dataset, batch_size=64, shuffle=True)
+    train_ratio: float = 0.8,
+) -> Tuple[ReturnLSTM, float, float, float, float]:
+    """Quick in-app training with a chronological train/val split.
+
+    Unlike shuffling 100% of overlapping windows into one pool, this splits
+    by time first and fits normalization stats on the training slice only,
+    so the reported validation loss is a meaningful (if noisy, given the
+    small epoch budget) out-of-sample estimate rather than a leaked number.
+
+    Returns:
+        (model, train_loss, val_loss, mean, std)
+    """
+    train_returns_raw, val_returns_raw = chronological_split(returns, train_ratio, window)
+    mean, std = compute_norm_stats(train_returns_raw)
+    train_returns = (train_returns_raw - mean) / std
+    val_returns = (val_returns_raw - mean) / std
+
+    train_set = PriceWindowDataset(train_returns, window=window)
+    val_set = PriceWindowDataset(val_returns, window=window)
+    train_loader = DataLoader(train_set, batch_size=64, shuffle=True)
+    val_loader = DataLoader(val_set, batch_size=64)
 
     model = ReturnLSTM(hidden_size=hidden_size, num_layers=num_layers, dropout=dropout).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = torch.nn.MSELoss()
+    train_loss, val_loss, _ = fit_model(
+        model, train_loader, val_loader, epochs=epochs, lr=lr, device=device
+    )
 
-    model.train()
-    last_loss = 0.0
-    for _ in range(epochs):
-        epoch_loss = 0.0
-        for features, target in loader:
-            features, target = features.to(device), target.to(device)
-            optimizer.zero_grad()
-            preds = model(features)
-            loss = criterion(preds, target)
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item() * features.size(0)
-        last_loss = epoch_loss / len(loader.dataset)
-    return model, last_loss
+    return model, train_loss, val_loss, mean, std
 
 
 def render_chart(prices: np.ndarray, forecast_prices: np.ndarray) -> None:
@@ -71,7 +92,7 @@ def render_chart(prices: np.ndarray, forecast_prices: np.ndarray) -> None:
         legend_title="",
         margin=dict(l=10, r=10, t=40, b=10),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def render_predictions(denorm_returns: np.ndarray, price_projection: np.ndarray) -> None:
@@ -87,7 +108,13 @@ def render_predictions(denorm_returns: np.ndarray, price_projection: np.ndarray)
             "Preis": price_projection,
         }
     )
-    st.dataframe(preview, use_container_width=True)
+    st.dataframe(preview, width="stretch")
+    st.caption(
+        "⚠️ Mehrstufige Prognosen führen ihre eigenen Vorhersagen als Eingabe fort — "
+        "der Fehler kann sich von Schritt zu Schritt aufsummieren. Es wird keine "
+        "Unsicherheits-/Konfidenzspanne berechnet; spätere Schritte sind entsprechend "
+        "unsicherer als frühe."
+    )
 
 
 def main() -> None:
@@ -128,9 +155,13 @@ def main() -> None:
     price_col = st.sidebar.text_input("Preisspalte", value="close")
 
     st.sidebar.subheader("Optional: Schnelltraining")
-    enable_training = st.sidebar.checkbox("Direkt in der App trainieren, wenn kein Checkpoint geladen ist")
+    enable_training = st.sidebar.checkbox(
+        "Direkt in der App trainieren, wenn kein Checkpoint geladen ist"
+    )
     train_epochs = st.sidebar.slider("Epochen", 1, 25, 5)
-    lr = st.sidebar.number_input("Lernrate", min_value=1e-5, max_value=1e-1, value=1e-3, format="%e")
+    lr = st.sidebar.number_input(
+        "Lernrate", min_value=1e-5, max_value=1e-1, value=1e-3, format="%e"
+    )
     hidden_size = st.sidebar.slider("Hidden Size", 32, 512, 128, step=32)
     num_layers = st.sidebar.slider("LSTM Layer", 1, 4, 2)
     dropout = st.sidebar.slider("Dropout", 0.0, 0.7, 0.1, step=0.05)
@@ -143,53 +174,83 @@ def main() -> None:
         return
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    uploaded_csv.seek(0)
-    price_data = load_prices(uploaded_csv, date_col=date_col, price_col=price_col)
-    uploaded_csv.seek(0)
+
+    try:
+        # normalize=False: this is the shared/display price_data. Each
+        # training path (checkpoint vs. quick-train) derives its own
+        # normalization stats from only the data it's entitled to see.
+        price_data = _load_prices_cached(uploaded_csv.getvalue(), date_col, price_col)
+    except ValueError as exc:
+        st.error(f"Fehler beim Laden der CSV: {exc}")
+        return
 
     st.subheader("Datenvorschau")
-    df_preview = pd.read_csv(uploaded_csv)
-    st.dataframe(df_preview.head(), use_container_width=True)
-    uploaded_csv.seek(0)
+    try:
+        df_preview = pd.read_csv(io.BytesIO(uploaded_csv.getvalue()))
+    except Exception as exc:  # pragma: no cover - defensive, load_prices already validated
+        st.error(f"Fehler beim Anzeigen der CSV-Vorschau: {exc}")
+        return
+    st.dataframe(df_preview.head(), width="stretch")
 
     st.subheader("Historische Preise")
     render_chart(price_data.prices, np.array([]))
 
     if st.button("Forecast berechnen"):
+        # mean/std/val_loss are always set by one of the two branches below
+        # before iterative_forecast() is called; the third (else) branch
+        # returns early. No branch falls back to price_data's full-history
+        # stats, which would leak validation-period data into the forecast.
+        val_loss: float | None = None
+        baseline_loss: float | None = None
+
         if checkpoint_upload is not None:
-            checkpoint_path = _persist_upload(checkpoint_upload)
-            model, hyper = load_model_from_checkpoint(checkpoint_path)
+            try:
+                model, hyper = load_model_from_checkpoint(io.BytesIO(checkpoint_upload.getbuffer()))
+            except ValueError as exc:
+                st.error(f"Checkpoint konnte nicht geladen werden: {exc}")
+                return
             window = int(hyper.get("window", window))
             mean = float(hyper.get("mean", price_data.mean))
             std = float(hyper.get("std", price_data.std) or 1.0)
-            uploaded_csv.seek(0)
-            price_data = load_prices(
-                uploaded_csv, date_col=date_col, price_col=price_col, normalize=True, normalize_stats=(mean, std)
-            )
+            # Normalize the full available history with the checkpoint's
+            # training-time stats (standard practice — not leakage, since
+            # those stats were already fixed before this inference call).
+            forecast_returns = (price_data.returns - mean) / std
         elif enable_training:
             try:
-                model, last_loss = train_lightweight_model(
-                    price_data.returns,
-                    window=window,
-                    epochs=train_epochs,
-                    lr=lr,
-                    hidden_size=hidden_size,
-                    num_layers=num_layers,
-                    dropout=dropout,
-                    device=device,
-                )
+                with st.spinner(f"Trainiere Modell ({train_epochs} Epochen)…"):
+                    model, train_loss, val_loss, mean, std = train_lightweight_model(
+                        price_data.returns,
+                        window=window,
+                        epochs=train_epochs,
+                        lr=lr,
+                        hidden_size=hidden_size,
+                        num_layers=num_layers,
+                        dropout=dropout,
+                        device=device,
+                    )
+                _, val_raw = chronological_split(price_data.returns, 0.8, window)
+                baseline_loss = naive_baseline_loss((val_raw - mean) / std, window)
             except ValueError as exc:
                 st.error(str(exc))
                 return
-            mean, std = price_data.mean, price_data.std
-            st.toast(f"Training abgeschlossen (Loss ~ {last_loss:.4f})", icon="✅")
+            st.toast(
+                f"Training abgeschlossen (train_loss ~ {train_loss:.4f}, val_loss ~ {val_loss:.4f})",
+                icon="✅",
+            )
+            # For the live forecast, use the full available history as
+            # context (normalized with the just-fitted train-split stats) —
+            # the train/val split only matters for judging model quality.
+            forecast_returns = (price_data.returns - mean) / std
         else:
-            st.warning("Lade einen Checkpoint oder aktiviere das Schnelltraining, um einen Forecast zu starten.")
+            st.warning(
+                "Lade einen Checkpoint oder aktiviere das Schnelltraining, um einen Forecast zu starten."
+            )
             return
 
         try:
             normalized_preds = iterative_forecast(
-                price_data.returns, model, window=window, steps=forecast_steps, device=device
+                forecast_returns, model, window=window, steps=forecast_steps, device=device
             )
         except ValueError as exc:
             st.error(str(exc))
@@ -197,12 +258,41 @@ def main() -> None:
         denorm_preds = denormalize_returns(normalized_preds, mean=mean, std=std)
         price_projection = project_prices(price_data.prices[-1], denorm_preds)
 
+        st.session_state["forecast_result"] = {
+            "prices": price_data.prices,
+            "denorm_preds": denorm_preds,
+            "price_projection": price_projection,
+            "val_loss": val_loss,
+            "baseline_loss": baseline_loss,
+        }
+
+    result = st.session_state.get("forecast_result")
+    if result is not None:
         st.subheader("Forecast")
+        if result["val_loss"] is not None:
+            st.caption(
+                f"Validierungs-Loss (zeitlich nach den Trainingsdaten, nicht gesehen): "
+                f"{result['val_loss']:.6f}"
+            )
+            base = result.get("baseline_loss")
+            if base is not None:
+                skill = skill_score(result["val_loss"], base)
+                if skill > 0.05:
+                    st.success(
+                        f"Besser als die naive Baseline (Mittelwert-Prognose, Loss {base:.6f}): "
+                        f"Skill-Score {skill:+.1%}."
+                    )
+                else:
+                    st.warning(
+                        f"Nicht klar besser als die naive Baseline (Mittelwert-Prognose, "
+                        f"Loss {base:.6f}): Skill-Score {skill:+.1%}. Tagesrenditen sind "
+                        "überwiegend Rauschen – der Forecast ist mit Vorsicht zu lesen."
+                    )
         cols = st.columns([1, 2])
         with cols[0]:
-            render_predictions(denorm_preds, price_projection)
+            render_predictions(result["denorm_preds"], result["price_projection"])
         with cols[1]:
-            render_chart(price_data.prices, price_projection)
+            render_chart(result["prices"], result["price_projection"])
 
 
 if __name__ == "__main__":

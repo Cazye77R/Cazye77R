@@ -1,0 +1,44 @@
+# Gepinnte Abhängigkeiten – generiert aus requirements.in
+# Zum Aktualisieren:
+#   pip install pip-tools
+#   pip-compile requirements.in
+#
+# Zuletzt aktualisiert: 2026-04-08
+
+# --- Dashboard ---
+streamlit==1.56.0
+
+# --- Marktdaten ---
+yfinance>=0.2.52
+requests==2.33.1
+
+# --- Datenverarbeitung ---
+pandas==3.0.2
+numpy==2.4.4
+pyarrow==23.0.1
+
+# --- Maschinelles Lernen ---
+scikit-learn==1.8.0
+
+# --- Charts ---
+plotly==6.6.0
+
+# --- Technische Indikatoren ---
+ta==0.11.0
+
+# --- KI / LLM ---
+ollama==0.6.1
+
+# --- Logging ---
+loguru==0.7.3
+
+# --- Konfiguration ---
+python-dotenv==1.2.2
+
+# --- Datenvalidierung ---
+pydantic==2.12.5
+
+# --- Entwicklung & Tests ---
+ruff==0.15.9
+pytest==9.0.3
+pytest-timeout==2.4.0

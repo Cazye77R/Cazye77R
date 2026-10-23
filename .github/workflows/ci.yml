@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff==0.15.9
+
+      - name: ruff check
+        run: ruff check stockmind/ stock_model/
+
+      - name: ruff format --check
+        # ruff ist auf die Version aus stockmind/requirements.txt gepinnt, damit neue Releases den Check nicht ohne Code-Änderung kippen.
+        run: ruff format --check stockmind/ stock_model/
+
+  typecheck:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install type-check dependencies
+        run: pip install -r stockmind/requirements-test.txt
+
+      - name: mypy
+        # app.py wird ausgelassen – Streamlit-Typen sind nur partiell vorhanden.
+        # models.py und alle Module in modules/ werden vollständig geprüft.
+        run: mypy stockmind/models.py stockmind/modules/
+
+  test:
+    name: Test (pytest + coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        # requirements-test.txt enthält nur die für Tests nötigen Pakete –
+        # kein Streamlit/Plotly/yfinance. Dadurch entfallen schwere Binary-Builds
+        # und python-dotenv ist garantiert installiert bevor config importiert wird.
+        run: pip install -r stockmind/requirements-test.txt
+
+      - name: Run tests with coverage
+        run: >
+          pytest tests/ --timeout=60 -v
+          --cov=stockmind --cov-report=term-missing
+          --cov-fail-under=45
+
+  test-stock-model:
+    name: Test stock_model (pytest, torch CPU)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU-only torch + test dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy pandas pytest pytest-timeout
+
+      - name: Run stock_model tests
+        # test_stock_model.py importiert nur data/inference/model/train –
+        # kein Streamlit/Plotly nötig.
+        run: pytest tests/test_stock_model.py --timeout=300 -v
+
+  frontend:
+    name: Frontend (lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build

@@ -1,5 +1,6 @@
-pandas>=2.0
-numpy>=1.24
-torch>=2.0
-streamlit>=1.33
-plotly>=5.20
+# Alle Python-Abhängigkeiten des Repos (stockmind + stock_model).
+# Einzelne Teilprojekte lassen sich auch separat installieren:
+#   pip install -r stockmind/requirements.txt
+#   pip install -r stock_model/requirements.txt
+-r stockmind/requirements.txt
+-r stock_model/requirements.txt

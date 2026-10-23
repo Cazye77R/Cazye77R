@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+/* ─── Design Tokens (single source of truth) ──────────────────────────────── */
+@theme {
+  /* Backgrounds */
+  --color-background: #0B0F1A;
+  --color-surface:    #121826;
+  --color-card:       #1A2233;
+  --color-border:     #2A3344;
+
+  /* Brand */
+  --color-primary:    #00D4FF;
+  --color-success:    #00FF88;
+  --color-danger:     #FF3B3B;
+  --color-accent:     #6C63FF;
+
+  /* Text */
+  --color-foreground:       #E5E7EB;
+  --color-foreground-muted: #9CA3AF;
+  --color-muted:            #6B7280;
+
+  /* Fonts */
+  --font-sans: var(--font-geist-sans, "Inter", system-ui, sans-serif);
+  --font-mono: var(--font-geist-mono, "JetBrains Mono", ui-monospace, monospace);
+
+  /* Border radius */
+  --radius-sm:   0.5rem;
+  --radius-md:   0.75rem;
+  --radius-lg:   1rem;
+  --radius-xl:   1.5rem;
+  --radius-full: 9999px;
+}
+
+/* ─── Base Styles ─────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-feature-settings: "cv11", "ss01", "ss03";
+  font-variant-numeric: tabular-nums;
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  min-height: 100dvh;
+}
+
+/* ─── Custom Scrollbar ────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-surface);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+}
+
+/* ─── Glassmorphism utility ───────────────────────────────────────────────── */
+.glass {
+  background-color: color-mix(in srgb, var(--color-card) 60%, transparent);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* ─── Glow variants ───────────────────────────────────────────────────────── */
+.glow-primary {
+  box-shadow: 0 0 30px -5px rgba(0, 212, 255, 0.4);
+}
+.glow-success {
+  box-shadow: 0 0 30px -5px rgba(0, 255, 136, 0.4);
+}
+.glow-danger {
+  box-shadow: 0 0 30px -5px rgba(255, 59, 59, 0.4);
+}
+.glow-accent {
+  box-shadow: 0 0 30px -5px rgba(108, 99, 255, 0.4);
+}
+
+/* ─── Shimmer animation for skeleton loaders ──────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface) 25%,
+    var(--color-card) 50%,
+    var(--color-surface) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ─── Focus ring ──────────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ─── Number typography ───────────────────────────────────────────────────── */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
