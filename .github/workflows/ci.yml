@@ -20,9 +20,10 @@ jobs:
         run: pip install ruff
 
       - name: ruff check
-        run: ruff check stockmind/
+        run: ruff check stockmind/ stock_model/
 
       - name: ruff format --check
+        # Nur stockmind/ ist durchgehend ruff-format-formatiert.
         run: ruff format --check stockmind/
 
   typecheck:
@@ -64,3 +65,47 @@ jobs:
           pytest tests/ --timeout=60 -v
           --cov=stockmind --cov-report=term-missing
           --cov-fail-under=70
+
+  test-stock-model:
+    name: Test stock_model (pytest, torch CPU)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU-only torch + test dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy pandas pytest pytest-timeout
+
+      - name: Run stock_model tests
+        # test_stock_model.py importiert nur data/inference/model/train –
+        # kein Streamlit/Plotly nötig.
+        run: pytest tests/test_stock_model.py --timeout=300 -v
+
+  frontend:
+    name: Frontend (lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build

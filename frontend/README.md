@@ -1,36 +1,32 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# StockMind – Frontend
 
-## Getting Started
+Next.js 16 (App Router, Turbopack) · React 19 · Tailwind v4 · Recharts · zustand.
 
-First, run the development server:
+> Hinweis: Dieses Next.js hat Breaking Changes gegenüber älteren Versionen
+> (z. B. ist `params` ein Promise). Siehe `AGENTS.md` und
+> `node_modules/next/dist/docs/`.
+
+## Start
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev      # http://localhost:3000
+npm run lint
+npm run build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Daten
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Aktuell läuft die App **vollständig auf Mock-Daten** (`lib/mock-data.ts`).
+Alle Seiten lesen ausschließlich über `lib/api/stocks.ts`; für einen echten
+Backend-Anschluss müssen nur die Funktionen in dieser Datei ersetzt werden
+(und die Konsumenten Lade-/Fehlerzustände bekommen, da sie heute synchron
+arbeiten). `NEXT_PUBLIC_API_BASE_URL` in `.env.example` ist dafür reserviert,
+wird aber noch nicht gelesen.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Struktur
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `app/` – Routen (`/`, `/markets`, `/stock/[ticker]`, `/ai`, `/watchlist`, `/settings`, `/demo` nur in Dev)
+- `components/` – UI (`ui/`, `stock/`, `charts/`, `layout/`, `ai/`, `home/`, `shared/`)
+- `store/watchlist-store.ts` – zustand-Store mit `persist` (`skipHydration` + `WatchlistHydrator`, um Hydration-Mismatches zu vermeiden)
+- `lib/` – Typen, Formatierung, Mock-Daten, API-Schicht
