@@ -18,6 +18,8 @@ from .data import (
     chronological_split,
     compute_norm_stats,
     load_prices,
+    naive_baseline_loss,
+    skill_score,
 )
 from .inference import (
     denormalize_returns,
@@ -222,6 +224,7 @@ def main() -> None:
         # returns early. No branch falls back to price_data's full-history
         # stats, which would leak validation-period data into the forecast.
         val_loss: float | None = None
+        baseline_loss: float | None = None
 
         if checkpoint_upload is not None:
             try:
@@ -249,6 +252,8 @@ def main() -> None:
                         dropout=dropout,
                         device=device,
                     )
+                _, val_raw = chronological_split(price_data.returns, 0.8, window)
+                baseline_loss = naive_baseline_loss((val_raw - mean) / std, window)
             except ValueError as exc:
                 st.error(str(exc))
                 return
@@ -281,6 +286,7 @@ def main() -> None:
             "denorm_preds": denorm_preds,
             "price_projection": price_projection,
             "val_loss": val_loss,
+            "baseline_loss": baseline_loss,
         }
 
     result = st.session_state.get("forecast_result")
@@ -291,6 +297,20 @@ def main() -> None:
                 f"Validierungs-Loss (zeitlich nach den Trainingsdaten, nicht gesehen): "
                 f"{result['val_loss']:.6f}"
             )
+            base = result.get("baseline_loss")
+            if base is not None:
+                skill = skill_score(result["val_loss"], base)
+                if skill > 0.05:
+                    st.success(
+                        f"Besser als die naive Baseline (Mittelwert-Prognose, Loss {base:.6f}): "
+                        f"Skill-Score {skill:+.1%}."
+                    )
+                else:
+                    st.warning(
+                        f"Nicht klar besser als die naive Baseline (Mittelwert-Prognose, "
+                        f"Loss {base:.6f}): Skill-Score {skill:+.1%}. Tagesrenditen sind "
+                        "überwiegend Rauschen – der Forecast ist mit Vorsicht zu lesen."
+                    )
         cols = st.columns([1, 2])
         with cols[0]:
             render_predictions(result["denorm_preds"], result["price_projection"])

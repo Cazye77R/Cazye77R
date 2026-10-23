@@ -27,6 +27,7 @@ from modules.easter_eggs import (
 from modules.explainer import explain_decision
 from modules.predictor import SIGNAL_FUNCTIONS, predict
 from modules.sentiment_analyzer import analyze_news
+from modules.stats import VERDICT_TEXT, summarize_accuracy, summarize_by_method
 from modules.trainer import (
     _BANDIT_NAMES,
     StockTrainer,
@@ -57,6 +58,59 @@ from ui.state import (
     current_provider,
 )
 from ui.style import QUOTES, quote_html, section, signal_badge_html, ticker_html
+
+
+def _render_accuracy_significance(history: list[dict]) -> None:
+    """Trefferquote mit Konfidenzintervall und Vergleich zur Mehrheits-Baseline."""
+    overall = summarize_accuracy(history)
+    if overall.n == 0:
+        return
+
+    section("🎯 Aussagekraft der Trefferquote")
+    c1, c2, c3 = st.columns(3)
+    c1.metric(
+        "Trefferquote",
+        f"{overall.accuracy:.0%}",
+        help=f"{overall.correct} von {overall.n} bewerteten LLM-Zyklen richtig.",
+    )
+    c2.metric(
+        "95 %-Konfidenzintervall",
+        f"{overall.ci_low:.0%} – {overall.ci_high:.0%}",
+        help="Wilson-Intervall: Bereich, in dem die wahre Trefferquote mit 95 % "
+        "Wahrscheinlichkeit liegt. Wenige Zyklen = sehr breites Intervall.",
+    )
+    c3.metric(
+        "Baseline",
+        f"{overall.baseline_accuracy:.0%}",
+        help=f"Trefferquote von „immer {overall.baseline_label}“ (häufigste tatsächliche "
+        "Richtung der bewerteten Tage). Erst deutlich darüber hat das Modell "
+        "überhaupt etwas gelernt.",
+    )
+    {
+        "besser": st.success,
+        "schlechter": st.error,
+        "unklar": st.info,
+        "zu_wenig_daten": st.warning,
+    }[overall.verdict](VERDICT_TEXT[overall.verdict])
+
+    per_method = summarize_by_method(history)
+    if per_method:
+        rows = [
+            {
+                "Methode": m,
+                "Zyklen": s.n,
+                "Treffer": f"{s.accuracy:.0%}",
+                "95 %-Intervall": f"{s.ci_low:.0%} – {s.ci_high:.0%}",
+                "Urteil": VERDICT_TEXT[s.verdict],
+            }
+            for m, s in sorted(per_method.items(), key=lambda kv: -kv[1].n)
+        ]
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    st.caption(
+        "Die Baseline kennt die häufigste Richtung erst im Nachhinein und ist deshalb "
+        "bewusst eine strenge Latte. Zyklen werden an zufälligen Tagen der letzten "
+        "6 Monate bewertet – ein Hinweis, kein Beweis."
+    )
 
 
 def render() -> None:
@@ -820,6 +874,8 @@ def render() -> None:
                         accuracy_gauge(acc),
                         width="stretch",
                     )
+
+            _render_accuracy_significance(state.get("accuracy_history", []))
 
             if state.get("method_scores"):
                 st.plotly_chart(

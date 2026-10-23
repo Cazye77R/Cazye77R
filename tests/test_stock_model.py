@@ -220,3 +220,19 @@ class TestTrain:
         monkeypatch.setattr("sys.argv", ["train", "x.csv", *args])
         with pytest.raises(SystemExit):
             parse_args()
+
+
+def test_naive_baseline_loss_is_mean_squared_target():
+    from stock_model.data import naive_baseline_loss
+
+    vals = np.array([0.0, 1.0, -1.0, 2.0, 0.0, 1.0], dtype=np.float32)
+    # window=2 -> targets are vals[2:] = [-1, 2, 0, 1]
+    assert naive_baseline_loss(vals, window=2) == pytest.approx((1 + 4 + 0 + 1) / 4)
+
+
+def test_skill_score_sign_and_zero_baseline():
+    from stock_model.data import skill_score
+
+    assert skill_score(0.5, 1.0) == pytest.approx(0.5)
+    assert skill_score(1.5, 1.0) < 0
+    assert skill_score(0.5, 0.0) == 0.0

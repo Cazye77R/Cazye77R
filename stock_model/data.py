@@ -157,3 +157,21 @@ class PriceWindowDataset(Dataset[Tuple[torch.Tensor, torch.Tensor]]):
         feature = torch.from_numpy(self.features[idx]).unsqueeze(-1)
         target = torch.tensor(self.targets[idx], dtype=torch.float32)
         return feature, target
+
+
+def naive_baseline_loss(val_returns_normalized: Iterable[float], window: int) -> float:
+    """MSE of the naive forecast "next return = training mean" on the validation slice.
+
+    The inputs are normalized with training-slice stats, so the training mean
+    is 0 and the baseline MSE is simply the mean squared validation target.
+    A model is only useful if its validation loss is clearly below this value.
+    """
+    targets = PriceWindowDataset(val_returns_normalized, window=window).targets
+    return float(np.mean(np.square(targets)))
+
+
+def skill_score(val_loss: float, baseline_loss: float) -> float:
+    """1 - val/baseline: > 0 beats the naive forecast, <= 0 does not."""
+    if baseline_loss <= 0:
+        return 0.0
+    return 1.0 - val_loss / baseline_loss

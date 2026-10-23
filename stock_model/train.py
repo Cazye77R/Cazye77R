@@ -8,7 +8,14 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from .data import PriceWindowDataset, chronological_split, compute_norm_stats, load_prices
+from .data import (
+    PriceWindowDataset,
+    chronological_split,
+    compute_norm_stats,
+    load_prices,
+    naive_baseline_loss,
+    skill_score,
+)
 from .model import ReturnLSTM
 
 
@@ -47,6 +54,9 @@ def train(
     model_device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     model.to(model_device)
 
+    baseline_loss = naive_baseline_loss(val_returns, window)
+    print(f"Naive Baseline (Mittelwert-Prognose) val_loss={baseline_loss:.6f}")
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for epoch in range(1, epochs + 1):
@@ -73,6 +83,8 @@ def train(
         val_loss = val_loss_total / len(val_loader.dataset)
 
         print(f"Epoch {epoch:03d} | train_loss={train_loss:.6f} | val_loss={val_loss:.6f}")
+
+    print(f"Skill-Score vs. Baseline: {skill_score(val_loss, baseline_loss):+.1%}")
 
     model_path = output_dir / "return_lstm.pt"
     torch.save(
