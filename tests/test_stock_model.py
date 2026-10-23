@@ -9,6 +9,7 @@ Sichern vor allem die Fixes aus dem Code-Review gegen Rückfall ab:
 Ohne installiertes torch werden die Tests übersprungen (das Haupt-CI-Setup
 für stockmind installiert torch bewusst nicht).
 """
+
 from __future__ import annotations
 
 import io
@@ -47,6 +48,7 @@ def _csv_bytes(n: int = 200, seed: int = 0) -> bytes:
 # data.py
 # ---------------------------------------------------------------------------
 
+
 class TestLoadPrices:
     def test_basic_returns_length(self):
         data = load_prices(io.BytesIO(_csv_bytes(50)), normalize=False)
@@ -71,7 +73,9 @@ class TestLoadPrices:
 
     @pytest.mark.parametrize("bad", [0.0, -1.0, float("nan"), float("inf")])
     def test_invalid_prices_rejected(self, bad):
-        df = pd.DataFrame({"date": pd.date_range("2024-01-01", periods=5), "close": [1, 2, bad, 4, 5]})
+        df = pd.DataFrame(
+            {"date": pd.date_range("2024-01-01", periods=5), "close": [1, 2, bad, 4, 5]}
+        )
         with pytest.raises(ValueError):
             load_prices(io.BytesIO(df.to_csv(index=False).encode()))
 
@@ -127,6 +131,7 @@ class TestChronologicalSplit:
 # inference.py – Sicherheit
 # ---------------------------------------------------------------------------
 
+
 class TestCheckpointLoading:
     def _save_valid(self, path):
         model = ReturnLSTM(hidden_size=8, num_layers=1)
@@ -179,6 +184,7 @@ class TestCheckpointLoading:
 # inference.py – Forecast-Mathematik
 # ---------------------------------------------------------------------------
 
+
 class TestForecastMath:
     def test_project_prices_compounds(self):
         out = project_prices(100.0, [0.1, 0.1])
@@ -199,6 +205,7 @@ class TestForecastMath:
 # ---------------------------------------------------------------------------
 # train.py
 # ---------------------------------------------------------------------------
+
 
 class TestTrain:
     def test_train_saves_train_only_stats_and_input_dim(self, tmp_path):
@@ -236,3 +243,42 @@ def test_skill_score_sign_and_zero_baseline():
     assert skill_score(0.5, 1.0) == pytest.approx(0.5)
     assert skill_score(1.5, 1.0) < 0
     assert skill_score(0.5, 0.0) == 0.0
+
+
+def _loaders(n=300, window=10):
+    torch = pytest.importorskip("torch")
+    from torch.utils.data import DataLoader
+
+    from stock_model.data import PriceWindowDataset
+
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=n).astype(np.float32)
+    ds = PriceWindowDataset(x, window=window)
+    return DataLoader(ds, batch_size=32, shuffle=True), DataLoader(ds, batch_size=32), torch
+
+
+def test_fit_model_stops_early_and_restores_best_weights():
+    from stock_model.model import ReturnLSTM
+    from stock_model.train import fit_model
+
+    train_l, val_l, torch = _loaders()
+    model = ReturnLSTM(hidden_size=8, num_layers=1, dropout=0.0)
+    seen = []
+    _, best_val, epochs_run = fit_model(
+        model,
+        train_l,
+        val_l,
+        epochs=40,
+        lr=0.01,
+        device="cpu",
+        patience=2,
+        on_epoch=lambda e, tl, vl: seen.append(vl),
+    )
+    assert epochs_run <= 8
+    assert best_val == pytest.approx(min(seen))
+    # restored weights reproduce the best validation loss
+    from stock_model.train import _run_epoch
+
+    model.eval()
+    again = _run_epoch(model, val_l, torch.nn.MSELoss(), "cpu")
+    assert again == pytest.approx(best_val, rel=1e-4)

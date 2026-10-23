@@ -19,6 +19,74 @@ from .data import (
 from .model import ReturnLSTM
 
 
+def _run_epoch(model, loader, criterion, device, optimizer=None, clip=None) -> float:
+    """One pass over ``loader``; trains if an optimizer is given, else evaluates."""
+    training = optimizer is not None
+    model.train(training)
+    total = 0.0
+    with torch.set_grad_enabled(training):
+        for features, target in loader:
+            features, target = features.to(device), target.to(device)
+            if training:
+                optimizer.zero_grad()
+            loss = criterion(model(features), target)
+            if training:
+                loss.backward()
+                if clip:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+                optimizer.step()
+            total += loss.item() * features.size(0)
+    return total / len(loader.dataset)
+
+
+def fit_model(
+    model: ReturnLSTM,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    epochs: int,
+    lr: float,
+    device: str,
+    patience: int = 5,
+    weight_decay: float = 1e-4,
+    clip: float = 1.0,
+    on_epoch=None,
+) -> tuple[float, float, int]:
+    """Train with early stopping and restore the best-validation weights.
+
+    Daily returns are mostly noise, so LSTMs overfit within a few epochs; the
+    weights from the best validation epoch generalize better than the last
+    ones. Also uses AdamW weight decay, gradient clipping and a plateau LR
+    schedule. Returns (train_loss_at_best, best_val_loss, epochs_run).
+    """
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=2)
+    criterion = torch.nn.MSELoss()
+
+    best_val = float("inf")
+    best_train = float("inf")
+    best_state = None
+    stale = 0
+    epochs_run = 0
+    for epoch in range(1, epochs + 1):
+        train_loss = _run_epoch(model, train_loader, criterion, device, optimizer, clip)
+        val_loss = _run_epoch(model, val_loader, criterion, device)
+        scheduler.step(val_loss)
+        epochs_run = epoch
+        if on_epoch is not None:
+            on_epoch(epoch, train_loss, val_loss)
+        if val_loss < best_val - 1e-9:
+            best_val, best_train = val_loss, train_loss
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            stale = 0
+        else:
+            stale += 1
+            if stale >= patience:
+                break
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    return best_train, best_val, epochs_run
+
+
 def train(
     csv_path: Path,
     output_dir: Path,
@@ -48,9 +116,6 @@ def train(
     val_loader = DataLoader(val_set, batch_size=batch_size)
 
     model = ReturnLSTM(hidden_size=hidden_size, num_layers=num_layers, dropout=dropout)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = torch.nn.MSELoss()
-
     model_device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     model.to(model_device)
 
@@ -59,31 +124,18 @@ def train(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for epoch in range(1, epochs + 1):
-        model.train()
-        total_loss = 0.0
-        for features, target in train_loader:
-            features, target = features.to(model_device), target.to(model_device)
-            optimizer.zero_grad()
-            preds = model(features)
-            loss = criterion(preds, target)
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item() * features.size(0)
-        train_loss = total_loss / len(train_loader.dataset)
-
-        model.eval()
-        val_loss_total = 0.0
-        with torch.no_grad():
-            for features, target in val_loader:
-                features, target = features.to(model_device), target.to(model_device)
-                preds = model(features)
-                loss = criterion(preds, target)
-                val_loss_total += loss.item() * features.size(0)
-        val_loss = val_loss_total / len(val_loader.dataset)
-
-        print(f"Epoch {epoch:03d} | train_loss={train_loss:.6f} | val_loss={val_loss:.6f}")
-
+    _, val_loss, epochs_run = fit_model(
+        model,
+        train_loader,
+        val_loader,
+        epochs=epochs,
+        lr=lr,
+        device=model_device,
+        on_epoch=lambda e, tl, vl: print(
+            f"Epoch {e:03d} | train_loss={tl:.6f} | val_loss={vl:.6f}"
+        ),
+    )
+    print(f"Bestes val_loss={val_loss:.6f} (nach {epochs_run} Epochen, Early Stopping aktiv)")
     print(f"Skill-Score vs. Baseline: {skill_score(val_loss, baseline_loss):+.1%}")
 
     model_path = output_dir / "return_lstm.pt"

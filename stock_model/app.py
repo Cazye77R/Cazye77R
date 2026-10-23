@@ -28,6 +28,7 @@ from .inference import (
     project_prices,
 )
 from .model import ReturnLSTM
+from .train import fit_model
 
 
 @st.cache_data(show_spinner=False)
@@ -70,33 +71,9 @@ def train_lightweight_model(
     val_loader = DataLoader(val_set, batch_size=64)
 
     model = ReturnLSTM(hidden_size=hidden_size, num_layers=num_layers, dropout=dropout).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = torch.nn.MSELoss()
-
-    train_loss = 0.0
-    val_loss = 0.0
-    for _ in range(epochs):
-        model.train()
-        epoch_loss = 0.0
-        for features, target in train_loader:
-            features, target = features.to(device), target.to(device)
-            optimizer.zero_grad()
-            preds = model(features)
-            loss = criterion(preds, target)
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item() * features.size(0)
-        train_loss = epoch_loss / len(train_loader.dataset)
-
-        model.eval()
-        val_epoch_loss = 0.0
-        with torch.no_grad():
-            for features, target in val_loader:
-                features, target = features.to(device), target.to(device)
-                preds = model(features)
-                loss = criterion(preds, target)
-                val_epoch_loss += loss.item() * features.size(0)
-        val_loss = val_epoch_loss / len(val_loader.dataset)
+    train_loss, val_loss, _ = fit_model(
+        model, train_loader, val_loader, epochs=epochs, lr=lr, device=device
+    )
 
     return model, train_loss, val_loss, mean, std
 
