@@ -39,7 +39,8 @@ def render() -> None:
     for sym in pt_state.positions:
         d = cached_ohlcv(sym, "5d")
         current_prices[sym] = (
-            float(d["Close"].iloc[-1]) if not d.empty
+            float(d["Close"].iloc[-1])
+            if not d.empty
             else pt_state.positions[sym].get("avg_price", 0)
         )
 
@@ -51,10 +52,10 @@ def render() -> None:
     kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
 
     # Gesamtwert – klickbarer Button (Easter-Egg Klick-Counter)
-    _currency     = st.session_state.selected_currency
-    _display_val  = get_currency_display(summary["total_value"], _currency)
-    _ret_color    = GREEN if summary["total_return_pct"] >= 0 else RED
-    _ret_sign     = "+" if summary["total_return_pct"] >= 0 else ""
+    _currency = st.session_state.selected_currency
+    _display_val = get_currency_display(summary["total_value"], _currency)
+    _ret_color = GREEN if summary["total_return_pct"] >= 0 else RED
+    _ret_sign = "+" if summary["total_return_pct"] >= 0 else ""
     with kpi1:
         if ENABLE_EASTER_EGGS:
             if st.button(
@@ -74,12 +75,12 @@ def render() -> None:
             st.metric("💼 Gesamtwert", _display_val)
         st.markdown(
             f'<span style="color:{_ret_color};font-family:IBM Plex Mono;">'
-            f'{_ret_sign}{summary["total_return_pct"]:.2f}%</span>',
+            f"{_ret_sign}{summary['total_return_pct']:.2f}%</span>",
             unsafe_allow_html=True,
         )
 
-    kpi2.metric("Cash",           f"{summary['cash']:,.2f} €")
-    kpi3.metric("Positionen",     f"{summary['position_value']:,.2f} €")
+    kpi2.metric("Cash", f"{summary['cash']:,.2f} €")
+    kpi3.metric("Positionen", f"{summary['position_value']:,.2f} €")
     kpi4.metric(
         "Realisiert",
         f"{summary['realized_pnl']:+,.2f} €",
@@ -87,16 +88,15 @@ def render() -> None:
     )
     win_r = summary.get("win_rate", 0.0)
     n_sell = summary.get("num_sell_trades", 0)
-    kpi5.metric("Win-Rate",       f"{win_r:.0%}" if n_sell else "–",
-                f"{n_sell} Trades")
+    kpi5.metric("Win-Rate", f"{win_r:.0%}" if n_sell else "–", f"{n_sell} Trades")
 
     # Währungsauswahl nach Unlock
     if ENABLE_EASTER_EGGS and st.session_state.currency_unlocked:
         st.markdown(
             '<div class="sm-card-accent">'
-            '🎉 <strong>Easter Egg freigeschaltet!</strong> '
-            'Die geheime Währungsauswahl ist jetzt in der Sidebar verfügbar.'
-            '</div>',
+            "🎉 <strong>Easter Egg freigeschaltet!</strong> "
+            "Die geheime Währungsauswahl ist jetzt in der Sidebar verfügbar."
+            "</div>",
             unsafe_allow_html=True,
         )
 
@@ -120,8 +120,7 @@ def render() -> None:
     perf_df = pt.get_performance_chart()
     if len(perf_df) > 1:
         st.plotly_chart(
-            equity_chart(perf_df, float(pt_state.start_budget),
-                          "Portfolio-Wert über Zeit"),
+            equity_chart(perf_df, float(pt_state.start_budget), "Portfolio-Wert über Zeit"),
             width="stretch",
         )
 
@@ -140,24 +139,25 @@ def render() -> None:
 
     # ── Trading-Tabs ──────────────────────────────────────────────────────────
     st.divider()
-    t_manual, t_auto, t_hist, t_reset = st.tabs([
-        "🖱️ Manuelle Order", "🤖 Auto-Trade", "📋 Trade-Historie", "⚠️ Reset"
-    ])
+    t_manual, t_auto, t_hist, t_reset = st.tabs(
+        ["🖱️ Manuelle Order", "🤖 Auto-Trade", "📋 Trade-Historie", "⚠️ Reset"]
+    )
 
     with t_manual:
-        st.caption("Simulierter Handel – kein echtes Geld. Kauf/Verkauf wird sofort zum aktuellen Schlusskurs ausgeführt.")
+        st.caption(
+            "Simulierter Handel – kein echtes Geld. Kauf/Verkauf wird sofort zum aktuellen Schlusskurs ausgeführt."
+        )
         if st.session_state.df is not None and st.session_state.ticker:
             ticker_pt = st.session_state.ticker
-            df_pt     = st.session_state.df
-            price_pt  = float(df_pt["Close"].iloc[-1])
+            df_pt = st.session_state.df
+            price_pt = float(df_pt["Close"].iloc[-1])
             pt_state_now = pt.load()
 
             ma1, ma2, ma3, ma4 = st.columns(4)
             with ma1:
                 pt_dir = st.selectbox("Richtung", ["BUY", "SELL"], key="pt_dir")
             with ma2:
-                pt_frac = st.slider("Cash-Anteil", 0.05, 1.0, 0.2, 0.05,
-                                    key="pt_frac")
+                pt_frac = st.slider("Cash-Anteil", 0.05, 1.0, 0.2, 0.05, key="pt_frac")
             with ma3:
                 st.metric("Kurs", f"{price_pt:.2f} €")
             with ma4:
@@ -185,11 +185,20 @@ def render() -> None:
                         for sym, p in pt_state_now.positions.items()
                         if _ticker_market(sym) == _market
                     )
-                    _order_value = invest  # Spread/Gebühr sind hier vernachlässigbar für die Vorschau
+                    _order_value = (
+                        invest  # Spread/Gebühr sind hier vernachlässigbar für die Vorschau
+                    )
                     _correlated_pct = (_already_correlated + _order_value) / _equity_now * 100
                     if _correlated_pct >= MAX_CORRELATED_EXPOSURE_PCT:
-                        _max_order_value = max(0.0, _equity_now * MAX_CORRELATED_EXPOSURE_PCT / 100 - _already_correlated)
-                        _max_frac = min(1.0, _max_order_value / pt_state_now.cash) if pt_state_now.cash > 0 else 0.0
+                        _max_order_value = max(
+                            0.0,
+                            _equity_now * MAX_CORRELATED_EXPOSURE_PCT / 100 - _already_correlated,
+                        )
+                        _max_frac = (
+                            min(1.0, _max_order_value / pt_state_now.cash)
+                            if pt_state_now.cash > 0
+                            else 0.0
+                        )
                         st.warning(
                             f"⚠️ Diese Order ({_correlated_pct:.0f}% Exposure in Markt-Gruppe "
                             f"'{_market}') überschreitet das Risk-Manager-Limit von "
@@ -210,10 +219,8 @@ def render() -> None:
                     spread_f = st.session_state.pt_spread / 100
                     qty = invest / (price_pt * (1 + spread_f))
                 else:
-                    qty = (pt_state_now.positions
-                           .get(ticker_pt, {}).get("quantity", 0))
-                res = pt.place_order(ticker_pt, pt_dir, qty, price_pt,
-                                     signal=sig_str)
+                    qty = pt_state_now.positions.get(ticker_pt, {}).get("quantity", 0)
+                res = pt.place_order(ticker_pt, pt_dir, qty, price_pt, signal=sig_str)
                 if res["ok"]:
                     pnl_str = f"{res['pnl']:+.2f} €" if res.get("pnl") else "–"
                     # Toast statt st.success – überlebt den folgenden Rerun
@@ -240,59 +247,65 @@ def render() -> None:
             with aa1:
                 at_cycles = st.slider("Zyklen", 1, 10, 3, key="at_cycles")
             with aa2:
-                at_invest = st.slider("Invest-Anteil/BUY",
-                                      0.05, 0.5, 0.2, 0.05, key="at_invest")
+                at_invest = st.slider("Invest-Anteil/BUY", 0.05, 0.5, 0.2, 0.05, key="at_invest")
             with aa3:
                 at_method = st.selectbox(
-                    "Methode", ANALYSIS_METHODS,
+                    "Methode",
+                    ANALYSIS_METHODS,
                     index=ANALYSIS_METHODS.index("Auto (KI wählt)"),
                     key="at_method",
                 )
             _HOLD_LABELS = {
-                "HOLD_ALREADY_IN":  "Bereits in Position – kein Neukauf",
-                "HOLD_LOW_CASH":    "Zu wenig Cash",
+                "HOLD_ALREADY_IN": "Bereits in Position – kein Neukauf",
+                "HOLD_LOW_CASH": "Zu wenig Cash",
                 "HOLD_NO_POSITION": "Keine Position zum Verkaufen",
-                "HOLD_NEUTRAL":     "Konfidenz < 50 % – kein Signal",
-                "HOLD_RISK_LIMIT":  "Risk-Manager: Positionsgröße 0",
-                "BUY_FAILED":       "Kauf fehlgeschlagen",
-                "SELL_FAILED":      "Verkauf fehlgeschlagen",
-                "SKIP":             "Übersprungen (Fehler)",
+                "HOLD_NEUTRAL": "Konfidenz < 50 % – kein Signal",
+                "HOLD_RISK_LIMIT": "Risk-Manager: Positionsgröße 0",
+                "BUY_FAILED": "Kauf fehlgeschlagen",
+                "SELL_FAILED": "Verkauf fehlgeschlagen",
+                "SKIP": "Übersprungen (Fehler)",
             }
 
             def _at_log_line(entry: dict) -> str:
                 decision = entry.get("decision", "?")
-                pred     = entry.get("prediction", "?")
-                conf     = entry.get("confidence", 0.0)
-                price    = entry.get("current_price")
-                pval     = entry.get("portfolio_value")
+                pred = entry.get("prediction", "?")
+                conf = entry.get("confidence", 0.0)
+                price = entry.get("current_price")
+                pval = entry.get("portfolio_value")
 
                 if decision == "BUY":
-                    icon  = "🟢"
+                    icon = "🟢"
                     label = f"**KAUF** · {pred} ({conf:.0%})"
                 elif decision == "SELL":
-                    icon  = "🔴"
-                    label = f"**VERKAUF** · {pred} ({conf:.0%}) · PnL {entry.get('pnl', 0.0):+.2f} €"
+                    icon = "🔴"
+                    label = (
+                        f"**VERKAUF** · {pred} ({conf:.0%}) · PnL {entry.get('pnl', 0.0):+.2f} €"
+                    )
                 elif decision == "STOP_LOSS":
-                    icon  = "🛑"
+                    icon = "🛑"
                     label = f"**STOP-LOSS** · PnL {entry.get('pnl', 0.0):+.2f} €"
                 elif decision == "TAKE_PROFIT":
-                    icon  = "🎯"
+                    icon = "🎯"
                     label = f"**TAKE-PROFIT** · PnL {entry.get('pnl', 0.0):+.2f} €"
                 elif decision == "SKIP":
-                    icon  = "❌"
+                    icon = "❌"
                     label = f"Fehler: {entry.get('reason', '?')}"
                 else:
-                    icon  = "⚪"
+                    icon = "⚪"
                     label = _HOLD_LABELS.get(decision, f"HALTEN ({decision})")
                     if pred and pred != "?":
                         label += f" · Signal: {pred} ({conf:.0%})"
 
                 price_str = f" · Kurs {price:.2f} €" if price else ""
-                pval_str  = f" · Portfolio {pval:,.0f} €" if pval else ""
-                return f"{icon} Zyklus {entry.get('cycle','?')}: {label}{price_str}{pval_str}"
+                pval_str = f" · Portfolio {pval:,.0f} €" if pval else ""
+                return f"{icon} Zyklus {entry.get('cycle', '?')}: {label}{price_str}{pval_str}"
 
-            if st.button("🚀 Auto-Trade starten", use_container_width=True,
-                         type="primary", key="btn_auto_trade"):
+            if st.button(
+                "🚀 Auto-Trade starten",
+                use_container_width=True,
+                type="primary",
+                key="btn_auto_trade",
+            ):
                 if not cached_check_llm(current_provider()):
                     st.toast("LLM offline.", icon="🚨")
                     st.error("LLM offline – Provider im Tab ⚙️ prüfen.")
@@ -322,8 +335,7 @@ def render() -> None:
                                 line = _at_log_line(entry)
                                 st.write(line)
                                 at_lines.append(line)
-                        at_status.update(label="Auto-Trade abgeschlossen!",
-                                         state="complete")
+                        at_status.update(label="Auto-Trade abgeschlossen!", state="complete")
                     # Protokoll persistieren – überlebt so den Rerun
                     st.session_state.auto_trade_result = {"log": at_lines}
                     st.rerun()
@@ -340,21 +352,32 @@ def render() -> None:
     with t_hist:
         if pt_state.trades:
             th = pd.DataFrame(pt_state.trades)
-            cols = ["timestamp", "symbol", "direction", "quantity",
-                    "exec_price", "pnl", "pnl_pct", "signal"]
+            cols = [
+                "timestamp",
+                "symbol",
+                "direction",
+                "quantity",
+                "exec_price",
+                "pnl",
+                "pnl_pct",
+                "signal",
+            ]
             show = [c for c in cols if c in th.columns]
             st.dataframe(
                 th[show].sort_values("timestamp", ascending=False),
-                width="stretch", hide_index=True,
+                width="stretch",
+                hide_index=True,
                 column_config={
-                    "timestamp":  st.column_config.DatetimeColumn("Zeitpunkt", format="DD.MM.YYYY HH:mm"),
-                    "symbol":     st.column_config.TextColumn("Symbol"),
-                    "direction":  st.column_config.TextColumn("Richtung"),
-                    "quantity":   st.column_config.NumberColumn("Stück", format="%.4f"),
+                    "timestamp": st.column_config.DatetimeColumn(
+                        "Zeitpunkt", format="DD.MM.YYYY HH:mm"
+                    ),
+                    "symbol": st.column_config.TextColumn("Symbol"),
+                    "direction": st.column_config.TextColumn("Richtung"),
+                    "quantity": st.column_config.NumberColumn("Stück", format="%.4f"),
                     "exec_price": st.column_config.NumberColumn("Ausführungskurs", format="%.2f €"),
-                    "pnl":        st.column_config.NumberColumn("PnL", format="%.2f €"),
-                    "pnl_pct":    st.column_config.NumberColumn("PnL %", format="%.2f %%"),
-                    "signal":     st.column_config.TextColumn("Signal"),
+                    "pnl": st.column_config.NumberColumn("PnL", format="%.2f €"),
+                    "pnl_pct": st.column_config.NumberColumn("PnL %", format="%.2f %%"),
+                    "signal": st.column_config.TextColumn("Signal"),
                 },
             )
             st.download_button(
@@ -371,11 +394,11 @@ def render() -> None:
         st.warning("⚠️ Alle Positionen und Trade-Historie werden gelöscht!")
         reset_b = st.number_input(
             "Neues Startkapital (€)",
-            value=float(pt_state.start_budget), step=1000.0,
+            value=float(pt_state.start_budget),
+            step=1000.0,
             key="pt_reset_budget",
         )
-        if st.button("🔄 Portfolio zurücksetzen", type="secondary",
-                     key="btn_pt_reset"):
+        if st.button("🔄 Portfolio zurücksetzen", type="secondary", key="btn_pt_reset"):
             pt.reset(new_budget=reset_b)
             st.toast(f"Portfolio zurückgesetzt auf {reset_b:,.0f} €.", icon="🔄")
             st.rerun()

@@ -65,19 +65,21 @@ def walk_forward_backtest(
     test_start = train_window
     while test_start + test_window <= n:
         train_df = df.iloc[test_start - train_window : test_start]
-        test_df  = df.iloc[test_start : test_start + test_window]
+        test_df = df.iloc[test_start : test_start + test_window]
 
         try:
             signals = strategy_fn(train_df, test_df)
         except Exception as exc:
-            fold_results.append({
-                "start":        str(test_df.index[0].date()),
-                "end":          str(test_df.index[-1].date()),
-                "total_return": 0.0,
-                "sharpe":       float("nan"),
-                "n_trades":     0,
-                "error":        str(exc),
-            })
+            fold_results.append(
+                {
+                    "start": str(test_df.index[0].date()),
+                    "end": str(test_df.index[-1].date()),
+                    "total_return": 0.0,
+                    "sharpe": float("nan"),
+                    "n_trades": 0,
+                    "error": str(exc),
+                }
+            )
             test_start += step
             continue
 
@@ -93,13 +95,15 @@ def walk_forward_backtest(
         sharpe = _fold_sharpe(strat_returns)
         n_trades = int((signals.diff().abs() > 0).sum())
 
-        fold_results.append({
-            "start":        str(test_df.index[0].date()),
-            "end":          str(test_df.index[-1].date()),
-            "total_return": round(fold_total_return * 100, 2),
-            "sharpe":       round(sharpe, 3),
-            "n_trades":     n_trades,
-        })
+        fold_results.append(
+            {
+                "start": str(test_df.index[0].date()),
+                "end": str(test_df.index[-1].date()),
+                "total_return": round(fold_total_return * 100, 2),
+                "sharpe": round(sharpe, 3),
+                "n_trades": n_trades,
+            }
+        )
         all_equity_pieces.append(equity)
 
         test_start += step
@@ -117,15 +121,16 @@ def walk_forward_backtest(
         equity_curve = pd.Series(dtype=float)
 
     total_returns = [f["total_return"] for f in fold_results if "error" not in f]
-    sharpes       = [f["sharpe"] for f in fold_results if not np.isnan(f.get("sharpe", float("nan")))]
+    sharpes = [f["sharpe"] for f in fold_results if not np.isnan(f.get("sharpe", float("nan")))]
 
     return {
-        "fold_results":       fold_results,
-        "equity_curve":       equity_curve,
-        "total_return":       round(float(np.prod([1 + r / 100 for r in total_returns]) - 1) * 100, 2)
-                              if total_returns else 0.0,
-        "mean_sharpe":        round(float(np.mean(sharpes)), 3) if sharpes else float("nan"),
-        "n_folds":            len(fold_results),
+        "fold_results": fold_results,
+        "equity_curve": equity_curve,
+        "total_return": round(float(np.prod([1 + r / 100 for r in total_returns]) - 1) * 100, 2)
+        if total_returns
+        else 0.0,
+        "mean_sharpe": round(float(np.mean(sharpes)), 3) if sharpes else float("nan"),
+        "n_folds": len(fold_results),
         "n_folds_profitable": sum(1 for r in total_returns if r > 0),
     }
 

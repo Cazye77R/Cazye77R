@@ -21,11 +21,11 @@ AVAILABLE_MODELS: list[str] = [
 ]
 
 MODEL_DESCRIPTIONS: dict[str, str] = {
-    "llama3":  "Ausgewogen, gut für Analyse",
+    "llama3": "Ausgewogen, gut für Analyse",
     "mistral": "Schnell, effizient",
-    "phi3":    "Klein & sparsam",
-    "gemma2":  "Googles Modell",
-    "qwen2":   "Mehrsprachig",
+    "phi3": "Klein & sparsam",
+    "gemma2": "Googles Modell",
+    "qwen2": "Mehrsprachig",
 }
 
 # --- Multi-Provider ---

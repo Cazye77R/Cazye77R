@@ -66,6 +66,7 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
 # Multi-Armed Bandit – Algorithmen
 # ===========================================================================
 
+
 class BanditBase(ABC):
     """Gemeinsames Interface für alle Bandit-Algorithmen."""
 
@@ -96,9 +97,9 @@ class UCB1Bandit(BanditBase):
         self.c = c
 
     def select(self, state: dict, methods: list[str]) -> str:
-        history       = state.get("accuracy_history", [])
+        history = state.get("accuracy_history", [])
         method_scores = state.get("method_scores", {})
-        total         = max(1, state.get("cycles", 1))
+        total = max(1, state.get("cycles", 1))
 
         counts: dict[str, int] = {}
         for entry in history:
@@ -109,7 +110,7 @@ class UCB1Bandit(BanditBase):
         best_method, best_score = methods[0], -1.0
         for m in methods:
             acc = method_scores.get(m, 0.5)
-            n   = max(1, counts.get(m, 1))
+            n = max(1, counts.get(m, 1))
             ucb = acc + self.c * math.sqrt(math.log(total + 1) / n)
             if ucb > best_score:
                 best_score, best_method = ucb, m
@@ -141,32 +142,32 @@ class DiscountedUCB1(BanditBase):
     def __init__(
         self,
         gamma: float = DUCB_GAMMA,
-        c:     float = EXPLORATION_CONSTANT,
+        c: float = EXPLORATION_CONSTANT,
     ) -> None:
         if not (0.0 < gamma < 1.0):
             raise ValueError(f"gamma muss in (0, 1) liegen, nicht {gamma!r}.")
         self.gamma = gamma
-        self.c     = c
+        self.c = c
 
     def select(self, state: dict, methods: list[str]) -> str:
         history = state.get("accuracy_history", [])
-        t       = len(history)          # Gesamtanzahl Beobachtungen
+        t = len(history)  # Gesamtanzahl Beobachtungen
 
         # Diskontierte Summen pro Methode berechnen
-        disc_count:  dict[str, float] = {m: 0.0 for m in methods}
+        disc_count: dict[str, float] = {m: 0.0 for m in methods}
         disc_reward: dict[str, float] = {m: 0.0 for m in methods}
 
         for s, entry in enumerate(history):
             m = entry.get("method", "")
             if m not in disc_count:
                 continue
-            weight = self.gamma ** (t - 1 - s)          # γ^(t-s), s läuft ab 0
-            r      = 1.0 if entry.get("correct", False) else 0.0
-            disc_count[m]  += weight
+            weight = self.gamma ** (t - 1 - s)  # γ^(t-s), s läuft ab 0
+            r = 1.0 if entry.get("correct", False) else 0.0
+            disc_count[m] += weight
             disc_reward[m] += weight * r
 
         # Diskontierter Gesamtzähler n_t(γ) = (1 - γ^t) / (1 - γ)
-        n_total = (1.0 - self.gamma ** t) / (1.0 - self.gamma) if t > 0 else 1.0
+        n_total = (1.0 - self.gamma**t) / (1.0 - self.gamma) if t > 0 else 1.0
 
         best_method, best_ucb = methods[0], -1.0
         for m in methods:
@@ -199,7 +200,7 @@ class ThompsonSamplingBandit(BanditBase):
     def select(self, state: dict, methods: list[str]) -> str:
         history = state.get("accuracy_history", [])
 
-        wins:   dict[str, int] = {m: 0 for m in methods}
+        wins: dict[str, int] = {m: 0 for m in methods}
         losses: dict[str, int] = {m: 0 for m in methods}
 
         for entry in history:
@@ -207,14 +208,11 @@ class ThompsonSamplingBandit(BanditBase):
             if m not in wins:
                 continue
             if entry.get("correct", False):
-                wins[m]   += 1
+                wins[m] += 1
             else:
                 losses[m] += 1
 
-        samples = {
-            m: float(self._rng.beta(wins[m] + 1, losses[m] + 1))
-            for m in methods
-        }
+        samples = {m: float(self._rng.beta(wins[m] + 1, losses[m] + 1)) for m in methods}
         return max(samples, key=lambda k: samples[k])
 
 
@@ -228,7 +226,7 @@ _BANDIT_NAMES = ("UCB1", "D-UCB", "Thompson")
 def get_bandit(
     name: str,
     gamma: float = DUCB_GAMMA,
-    c:     float = EXPLORATION_CONSTANT,
+    c: float = EXPLORATION_CONSTANT,
 ) -> BanditBase:
     """
     Erstellt eine Bandit-Instanz anhand des Namens.
@@ -250,11 +248,12 @@ def get_bandit(
 # A/B-Vergleich: compare_bandits
 # ---------------------------------------------------------------------------
 
+
 def compare_bandits(
     history: list[dict],
     methods: list[str],
-    gamma:   float = DUCB_GAMMA,
-    c:       float = EXPLORATION_CONSTANT,
+    gamma: float = DUCB_GAMMA,
+    c: float = EXPLORATION_CONSTANT,
 ) -> dict:
     """
     Vergleicht UCB1, D-UCB und Thompson Sampling auf einem historischen
@@ -290,18 +289,18 @@ def compare_bandits(
         }
 
     bandits: dict[str, BanditBase] = {
-        "UCB1":     UCB1Bandit(c=c),
-        "D-UCB":    DiscountedUCB1(gamma=gamma, c=c),
+        "UCB1": UCB1Bandit(c=c),
+        "D-UCB": DiscountedUCB1(gamma=gamma, c=c),
         "Thompson": ThompsonSamplingBandit(rng_seed=42),
     }
 
-    cum_rewards:  dict[str, list[float]] = {n: [] for n in bandits}
-    selections:   dict[str, list[str]]   = {n: [] for n in bandits}
-    running_totals: dict[str, float]     = {n: 0.0 for n in bandits}
+    cum_rewards: dict[str, list[float]] = {n: [] for n in bandits}
+    selections: dict[str, list[str]] = {n: [] for n in bandits}
+    running_totals: dict[str, float] = {n: 0.0 for n in bandits}
 
     # Laufende Methoden-Durchschnitte für Counterfactual-Rewards
-    method_wins: dict[str, int]   = {m: 0 for m in methods}
-    method_cnt:  dict[str, int]   = {m: 0 for m in methods}
+    method_wins: dict[str, int] = {m: 0 for m in methods}
+    method_cnt: dict[str, int] = {m: 0 for m in methods}
 
     for t, obs in enumerate(history):
         actual_method = obs.get("method", "")
@@ -338,21 +337,21 @@ def compare_bandits(
         # Beobachtung registrieren
         if actual_method in method_wins:
             method_wins[actual_method] += int(actual_reward)
-            method_cnt[actual_method]  += 1
+            method_cnt[actual_method] += 1
 
     fig = _make_comparison_figure(cum_rewards, history)
 
     return {
         "cumulative_rewards": cum_rewards,
-        "final_rewards":      {n: round(v[-1], 2) for n, v in cum_rewards.items() if v},
-        "selections":         selections,
-        "figure":             fig,
+        "final_rewards": {n: round(v[-1], 2) for n, v in cum_rewards.items() if v},
+        "selections": selections,
+        "figure": fig,
     }
 
 
 def _replay_method_scores(history: list[dict], methods: list[str]) -> dict[str, float]:
     """Recomputes method_scores dict from partial history."""
-    wins:   dict[str, int] = {m: 0 for m in methods}
+    wins: dict[str, int] = {m: 0 for m in methods}
     counts: dict[str, int] = {m: 0 for m in methods}
     for entry in history:
         m = entry.get("method", "")
@@ -360,10 +359,7 @@ def _replay_method_scores(history: list[dict], methods: list[str]) -> dict[str, 
             counts[m] += 1
             if entry.get("correct", False):
                 wins[m] += 1
-    return {
-        m: round(wins[m] / counts[m], 4) if counts[m] > 0 else 0.5
-        for m in methods
-    }
+    return {m: round(wins[m] / counts[m], 4) if counts[m] > 0 else 0.5 for m in methods}
 
 
 def _make_comparison_figure(
@@ -374,10 +370,10 @@ def _make_comparison_figure(
     import plotly.graph_objects as go
 
     _DARK_BG = {
-        "plot_bgcolor":  "#0d1117",
+        "plot_bgcolor": "#0d1117",
         "paper_bgcolor": "#0d1117",
-        "font":          {"color": "#c9d1d9", "family": "IBM Plex Mono, monospace"},
-        "margin":        {"t": 40, "b": 30, "l": 40, "r": 10},
+        "font": {"color": "#c9d1d9", "family": "IBM Plex Mono, monospace"},
+        "margin": {"t": 40, "b": 30, "l": 40, "r": 10},
     }
     _COLORS = {"UCB1": "#58a6ff", "D-UCB": "#00ff88", "Thompson": "#f0b429"}
 
@@ -386,13 +382,15 @@ def _make_comparison_figure(
     for bname, rewards in cum_rewards.items():
         if not rewards:
             continue
-        fig.add_trace(go.Scatter(
-            x=x[:len(rewards)],
-            y=rewards,
-            mode="lines",
-            name=bname,
-            line=dict(color=_COLORS.get(bname, "#aaa"), width=2),
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=x[: len(rewards)],
+                y=rewards,
+                mode="lines",
+                name=bname,
+                line=dict(color=_COLORS.get(bname, "#aaa"), width=2),
+            )
+        )
 
     fig.update_layout(
         **_DARK_BG,
@@ -405,11 +403,10 @@ def _make_comparison_figure(
     return fig
 
 
-
-
 # ===========================================================================
 # StockTrainer – Klasse
 # ===========================================================================
+
 
 class StockTrainer:
     """
@@ -429,11 +426,11 @@ class StockTrainer:
       accuracy (Legacy), feature_importance (Legacy), training_log (Legacy)
     """
 
-    TRAINING_PERIOD   = "6mo"
-    CANDLE_WINDOW     = 60      # Kerzen im LLM-Kontext
-    MAX_INSIGHTS      = 15      # Maximale gespeicherte Insights
-    TABLE_ROWS        = 20      # Detailzeilen in der Kerzen-Tabelle
-    NEUTRAL_BAND_PCT  = 0.25    # |Änderung| unterhalb → Ist-Richtung NEUTRAL
+    TRAINING_PERIOD = "6mo"
+    CANDLE_WINDOW = 60  # Kerzen im LLM-Kontext
+    MAX_INSIGHTS = 15  # Maximale gespeicherte Insights
+    TABLE_ROWS = 20  # Detailzeilen in der Kerzen-Tabelle
+    NEUTRAL_BAND_PCT = 0.25  # |Änderung| unterhalb → Ist-Richtung NEUTRAL
 
     def __init__(self, base_dir: str | None = None) -> None:
         root = Path(os.path.dirname(os.path.dirname(__file__)))
@@ -450,19 +447,19 @@ class StockTrainer:
     def _default_state(self, symbol: str) -> dict:
         return {
             # Neue Felder (Spec)
-            "symbol":           symbol.upper(),
-            "cycles":           0,
+            "symbol": symbol.upper(),
+            "cycles": 0,
             "accuracy_history": [],
             "current_accuracy": 0.0,
-            "best_method":      None,
-            "method_scores":    {},
-            "last_trained":     None,
-            "model_used":       None,
-            "insights":         [],
+            "best_method": None,
+            "method_scores": {},
+            "last_trained": None,
+            "model_used": None,
+            "insights": [],
             # Legacy-Felder (app.py / predictor.py)
-            "accuracy":          None,
+            "accuracy": None,
             "feature_importance": {},
-            "training_log":      [],
+            "training_log": [],
         }
 
     def load_state(self, symbol: str) -> dict:
@@ -474,7 +471,9 @@ class StockTrainer:
             with open(path) as f:
                 state = json.load(f)
         except (json.JSONDecodeError, OSError) as exc:
-            logger.warning(f"Trainingszustand {path.name} unlesbar ({exc}) – Neustart mit Defaults.")
+            logger.warning(
+                f"Trainingszustand {path.name} unlesbar ({exc}) – Neustart mit Defaults."
+            )
             return self._default_state(symbol)
         # Schema-Migration: fehlende Schlüssel ergänzen
         defaults = self._default_state(symbol)
@@ -490,7 +489,6 @@ class StockTrainer:
 
     def list_trained(self) -> list[str]:
         return [p.stem for p in self._state_dir.glob("*.json")]
-
 
     # ------------------------------------------------------------------
     # 3. run_training_cycle
@@ -539,10 +537,10 @@ class StockTrainer:
         # Ein fester Cutoff am letzten Balken würde in jedem Zyklus denselben
         # Tag bewerten – N Zyklen wären dann N Wiederholungen EINER Beobachtung.
         rng = np.random.default_rng()
-        k   = int(rng.integers(max(20, int(len(df) * 0.6)), len(df)))
-        train_df   = df.iloc[:k]        # LLM sieht nur Daten vor dem Validierungs-Bar
+        k = int(rng.integers(max(20, int(len(df) * 0.6)), len(df)))
+        train_df = df.iloc[:k]  # LLM sieht nur Daten vor dem Validierungs-Bar
         close_prev = float(df["Close"].iloc[k - 1])
-        close_now  = float(df["Close"].iloc[k])
+        close_now = float(df["Close"].iloc[k])
         actual_chg = (close_now - close_prev) / close_prev * 100
         # Dead-Band: kleine Bewegungen zählen als NEUTRAL – sonst kann eine
         # korrekte NEUTRAL-Vorhersage nie als Treffer gewertet werden
@@ -558,30 +556,30 @@ class StockTrainer:
         prompt = self._build_prompt(symbol, train_df, method)
         system = self._system_prompt()
         try:
-            raw_response = query_model(model_name, prompt, system, temperature=0.1, provider=provider)
+            raw_response = query_model(
+                model_name, prompt, system, temperature=0.1, provider=provider
+            )
         except Exception as exc:
             logger.error(f"LLM-Anfrage fehlgeschlagen ({symbol}, {method}): {exc}")
             return self._error_result(str(exc), symbol, method)
 
         # --- Antwort parsen ---
-        parsed     = self._parse_llm_response(raw_response)
+        parsed = self._parse_llm_response(raw_response)
         prediction = parsed.get("prediction", "NEUTRAL")
         confidence = float(parsed.get("confidence", 0.5))
-        reasoning  = str(parsed.get("reasoning", raw_response[:300]))
+        reasoning = str(parsed.get("reasoning", raw_response[:300]))
 
-        correct = (prediction == actual_dir)
+        correct = prediction == actual_dir
 
         # --- State aktualisieren ---
         state = self.load_state(symbol)
-        state["cycles"]     += 1
+        state["cycles"] += 1
         state["last_trained"] = datetime.now().isoformat()
-        state["model_used"]   = model_name
+        state["model_used"] = model_name
 
         # Method score (laufender Durchschnitt)
         prev_score = state["method_scores"].get(method)
-        n_method   = sum(
-            1 for e in state["accuracy_history"] if e.get("method") == method
-        )
+        n_method = sum(1 for e in state["accuracy_history"] if e.get("method") == method)
         if prev_score is None:
             new_score = 1.0 if correct else 0.0
         else:
@@ -589,31 +587,29 @@ class StockTrainer:
         state["method_scores"][method] = round(new_score, 4)
 
         # Best method
-        state["best_method"] = max(
-            state["method_scores"], key=lambda k: state["method_scores"][k]
-        )
+        state["best_method"] = max(state["method_scores"], key=lambda k: state["method_scores"][k])
 
         # Gesamtgenauigkeit
-        prev_correct = sum(
-            1 for e in state["accuracy_history"] if e.get("correct", False)
-        )
+        prev_correct = sum(1 for e in state["accuracy_history"] if e.get("correct", False))
         state["current_accuracy"] = round(
             (prev_correct + (1 if correct else 0)) / state["cycles"], 4
         )
-        state["accuracy"] = state["current_accuracy"]   # Legacy
+        state["accuracy"] = state["current_accuracy"]  # Legacy
 
         # Accuracy-History-Eintrag
-        state["accuracy_history"].append({
-            "cycle":             state["cycles"],
-            "timestamp":         state["last_trained"],
-            "method":            method,
-            "prediction":        prediction,
-            "actual":            actual_dir,
-            "actual_change_pct": round(actual_chg, 3),
-            "correct":           correct,
-            "confidence":        round(confidence, 3),
-            "accuracy_snapshot": state["current_accuracy"],
-        })
+        state["accuracy_history"].append(
+            {
+                "cycle": state["cycles"],
+                "timestamp": state["last_trained"],
+                "method": method,
+                "prediction": prediction,
+                "actual": actual_dir,
+                "actual_change_pct": round(actual_chg, 3),
+                "correct": correct,
+                "confidence": round(confidence, 3),
+                "accuracy_snapshot": state["current_accuracy"],
+            }
+        )
 
         # Insight speichern
         tick = "✓" if correct else "✗"
@@ -622,30 +618,32 @@ class StockTrainer:
             f"({actual_chg:+.2f}%) | {reasoning[:180]}"
         )
         state["insights"].append(insight)
-        state["insights"] = state["insights"][-self.MAX_INSIGHTS:]
+        state["insights"] = state["insights"][-self.MAX_INSIGHTS :]
 
         # Legacy training_log
-        state["training_log"].append({
-            "cycle":     state["cycles"],
-            "timestamp": state["last_trained"],
-            "method":    method,
-            "accuracy":  state["current_accuracy"],
-        })
+        state["training_log"].append(
+            {
+                "cycle": state["cycles"],
+                "timestamp": state["last_trained"],
+                "method": method,
+                "accuracy": state["current_accuracy"],
+            }
+        )
 
         self._save_state(state)
 
         return {
-            "prediction":       prediction,
-            "confidence":       round(confidence, 3),
-            "reasoning":        reasoning,
-            "correct":          correct,
-            "actual":           actual_dir,
+            "prediction": prediction,
+            "confidence": round(confidence, 3),
+            "reasoning": reasoning,
+            "correct": correct,
+            "actual": actual_dir,
             "actual_change_pct": round(actual_chg, 3),
-            "cycle":            state["cycles"],
-            "method":           method,
-            "method_accuracy":  round(new_score, 3),
+            "cycle": state["cycles"],
+            "method": method,
+            "method_accuracy": round(new_score, 3),
             "overall_accuracy": state["current_accuracy"],
-            "symbol":           symbol.upper(),
+            "symbol": symbol.upper(),
         }
 
     # ------------------------------------------------------------------
@@ -654,10 +652,10 @@ class StockTrainer:
 
     def auto_mode(
         self,
-        symbol:      str,
-        model_name:  str,
+        symbol: str,
+        model_name: str,
         bandit_name: str = "UCB1",
-        provider:    str | None = None,
+        provider: str | None = None,
     ) -> dict:
         """
         Wählt automatisch die nächste zu testende Methode nach dem gewählten
@@ -674,20 +672,20 @@ class StockTrainer:
             run_training_cycle-Ergebnis + {"selected_method", "preferred_method",
             "bandit_used"}
         """
-        bandit          = get_bandit(bandit_name)
-        state           = self.load_state(symbol)
+        bandit = get_bandit(bandit_name)
+        state = self.load_state(symbol)
         selected_method = self._select_next_method(state, bandit=bandit)
-        result          = self.run_training_cycle(symbol, selected_method, model_name, provider=provider)
+        result = self.run_training_cycle(symbol, selected_method, model_name, provider=provider)
 
         updated_state = self.load_state(symbol)
-        result["selected_method"]  = selected_method
+        result["selected_method"] = selected_method
         result["preferred_method"] = updated_state.get("best_method") or selected_method
-        result["bandit_used"]      = bandit_name
+        result["bandit_used"] = bandit_name
         return result
 
     def _select_next_method(
         self,
-        state:  dict,
+        state: dict,
         bandit: BanditBase | None = None,
     ) -> str:
         """
@@ -725,14 +723,13 @@ class StockTrainer:
         Returns:
             run_training_cycle-Ergebnis (validiert gegen letzte bekannte Kerze)
         """
-        state       = self.load_state(symbol)
+        state = self.load_state(symbol)
         best_method = state.get("best_method")
         if not best_method or best_method not in state.get("method_scores", {}):
             best_method = _METHODS[0]
         result = self.run_training_cycle(symbol, best_method, model_name, provider=provider)
         result["is_best_method_prediction"] = True
         return result
-
 
     # ------------------------------------------------------------------
     # Prompt-Aufbau
@@ -754,15 +751,15 @@ class StockTrainer:
         - Methoden-spezifischen Indikatoren
         """
         ctx = df.tail(self.CANDLE_WINDOW)
-        n   = len(ctx)
+        n = len(ctx)
 
-        summary  = self._format_summary(ctx)
-        table    = self._format_candle_table(ctx)
+        summary = self._format_summary(ctx)
+        table = self._format_candle_table(ctx)
         ind_text = self._format_indicators(ctx, method)
 
         latest_close = float(ctx["Close"].iloc[-1])
-        prev_close   = float(ctx["Close"].iloc[-2])
-        day_chg      = (latest_close - prev_close) / prev_close * 100
+        prev_close = float(ctx["Close"].iloc[-2])
+        day_chg = (latest_close - prev_close) / prev_close * 100
 
         return (
             f"Aktie: {symbol.upper()}  |  Analyse-Methode: {method}\n\n"
@@ -781,12 +778,12 @@ class StockTrainer:
         )
 
     def _format_summary(self, df: pd.DataFrame) -> str:
-        close   = df["Close"]
-        volume  = df["Volume"]
+        close = df["Close"]
+        volume = df["Volume"]
         start_p = float(close.iloc[0])
-        end_p   = float(close.iloc[-1])
-        trend   = (end_p - start_p) / start_p * 100
-        lines   = [
+        end_p = float(close.iloc[-1])
+        trend = (end_p - start_p) / start_p * 100
+        lines = [
             f"Zeitraum   : {str(df.index[0])[:10]} – {str(df.index[-1])[:10]} ({len(df)} Tage)",
             f"Kurs-Range : {float(close.min()):.2f} – {float(close.max()):.2f}",
             f"Trend      : {trend:+.2f}% (Start {start_p:.2f} → Aktuell {end_p:.2f})",
@@ -797,18 +794,16 @@ class StockTrainer:
 
     def _format_candle_table(self, df: pd.DataFrame) -> str:
         """Letzte TABLE_ROWS Kerzen als kompakte Tabelle."""
-        rows   = df.tail(self.TABLE_ROWS)
+        rows = df.tail(self.TABLE_ROWS)
         header = "Datum       | Schluss | Δ%    | Volumen"
-        lines  = [header, "-" * len(header)]
-        prev   = float(rows["Close"].iloc[0])
+        lines = [header, "-" * len(header)]
+        prev = float(rows["Close"].iloc[0])
         for i, (idx, row) in enumerate(rows.iterrows()):
-            c   = float(row["Close"])
+            c = float(row["Close"])
             chg = (c - prev) / prev * 100 if i > 0 else 0.0
             vol = float(row["Volume"])
-            vol_str = f"{vol/1e6:.1f}M" if vol >= 1e6 else f"{vol/1e3:.0f}K"
-            lines.append(
-                f"{str(idx)[:10]} | {c:7.2f}  | {chg:+5.2f} | {vol_str}"
-            )
+            vol_str = f"{vol / 1e6:.1f}M" if vol >= 1e6 else f"{vol / 1e3:.0f}K"
+            lines.append(f"{str(idx)[:10]} | {c:7.2f}  | {chg:+5.2f} | {vol_str}")
             prev = c
         return "\n".join(lines)
 
@@ -823,15 +818,18 @@ class StockTrainer:
         lines.append(f"RSI(14)         : {rsi_val:.1f}  [{rsi_txt}]")
 
         # --- MACD ---
-        ema12   = close.ewm(span=12, adjust=False).mean()
-        ema26   = close.ewm(span=26, adjust=False).mean()
-        macd    = ema12 - ema26
-        sig     = macd.ewm(span=9, adjust=False).mean()
-        hist    = macd - sig
-        h_last  = float(hist.iloc[-1])
-        h_prev  = float(hist.iloc[-2])
-        cross   = "Bullish Crossover" if h_last > 0 > h_prev else (
-                  "Bearish Crossover" if h_last < 0 < h_prev else "")
+        ema12 = close.ewm(span=12, adjust=False).mean()
+        ema26 = close.ewm(span=26, adjust=False).mean()
+        macd = ema12 - ema26
+        sig = macd.ewm(span=9, adjust=False).mean()
+        hist = macd - sig
+        h_last = float(hist.iloc[-1])
+        h_prev = float(hist.iloc[-2])
+        cross = (
+            "Bullish Crossover"
+            if h_last > 0 > h_prev
+            else ("Bearish Crossover" if h_last < 0 < h_prev else "")
+        )
         lines.append(
             f"MACD-Histogramm : {h_last:+.4f}  "
             f"({'steigend' if h_last > h_prev else 'fallend'})"
@@ -839,23 +837,23 @@ class StockTrainer:
         )
 
         # --- Bollinger Bands ---
-        bb_mid  = close.rolling(20).mean()
-        bb_std  = close.rolling(20).std()
-        bb_up   = bb_mid + 2 * bb_std
-        bb_lo   = bb_mid - 2 * bb_std
-        bb_pct  = (close - bb_lo) / (bb_up - bb_lo).replace(0, float("nan"))
-        bpct    = float(bb_pct.iloc[-1]) if not bb_pct.isna().iloc[-1] else 0.5
+        bb_mid = close.rolling(20).mean()
+        bb_std = close.rolling(20).std()
+        bb_up = bb_mid + 2 * bb_std
+        bb_lo = bb_mid - 2 * bb_std
+        bb_pct = (close - bb_lo) / (bb_up - bb_lo).replace(0, float("nan"))
+        bpct = float(bb_pct.iloc[-1]) if not bb_pct.isna().iloc[-1] else 0.5
         lines.append(
             f"Bollinger %B    : {bpct:.2f}  "
-            f"({'über oberem Band' if bpct > 1 else 'unter unterem Band' if bpct < 0 else f'{bpct*100:.0f}% der Bandbreite'})"
+            f"({'über oberem Band' if bpct > 1 else 'unter unterem Band' if bpct < 0 else f'{bpct * 100:.0f}% der Bandbreite'})"
         )
 
         # --- SMAs ---
         for w in (20, 50, 200):
             if len(close) >= w:
-                sma   = float(close.rolling(w).mean().iloc[-1])
+                sma = float(close.rolling(w).mean().iloc[-1])
                 price = float(close.iloc[-1])
-                pos   = "darüber" if price > sma else "darunter"
+                pos = "darüber" if price > sma else "darunter"
                 lines.append(f"SMA({w:<3})         : {sma:.2f}  [Kurs {pos}]")
 
         # --- Methoden-spezifische Extras ---
@@ -876,8 +874,10 @@ class StockTrainer:
             sr_levels = self._calc_support_resistance(df)
             price = float(close.iloc[-1])
             resistances = sorted([lv for lv in sr_levels if lv > price])[:2]
-            supports    = sorted([lv for lv in sr_levels if lv <= price], reverse=True)[:2]
-            lines.append(f"Widerstände     : {', '.join(f'{x:.2f}' for x in resistances) or 'keine'}")
+            supports = sorted([lv for lv in sr_levels if lv <= price], reverse=True)[:2]
+            lines.append(
+                f"Widerstände     : {', '.join(f'{x:.2f}' for x in resistances) or 'keine'}"
+            )
             lines.append(f"Unterstützungen : {', '.join(f'{x:.2f}' for x in supports) or 'keine'}")
 
         elif method == "Candlestick Patterns":
@@ -895,25 +895,25 @@ class StockTrainer:
     @staticmethod
     def _get_rsi(close: pd.Series, period: int = 14) -> float:
         delta = close.diff()
-        gain  = delta.clip(lower=0).rolling(period).mean()
-        loss  = (-delta.clip(upper=0)).rolling(period).mean()
-        rs    = gain / loss.replace(0, float("nan"))
-        rsi   = 100 - (100 / (1 + rs))
-        val   = float(rsi.iloc[-1])
+        gain = delta.clip(lower=0).rolling(period).mean()
+        loss = (-delta.clip(upper=0)).rolling(period).mean()
+        rs = gain / loss.replace(0, float("nan"))
+        rsi = 100 - (100 / (1 + rs))
+        val = float(rsi.iloc[-1])
         return val if not math.isnan(val) else 50.0
 
     @staticmethod
     def _calc_support_resistance(df: pd.DataFrame, window: int = 5) -> list[float]:
         """Lokale Hochs und Tiefs als Support/Resistance-Niveaus."""
-        highs  = df["High"]
-        lows   = df["Low"]
+        highs = df["High"]
+        lows = df["Low"]
         levels: list[float] = []
         for i in range(window, len(df) - window):
             h = float(highs.iloc[i])
             lo = float(lows.iloc[i])
-            if h == float(highs.iloc[i - window:i + window + 1].max()):
+            if h == float(highs.iloc[i - window : i + window + 1].max()):
                 levels.append(h)
-            if lo == float(lows.iloc[i - window:i + window + 1].min()):
+            if lo == float(lows.iloc[i - window : i + window + 1].min()):
                 levels.append(lo)
         # Cluster: Niveaus innerhalb 0.5% zusammenfassen
         merged: list[float] = []
@@ -934,8 +934,8 @@ class StockTrainer:
             h = float(df["High"].iloc[i])
             lo = float(df["Low"].iloc[i])
             c = float(df["Close"].iloc[i])
-            body   = abs(c - o)
-            rng    = h - lo if h != lo else 1e-9
+            body = abs(c - o)
+            rng = h - lo if h != lo else 1e-9
             up_shd = h - max(c, o)
             dn_shd = min(c, o) - lo
 
@@ -997,26 +997,28 @@ class StockTrainer:
 
         # 3. Regex-Extraktion
         pred_match = re.search(
-            r'\b(UP|DOWN|NEUTRAL'
-            r'|STEIG[ET]N?|F[AÄ]LLT?|F[AÄ]LLEN'
-            r'|SEITW[ÄA]RTS|KAUFEN|VERKAUFEN|HALTEN'
-            r'|BUY|SELL|HOLD)\b',
-            clean, re.IGNORECASE,
+            r"\b(UP|DOWN|NEUTRAL"
+            r"|STEIG[ET]N?|F[AÄ]LLT?|F[AÄ]LLEN"
+            r"|SEITW[ÄA]RTS|KAUFEN|VERKAUFEN|HALTEN"
+            r"|BUY|SELL|HOLD)\b",
+            clean,
+            re.IGNORECASE,
         )
         conf_match = re.search(
-            r'(?:confidence|konfidenz|wahrscheinlichkeit)[^\d]*([01]?\.\d+)',
-            clean, re.IGNORECASE,
+            r"(?:confidence|konfidenz|wahrscheinlichkeit)[^\d]*([01]?\.\d+)",
+            clean,
+            re.IGNORECASE,
         )
         if not conf_match:
-            conf_match = re.search(r'\b(0\.\d{1,3}|1\.0)\b', clean)
+            conf_match = re.search(r"\b(0\.\d{1,3}|1\.0)\b", clean)
 
         prediction = "NEUTRAL"
         if pred_match:
             raw = pred_match.group(1).upper()
             # Normalisierung auf UP / DOWN / NEUTRAL
-            if re.match(r'UP|STEIG|KAUFEN|BUY', raw):
+            if re.match(r"UP|STEIG|KAUFEN|BUY", raw):
                 prediction = "UP"
-            elif re.match(r'DOWN|F[AÄ]LL|VERKAUFEN|SELL', raw):
+            elif re.match(r"DOWN|F[AÄ]LL|VERKAUFEN|SELL", raw):
                 prediction = "DOWN"
             else:
                 prediction = "NEUTRAL"
@@ -1026,7 +1028,7 @@ class StockTrainer:
         return {
             "prediction": prediction,
             "confidence": round(min(max(confidence, 0.0), 1.0), 3),
-            "reasoning":  clean[:400],
+            "reasoning": clean[:400],
         }
 
     # ------------------------------------------------------------------
@@ -1036,17 +1038,17 @@ class StockTrainer:
     @staticmethod
     def _error_result(error: str, symbol: str, method: str) -> dict:
         return {
-            "error":            error,
-            "prediction":       None,
-            "confidence":       0.0,
-            "reasoning":        error,
-            "correct":          None,
-            "actual":           None,
-            "cycle":            0,
-            "method":           method,
-            "method_accuracy":  None,
+            "error": error,
+            "prediction": None,
+            "confidence": 0.0,
+            "reasoning": error,
+            "correct": None,
+            "actual": None,
+            "cycle": 0,
+            "method": method,
+            "method_accuracy": None,
             "overall_accuracy": None,
-            "symbol":           symbol.upper(),
+            "symbol": symbol.upper(),
         }
 
 
@@ -1054,10 +1056,19 @@ def _normalize_parsed(data: dict) -> dict:
     """Normalisiert ein gepartes Dict auf einheitliche Schlüssel + Typen."""
     # prediction
     raw_pred = str(data.get("prediction", data.get("direction", "NEUTRAL"))).upper()
-    mapping  = {
-        "UP": "UP", "STEIGT": "UP", "KAUFEN": "UP", "BUY": "UP",
-        "DOWN": "DOWN", "FÄLLT": "DOWN", "VERKAUFEN": "DOWN", "SELL": "DOWN",
-        "NEUTRAL": "NEUTRAL", "HOLD": "NEUTRAL", "HALTEN": "NEUTRAL", "SEITWÄRTS": "NEUTRAL",
+    mapping = {
+        "UP": "UP",
+        "STEIGT": "UP",
+        "KAUFEN": "UP",
+        "BUY": "UP",
+        "DOWN": "DOWN",
+        "FÄLLT": "DOWN",
+        "VERKAUFEN": "DOWN",
+        "SELL": "DOWN",
+        "NEUTRAL": "NEUTRAL",
+        "HOLD": "NEUTRAL",
+        "HALTEN": "NEUTRAL",
+        "SEITWÄRTS": "NEUTRAL",
     }
     prediction = mapping.get(raw_pred, "NEUTRAL")
 
@@ -1078,6 +1089,7 @@ def _normalize_parsed(data: dict) -> dict:
 # Modul-Funktionen (Backward-Kompatibilität für app.py und predictor.py)
 # ===========================================================================
 
+
 def _state_path(ticker: str) -> Path:
     path = _ROOT_DIR / TRAINING_STATE_DIR
     path.mkdir(parents=True, exist_ok=True)
@@ -1096,6 +1108,7 @@ def _model_hash_path(ticker: str) -> Path:
 
 def _file_sha256(path: Path) -> str:
     import hashlib
+
     h = hashlib.sha256()
     with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(65536), b""):
@@ -1124,6 +1137,7 @@ def list_trained_stocks() -> list[str]:
 # Feature-Engineering (predictor.py)
 # ---------------------------------------------------------------------------
 
+
 def build_features(df: pd.DataFrame, sentiment_score: float = 0.0) -> pd.DataFrame:
     """
     Berechnet numerische ML-Features aus OHLCV-Daten.
@@ -1135,35 +1149,35 @@ def build_features(df: pd.DataFrame, sentiment_score: float = 0.0) -> pd.DataFra
                          da historische Sentiment-Daten nicht verfügbar sind.
                          Bei Live-Vorhersagen den echten Wert aus analyze_news() übergeben.
     """
-    feat   = pd.DataFrame(index=df.index)
-    close  = df["Close"]
-    high   = df["High"]
-    low    = df["Low"]
+    feat = pd.DataFrame(index=df.index)
+    close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
     volume = df["Volume"]
 
-    feat["ret_1d"]        = close.pct_change(1)
-    feat["ret_5d"]        = close.pct_change(5)
-    feat["ret_20d"]       = close.pct_change(20)
-    feat["sma_20"]        = close.rolling(20).mean() / close - 1
-    feat["sma_50"]        = close.rolling(50).mean() / close - 1
-    feat["sma_cross"]     = feat["sma_20"] - feat["sma_50"]
+    feat["ret_1d"] = close.pct_change(1)
+    feat["ret_5d"] = close.pct_change(5)
+    feat["ret_20d"] = close.pct_change(20)
+    feat["sma_20"] = close.rolling(20).mean() / close - 1
+    feat["sma_50"] = close.rolling(50).mean() / close - 1
+    feat["sma_cross"] = feat["sma_20"] - feat["sma_50"]
     feat["volatility_20d"] = close.pct_change().rolling(20).std()
-    feat["vol_ratio"]     = volume / volume.rolling(20).mean()
+    feat["vol_ratio"] = volume / volume.rolling(20).mean()
 
     delta = close.diff()
-    gain  = delta.clip(lower=0).rolling(14).mean()
-    loss  = (-delta.clip(upper=0)).rolling(14).mean()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = (-delta.clip(upper=0)).rolling(14).mean()
     feat["rsi"] = 100 - (100 / (1 + gain / loss.replace(0, float("nan"))))
 
-    ema12   = close.ewm(span=12, adjust=False).mean()
-    ema26   = close.ewm(span=26, adjust=False).mean()
-    macd    = ema12 - ema26
-    signal  = macd.ewm(span=9, adjust=False).mean()
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    macd = ema12 - ema26
+    signal = macd.ewm(span=9, adjust=False).mean()
     feat["macd_hist"] = macd - signal
 
-    bb_mid  = close.rolling(20).mean()
-    bb_std  = close.rolling(20).std()
-    feat["bb_pos"]  = (close - bb_mid) / (2 * bb_std)
+    bb_mid = close.rolling(20).mean()
+    bb_std = close.rolling(20).std()
+    feat["bb_pos"] = (close - bb_mid) / (2 * bb_std)
     feat["hl_range"] = (high - low) / close
 
     feat["sentiment"] = float(sentiment_score)
@@ -1172,9 +1186,7 @@ def build_features(df: pd.DataFrame, sentiment_score: float = 0.0) -> pd.DataFra
     return feat
 
 
-def build_labels(
-    df: pd.DataFrame, horizon: int = 5, threshold: float = 0.01
-) -> pd.Series:
+def build_labels(df: pd.DataFrame, horizon: int = 5, threshold: float = 0.01) -> pd.Series:
     """
     Binäre Labels: 1 = Kurs steigt ≥ threshold in `horizon` Tagen.
 
@@ -1191,24 +1203,23 @@ def build_labels(
 # sklearn-Training (app.py Trainingsseite)
 # ---------------------------------------------------------------------------
 
+
 def train(ticker: str, df: pd.DataFrame, horizon: int = 5) -> dict:
     """
     Trainiert ein GradientBoosting-Modell für einen Ticker.
     Persistiert Modell (joblib + SHA256) + State (json).
     Returns aktualisierter State-Dict.
     """
-    state    = load_state(ticker)
+    state = load_state(ticker)
     features = build_features(df)
-    labels   = build_labels(df, horizon=horizon)
+    labels = build_labels(df, horizon=horizon)
 
     idx = features.index.intersection(labels.index)
-    X   = features.loc[idx].values
-    y   = labels.loc[idx].values
+    X = features.loc[idx].values
+    y = labels.loc[idx].values
 
     if len(X) < 60:
-        raise ValueError(
-            f"Zu wenige Datenpunkte für Training: {len(X)} (mind. 60 nötig)"
-        )
+        raise ValueError(f"Zu wenige Datenpunkte für Training: {len(X)} (mind. 60 nötig)")
     if len(np.unique(y)) < 2:
         raise ValueError(
             "Labels enthalten nur eine Klasse – Training nicht sinnvoll "
@@ -1217,8 +1228,8 @@ def train(ticker: str, df: pd.DataFrame, horizon: int = 5) -> dict:
 
     # TimeSeriesSplit: kein zufälliges Sampling, strenge zeitliche Reihenfolge.
     # Jeder Fold: Scaler nur auf Train-Slice fitten (kein Data Leakage).
-    tscv       = TimeSeriesSplit(n_splits=5)
-    cv_scores  = []
+    tscv = TimeSeriesSplit(n_splits=5)
+    cv_scores = []
 
     for fold_train_idx, fold_test_idx in tscv.split(X):
         # Embargo: die letzten `horizon` Trainingszeilen tragen Forward-Labels
@@ -1231,11 +1242,11 @@ def train(ticker: str, df: pd.DataFrame, horizon: int = 5) -> dict:
             continue
 
         sc = StandardScaler()
-        X_tr_s = sc.fit_transform(X_tr)   # fit NUR auf Train
-        X_te_s = sc.transform(X_te)       # transform (kein fit) auf Test
+        X_tr_s = sc.fit_transform(X_tr)  # fit NUR auf Train
+        X_te_s = sc.transform(X_te)  # transform (kein fit) auf Test
 
         # GBC unterstützt kein class_weight → sample_weights für Balance
-        sw  = compute_sample_weight("balanced", y_tr)
+        sw = compute_sample_weight("balanced", y_tr)
         clf = GradientBoostingClassifier(n_estimators=100, max_depth=3, random_state=42)
         clf.fit(X_tr_s, y_tr, sample_weight=sw)
 
@@ -1250,9 +1261,9 @@ def train(ticker: str, df: pd.DataFrame, horizon: int = 5) -> dict:
     # Finaler Refit auf ALLEN Daten – das persistierte Modell soll auch die
     # jüngste Historie kennen; cv_scores bleiben die Out-of-Sample-Schätzung
     scaler = StandardScaler()
-    X_all  = scaler.fit_transform(X)
+    X_all = scaler.fit_transform(X)
     sw_all = compute_sample_weight("balanced", y)
-    model  = GradientBoostingClassifier(n_estimators=100, max_depth=3, random_state=42)
+    model = GradientBoostingClassifier(n_estimators=100, max_depth=3, random_state=42)
     model.fit(X_all, y, sample_weight=sw_all)
 
     # Atomar schreiben (tmp + os.replace): verhindert, dass ein paralleler
@@ -1261,7 +1272,7 @@ def train(ticker: str, df: pd.DataFrame, horizon: int = 5) -> dict:
     # Schritten ein kurzes Fenster offen, in dem load_model() die ALTE
     # Prüfsumme gegen das NEUE Modell prüft und (korrekt, fail-closed)
     # ablehnt – siehe die entsprechende Hinweis-Formulierung in load_model().
-    model_path     = _model_path(ticker)
+    model_path = _model_path(ticker)
     model_tmp_path = model_path.with_suffix(model_path.suffix + ".tmp")
     joblib.dump(
         {"model": model, "scaler": scaler, "feature_names": list(features.columns)},
@@ -1271,34 +1282,38 @@ def train(ticker: str, df: pd.DataFrame, horizon: int = 5) -> dict:
     model_hash = _file_sha256(model_tmp_path)
     os.replace(model_tmp_path, model_path)
 
-    hash_path     = _model_hash_path(ticker)
+    hash_path = _model_hash_path(ticker)
     hash_tmp_path = hash_path.with_suffix(hash_path.suffix + ".tmp")
     hash_tmp_path.write_text(model_hash)
     os.replace(hash_tmp_path, hash_path)
 
     # State aktualisieren (neues + Legacy-Schema)
-    state["symbol"]           = ticker.upper()
-    state["cycles"]           = state.get("cycles", 0) + 1
-    state["last_trained"]     = datetime.now().isoformat()
-    state["accuracy"]         = round(accuracy, 4)
+    state["symbol"] = ticker.upper()
+    state["cycles"] = state.get("cycles", 0) + 1
+    state["last_trained"] = datetime.now().isoformat()
+    state["accuracy"] = round(accuracy, 4)
     state["current_accuracy"] = round(accuracy, 4)
     state["feature_importance"] = dict(
         zip(features.columns, [round(v, 4) for v in model.feature_importances_])  # type: ignore[union-attr]
     )
-    state["training_log"].append({
-        "cycle":       state["cycles"],
-        "timestamp":   state["last_trained"],
-        "accuracy":    state["accuracy"],
-        "samples":     len(X),
-        "horizon_days": horizon,
-    })
-    state["accuracy_history"].append({
-        "cycle":             state["cycles"],
-        "timestamp":         state["last_trained"],
-        "method":            "sklearn/GBM",
-        "correct":           None,
-        "accuracy_snapshot": state["accuracy"],
-    })
+    state["training_log"].append(
+        {
+            "cycle": state["cycles"],
+            "timestamp": state["last_trained"],
+            "accuracy": state["accuracy"],
+            "samples": len(X),
+            "horizon_days": horizon,
+        }
+    )
+    state["accuracy_history"].append(
+        {
+            "cycle": state["cycles"],
+            "timestamp": state["last_trained"],
+            "method": "sklearn/GBM",
+            "correct": None,
+            "accuracy_snapshot": state["accuracy"],
+        }
+    )
     save_state(ticker, state)
     return state
 
@@ -1318,12 +1333,11 @@ def load_model(ticker: str) -> Optional[dict]:
     hp = _model_hash_path(ticker)
     if not hp.exists():
         logger.warning(
-            f"Modell {p.name} ohne Prüfsummen-Datei – wird nicht geladen. "
-            f"Bitte neu trainieren."
+            f"Modell {p.name} ohne Prüfsummen-Datei – wird nicht geladen. Bitte neu trainieren."
         )
         return None
     expected = hp.read_text().strip()
-    actual   = _file_sha256(p)
+    actual = _file_sha256(p)
     if actual != expected:
         logger.error(
             f"Prüfsummen-Mismatch für {p.name} (erwartet {expected[:12]}…, "

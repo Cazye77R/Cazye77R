@@ -12,6 +12,7 @@ Die eigentliche UI liegt im Paket ``ui/``:
     ui/tab_trading.py  Tab 2 – Paper Trading
     ui/tab_models.py   Tab 3 – Modell-Manager
 """
+
 from __future__ import annotations
 
 import os
@@ -41,11 +42,13 @@ startup_check()
 
 sidebar.render_sidebar()
 
-tab1, tab2, tab3 = st.tabs([
-    "📊 Analyse & Training",
-    "💰 Paper Trading",
-    "⚙️ Modell-Manager",
-])
+tab1, tab2, tab3 = st.tabs(
+    [
+        "📊 Analyse & Training",
+        "💰 Paper Trading",
+        "⚙️ Modell-Manager",
+    ]
+)
 
 with tab1:
     tab_analyse.render()

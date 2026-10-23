@@ -1,4 +1,5 @@
 """Streamlit UI for training and forecasting stock prices with a dark theme."""
+
 from __future__ import annotations
 
 import io
@@ -28,11 +29,11 @@ from .model import ReturnLSTM
 
 
 @st.cache_data(show_spinner=False)
-def _load_prices_cached(
-    file_bytes: bytes, date_col: str, price_col: str
-) -> PriceData:
+def _load_prices_cached(file_bytes: bytes, date_col: str, price_col: str) -> PriceData:
     """Cached CSV parse (normalize=False — callers normalize per their own split)."""
-    return load_prices(io.BytesIO(file_bytes), date_col=date_col, price_col=price_col, normalize=False)
+    return load_prices(
+        io.BytesIO(file_bytes), date_col=date_col, price_col=price_col, normalize=False
+    )
 
 
 def train_lightweight_model(
@@ -175,9 +176,13 @@ def main() -> None:
     price_col = st.sidebar.text_input("Preisspalte", value="close")
 
     st.sidebar.subheader("Optional: Schnelltraining")
-    enable_training = st.sidebar.checkbox("Direkt in der App trainieren, wenn kein Checkpoint geladen ist")
+    enable_training = st.sidebar.checkbox(
+        "Direkt in der App trainieren, wenn kein Checkpoint geladen ist"
+    )
     train_epochs = st.sidebar.slider("Epochen", 1, 25, 5)
-    lr = st.sidebar.number_input("Lernrate", min_value=1e-5, max_value=1e-1, value=1e-3, format="%e")
+    lr = st.sidebar.number_input(
+        "Lernrate", min_value=1e-5, max_value=1e-1, value=1e-3, format="%e"
+    )
     hidden_size = st.sidebar.slider("Hidden Size", 32, 512, 128, step=32)
     num_layers = st.sidebar.slider("LSTM Layer", 1, 4, 2)
     dropout = st.sidebar.slider("Dropout", 0.0, 0.7, 0.1, step=0.05)
@@ -256,7 +261,9 @@ def main() -> None:
             # the train/val split only matters for judging model quality.
             forecast_returns = (price_data.returns - mean) / std
         else:
-            st.warning("Lade einen Checkpoint oder aktiviere das Schnelltraining, um einen Forecast zu starten.")
+            st.warning(
+                "Lade einen Checkpoint oder aktiviere das Schnelltraining, um einen Forecast zu starten."
+            )
             return
 
         try:

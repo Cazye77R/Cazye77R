@@ -176,6 +176,7 @@ hr { border-color: #1c2128; }
 </style>
 """
 
+
 def inject_css() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
 
@@ -204,24 +205,32 @@ _TICKER_WORDS = (
     "SUPPORT • RESISTANCE • MOMENTUM • DIVERGENZ • BREAKOUT • "
 )
 
+
 def ticker_html() -> str:
     tape = _TICKER_WORDS * 5
-    return (
-        f'<div class="sm-ticker"><span class="sm-ticker-inner">{tape}</span></div>'
-    )
+    return f'<div class="sm-ticker"><span class="sm-ticker-inner">{tape}</span></div>'
+
 
 def quote_html(quote: str) -> str:
     # LLM-/API-Text darf nie roh ins HTML (Stored XSS über persistierte Insights)
     return f'<div class="sm-quote">"{html.escape(quote)}"</div>'
 
+
 def signal_badge_html(signal: str) -> str:
     mapping = {
-        "UP": "sm-badge-up", "KAUFEN": "sm-badge-up", "BUY": "sm-badge-up",
-        "DOWN": "sm-badge-down", "VERKAUFEN": "sm-badge-down", "SELL": "sm-badge-down",
-        "NEUTRAL": "sm-badge-neutral", "HALTEN": "sm-badge-neutral", "HOLD": "sm-badge-neutral",
+        "UP": "sm-badge-up",
+        "KAUFEN": "sm-badge-up",
+        "BUY": "sm-badge-up",
+        "DOWN": "sm-badge-down",
+        "VERKAUFEN": "sm-badge-down",
+        "SELL": "sm-badge-down",
+        "NEUTRAL": "sm-badge-neutral",
+        "HALTEN": "sm-badge-neutral",
+        "HOLD": "sm-badge-neutral",
     }
     cls = mapping.get(signal.upper(), "sm-badge-neutral")
     return f'<span class="{cls}">{html.escape(signal)}</span>'
+
 
 def section(label: str) -> None:
     st.markdown(f'<div class="sm-header">{label}</div>', unsafe_allow_html=True)

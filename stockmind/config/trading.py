@@ -6,7 +6,9 @@ import logging
 import os
 
 
-def _env_float(name: str, default: float, lo: float | None = None, hi: float | None = None) -> float:
+def _env_float(
+    name: str, default: float, lo: float | None = None, hi: float | None = None
+) -> float:
     """
     Liest eine Float-Env-Variable robust: unparsebare oder außerhalb der
     Grenzen liegende Werte fallen mit Warnung auf den Default zurück –
@@ -28,6 +30,7 @@ def _env_float(name: str, default: float, lo: float | None = None, hi: float | N
         )
         return default
     return val
+
 
 # --- Handelskosten ---
 ORDER_COST_EUR: float = 5.0
@@ -76,16 +79,20 @@ ENABLE_EASTER_EGGS: bool = os.getenv("ENABLE_EASTER_EGGS", "true").lower() == "t
 # Niedrigerer Wert = stärkere Gewichtung neuer Rewards (aggressiverer Vergiss-Effekt)
 DUCB_GAMMA: float = _env_float("DUCB_GAMMA", 0.95, lo=0.0001, hi=0.9999)
 # Basis-Spread in Prozent (fixed Komponente)
-SLIPPAGE_BASE_PCT:          float = _env_float("SLIPPAGE_BASE_PCT", 0.05, lo=0.0)
+SLIPPAGE_BASE_PCT: float = _env_float("SLIPPAGE_BASE_PCT", 0.05, lo=0.0)
 # Volumen-Faktor k: slippage += k * (order_size / avg_daily_volume)
-SLIPPAGE_VOLUME_FACTOR:     float = _env_float("SLIPPAGE_VOLUME_FACTOR", 0.1, lo=0.0)
+SLIPPAGE_VOLUME_FACTOR: float = _env_float("SLIPPAGE_VOLUME_FACTOR", 0.1, lo=0.0)
 # Fallback für avg_daily_volume wenn kein echtes Volumen vorhanden
-SLIPPAGE_DAILY_VOLUME_DEFAULT: float = _env_float("SLIPPAGE_DAILY_VOLUME_DEFAULT", 1_000_000.0, lo=1.0)
+SLIPPAGE_DAILY_VOLUME_DEFAULT: float = _env_float(
+    "SLIPPAGE_DAILY_VOLUME_DEFAULT", 1_000_000.0, lo=1.0
+)
 
 # --- Risk Management ---
-MAX_RISK_PER_TRADE_PCT:       float = _env_float("MAX_RISK_PER_TRADE_PCT", 2.0, lo=0.1, hi=100.0)
-MAX_POSITION_SIZE_PCT:        float = _env_float("MAX_POSITION_SIZE_PCT", 25.0, lo=1.0, hi=100.0)
-MAX_DRAWDOWN_PCT:             float = _env_float("MAX_DRAWDOWN_PCT", 15.0, lo=1.0, hi=100.0)
-MAX_CORRELATED_EXPOSURE_PCT:  float = _env_float("MAX_CORRELATED_EXPOSURE_PCT", 40.0, lo=1.0, hi=100.0)
-STOP_LOSS_ATR_MULTIPLE:       float = _env_float("STOP_LOSS_ATR_MULTIPLE", 2.0, lo=0.1)
-TAKE_PROFIT_ATR_MULTIPLE:     float = _env_float("TAKE_PROFIT_ATR_MULTIPLE", 3.0, lo=0.1)
+MAX_RISK_PER_TRADE_PCT: float = _env_float("MAX_RISK_PER_TRADE_PCT", 2.0, lo=0.1, hi=100.0)
+MAX_POSITION_SIZE_PCT: float = _env_float("MAX_POSITION_SIZE_PCT", 25.0, lo=1.0, hi=100.0)
+MAX_DRAWDOWN_PCT: float = _env_float("MAX_DRAWDOWN_PCT", 15.0, lo=1.0, hi=100.0)
+MAX_CORRELATED_EXPOSURE_PCT: float = _env_float(
+    "MAX_CORRELATED_EXPOSURE_PCT", 40.0, lo=1.0, hi=100.0
+)
+STOP_LOSS_ATR_MULTIPLE: float = _env_float("STOP_LOSS_ATR_MULTIPLE", 2.0, lo=0.1)
+TAKE_PROFIT_ATR_MULTIPLE: float = _env_float("TAKE_PROFIT_ATR_MULTIPLE", 3.0, lo=0.1)

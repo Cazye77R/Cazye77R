@@ -23,14 +23,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 # Datenklassen
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Prediction:
     ticker: str
-    signal: str                       # "KAUFEN" | "HALTEN" | "VERKAUFEN"
-    confidence: float                 # 0.0 – 1.0
-    ml_probability: Optional[float]   # Rohe ML-Wahrscheinlichkeit (Anstieg)
-    indicator_signals: dict           # Einzelsignale je Methode
-    summary: str                      # Kurztextbeschreibung
+    signal: str  # "KAUFEN" | "HALTEN" | "VERKAUFEN"
+    confidence: float  # 0.0 – 1.0
+    ml_probability: Optional[float]  # Rohe ML-Wahrscheinlichkeit (Anstieg)
+    indicator_signals: dict  # Einzelsignale je Methode
+    summary: str  # Kurztextbeschreibung
     horizon_days: int = 5
     warnings: list[str] = field(default_factory=list)
 
@@ -38,6 +39,7 @@ class Prediction:
 # ---------------------------------------------------------------------------
 # Technische Signal-Berechnung
 # ---------------------------------------------------------------------------
+
 
 def _sma_signal(df: pd.DataFrame) -> tuple[str, float]:
     close = df["Close"]
@@ -108,6 +110,7 @@ SCORE_TO_SIGNAL = {1: "KAUFEN", 0: "HALTEN", -1: "VERKAUFEN"}
 # ML-Feature-Berechnung (inline, kein Trainer-Import nötig)
 # ---------------------------------------------------------------------------
 
+
 def _build_features(df: pd.DataFrame, sentiment_score: float = 0.0) -> pd.DataFrame:
     """
     Berechnet numerische ML-Features aus OHLCV-Daten.
@@ -121,25 +124,25 @@ def _build_features(df: pd.DataFrame, sentiment_score: float = 0.0) -> pd.DataFr
     """
     feat = pd.DataFrame(index=df.index)
     close, high, low, volume = df["Close"], df["High"], df["Low"], df["Volume"]
-    feat["ret_1d"]         = close.pct_change(1)
-    feat["ret_5d"]         = close.pct_change(5)
-    feat["ret_20d"]        = close.pct_change(20)
-    feat["sma_20"]         = close.rolling(20).mean() / close - 1
-    feat["sma_50"]         = close.rolling(50).mean() / close - 1
-    feat["sma_cross"]      = feat["sma_20"] - feat["sma_50"]
+    feat["ret_1d"] = close.pct_change(1)
+    feat["ret_5d"] = close.pct_change(5)
+    feat["ret_20d"] = close.pct_change(20)
+    feat["sma_20"] = close.rolling(20).mean() / close - 1
+    feat["sma_50"] = close.rolling(50).mean() / close - 1
+    feat["sma_cross"] = feat["sma_20"] - feat["sma_50"]
     feat["volatility_20d"] = close.pct_change().rolling(20).std()
-    feat["vol_ratio"]      = volume / volume.rolling(20).mean()
+    feat["vol_ratio"] = volume / volume.rolling(20).mean()
     delta = close.diff()
-    gain  = delta.clip(lower=0).rolling(14).mean()
-    loss  = (-delta.clip(upper=0)).rolling(14).mean()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = (-delta.clip(upper=0)).rolling(14).mean()
     feat["rsi"] = 100 - (100 / (1 + gain / loss.replace(0, float("nan"))))
     ema12 = close.ewm(span=12, adjust=False).mean()
     ema26 = close.ewm(span=26, adjust=False).mean()
-    macd  = ema12 - ema26
+    macd = ema12 - ema26
     feat["macd_hist"] = macd - macd.ewm(span=9, adjust=False).mean()
     bb_mid = close.rolling(20).mean()
-    feat["bb_pos"]    = (close - bb_mid) / (2 * close.rolling(20).std())
-    feat["hl_range"]  = (high - low) / close
+    feat["bb_pos"] = (close - bb_mid) / (2 * close.rolling(20).std())
+    feat["hl_range"] = (high - low) / close
     feat["sentiment"] = float(sentiment_score)
     feat.dropna(inplace=True)
     return feat
@@ -148,6 +151,7 @@ def _build_features(df: pd.DataFrame, sentiment_score: float = 0.0) -> pd.DataFr
 # ---------------------------------------------------------------------------
 # Haupt-Vorhersage
 # ---------------------------------------------------------------------------
+
 
 def predict(
     ticker: str,
@@ -184,7 +188,9 @@ def predict(
         methods_to_run = [method]
     else:
         methods_to_run = list(SIGNAL_FUNCTIONS.keys())
-        warnings.append(f"Methode '{method}' hat keine eigenständige Signal-Berechnung – alle Indikatoren verwendet.")
+        warnings.append(
+            f"Methode '{method}' hat keine eigenständige Signal-Berechnung – alle Indikatoren verwendet."
+        )
 
     scores = []
     for m in methods_to_run:
@@ -227,7 +233,9 @@ def predict(
                 ml_score = (ml_prob - 0.5) * 2
                 scores.append(ml_score * 0.8)
                 indicator_signals["ML-Modell"] = {
-                    "signal": "KAUFEN" if ml_prob > 0.55 else ("VERKAUFEN" if ml_prob < 0.45 else "HALTEN"),
+                    "signal": "KAUFEN"
+                    if ml_prob > 0.55
+                    else ("VERKAUFEN" if ml_prob < 0.45 else "HALTEN"),
                     "confidence": round(abs(ml_prob - 0.5) * 2, 3),
                     "probability": round(ml_prob, 3),
                 }
@@ -237,10 +245,14 @@ def predict(
     # --- Aggregation ---
     if not scores:
         return Prediction(
-            ticker=ticker, signal="HALTEN", confidence=0.0,
-            ml_probability=ml_prob, indicator_signals={},
+            ticker=ticker,
+            signal="HALTEN",
+            confidence=0.0,
+            ml_probability=ml_prob,
+            indicator_signals={},
             summary="Nicht genug Daten für eine Vorhersage.",
-            horizon_days=horizon_days, warnings=warnings,
+            horizon_days=horizon_days,
+            warnings=warnings,
         )
 
     avg_score = float(np.mean(scores))

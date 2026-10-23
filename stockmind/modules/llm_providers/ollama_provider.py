@@ -1,4 +1,5 @@
 """StockMind – Ollama LLM Provider."""
+
 from __future__ import annotations
 
 import os
@@ -113,13 +114,15 @@ class OllamaProvider(LLMProvider):
             for m in resp.json().get("models", []):
                 name = m["name"].split(":")[0]
                 size_bytes = m.get("size", 0)
-                result.append({
-                    "name": name,
-                    "full_name": m["name"],
-                    "size_gb": round(size_bytes / 1024**3, 2) if size_bytes else 0.0,
-                    "modified": m.get("modified_at", "")[:10],
-                    "description": MODEL_DESCRIPTIONS.get(name, ""),
-                })
+                result.append(
+                    {
+                        "name": name,
+                        "full_name": m["name"],
+                        "size_gb": round(size_bytes / 1024**3, 2) if size_bytes else 0.0,
+                        "modified": m.get("modified_at", "")[:10],
+                        "description": MODEL_DESCRIPTIONS.get(name, ""),
+                    }
+                )
             return result
         except Exception as exc:
             logger.debug(f"OllamaProvider.list_models_with_info fehlgeschlagen: {exc}")

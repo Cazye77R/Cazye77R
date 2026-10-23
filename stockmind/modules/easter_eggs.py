@@ -39,9 +39,9 @@ CONFETTI_MARKER: str = "[KONFETTI]"
 _EUR_USD_RATE: float = 1.08
 
 # Preis-Referenzen je Nicht-Euro-Währung
-_PIZZA_EUR:   float = 12.0
-_COFFEE_EUR:  float = 3.50
-_MAX_ROCKETS: int   = 60     # Maximal angezeigte 🚀 (verhindert UI-Overflow)
+_PIZZA_EUR: float = 12.0
+_COFFEE_EUR: float = 3.50
+_MAX_ROCKETS: int = 60  # Maximal angezeigte 🚀 (verhindert UI-Overflow)
 
 
 def get_currency_display(eur_value: float, currency: str) -> str:
@@ -90,7 +90,11 @@ def get_currency_display(eur_value: float, currency: str) -> str:
     if currency == "🚀 Raketen-Emojis":
         # 1 Rakete = 200 €, Wert per Zeichen begrenzt
         count = max(1, min(_MAX_ROCKETS, int(eur_value / 200)))
-        extra = "" if eur_value / 200 <= _MAX_ROCKETS else f" (+{int(eur_value/200) - _MAX_ROCKETS} mehr)"
+        extra = (
+            ""
+            if eur_value / 200 <= _MAX_ROCKETS
+            else f" (+{int(eur_value / 200) - _MAX_ROCKETS} mehr)"
+        )
         return f"{'🚀' * count}{extra}"
 
     # Fallback
@@ -100,12 +104,12 @@ def get_currency_display(eur_value: float, currency: str) -> str:
 def currency_tooltip(currency: str) -> str:
     """Gibt einen erklärenden Tooltip-Text für eine Währung zurück."""
     tips = {
-        "EUR €":               "Der langweilige Euro. Funktioniert trotzdem.",
-        "USD $":               f"US-Dollar (Kurs ~{_EUR_USD_RATE:.2f} USD/EUR).",
-        "🍕 Pizzen (12€)":    "Eine ordentliche Margherita für 12 €.",
-        "☕ Kaffee (3.50€)":  "Flat White beim Hipster-Café um die Ecke.",
+        "EUR €": "Der langweilige Euro. Funktioniert trotzdem.",
+        "USD $": f"US-Dollar (Kurs ~{_EUR_USD_RATE:.2f} USD/EUR).",
+        "🍕 Pizzen (12€)": "Eine ordentliche Margherita für 12 €.",
+        "☕ Kaffee (3.50€)": "Flat White beim Hipster-Café um die Ecke.",
         "🏎️ Lambos (536.000€)": "Lamborghini Aventador SVJ – Basispreis Deutschland.",
-        "🚀 Raketen-Emojis":  "Jede Rakete repräsentiert 200 €. Einfach weil wir es können.",
+        "🚀 Raketen-Emojis": "Jede Rakete repräsentiert 200 €. Einfach weil wir es können.",
     }
     return tips.get(currency, "")
 
@@ -115,11 +119,11 @@ def currency_tooltip(currency: str) -> str:
 # ===========================================================================
 
 # Sonderfälle erhalten diese Priorität (niedrigere Zahl = höhere Priorität)
-_PRIORITY_LAMBO    = 1
-_PRIORITY_100CYC   = 2
-_PRIORITY_AI_WALL  = 3
-_PRIORITY_BUST     = 4
-_PRIORITY_RANDOM   = 99
+_PRIORITY_LAMBO = 1
+_PRIORITY_100CYC = 2
+_PRIORITY_AI_WALL = 3
+_PRIORITY_BUST = 4
+_PRIORITY_RANDOM = 99
 
 
 def check_easter_egg(context: dict) -> Optional[str]:
@@ -145,74 +149,80 @@ def check_easter_egg(context: dict) -> Optional[str]:
     if context.get("random_seed") is not None:
         random.seed(context["random_seed"])
 
-    candidates: list[tuple[int, str]] = []   # (Priorität, Text)
+    candidates: list[tuple[int, str]] = []  # (Priorität, Text)
 
     # --- Budget > 1 Lambo ---
     total_value = context.get("total_value")
     if total_value is not None and total_value >= LAMBO_PRICE_EUR:
         lambos = total_value / LAMBO_PRICE_EUR
-        candidates.append((
-            _PRIORITY_LAMBO,
+        candidates.append(
             (
-                f"🏎️ **Herzlichen Glückwunsch!** "
-                f"Du kannst dir jetzt einen Lambo leisten!\n\n"
-                f"Dein Portfolio ist aktuell **{lambos:.4f} Lamborghini Aventador SVJ** wert. "
-                f"Bestellformular liegt im Handschuhfach."
-            ),
-        ))
+                _PRIORITY_LAMBO,
+                (
+                    f"🏎️ **Herzlichen Glückwunsch!** "
+                    f"Du kannst dir jetzt einen Lambo leisten!\n\n"
+                    f"Dein Portfolio ist aktuell **{lambos:.4f} Lamborghini Aventador SVJ** wert. "
+                    f"Bestellformular liegt im Handschuhfach."
+                ),
+            )
+        )
 
     # --- 100 Zyklen Meilenstein ---
-    cycles          = context.get("cycles")
+    cycles = context.get("cycles")
     previous_cycles = context.get("previous_cycles", 0)
-    if (
-        cycles is not None
-        and cycles >= 100
-        and previous_cycles < 100
-    ):
-        candidates.append((
-            _PRIORITY_100CYC,
+    if cycles is not None and cycles >= 100 and previous_cycles < 100:
+        candidates.append(
             (
-                f"🏆 **100 Zyklen! Du bist jetzt offiziell ein Quant.** {CONFETTI_MARKER}\n\n"
-                "Ernsthaft: 100 Trainingszyklen. Das ist Hingabe.\n"
-                "Renaissance Technologies wird nervös. 📊"
-            ),
-        ))
+                _PRIORITY_100CYC,
+                (
+                    f"🏆 **100 Zyklen! Du bist jetzt offiziell ein Quant.** {CONFETTI_MARKER}\n\n"
+                    "Ernsthaft: 100 Trainingszyklen. Das ist Hingabe.\n"
+                    "Renaissance Technologies wird nervös. 📊"
+                ),
+            )
+        )
 
     # --- Accuracy > 70% ---
     accuracy = context.get("accuracy")
     if accuracy is not None and accuracy > 0.70:
-        candidates.append((
-            _PRIORITY_AI_WALL,
+        candidates.append(
             (
-                f"🧠 **Achtung: KI übernimmt bald Wall Street.**\n\n"
-                f"Aktuelle Modell-Genauigkeit: **{accuracy:.1%}** – Das ist bemerkenswert gut.\n"
-                "Bitte nicht mit echtem Geld testen. Aber falls doch: Wir haben nichts gesagt."
-            ),
-        ))
+                _PRIORITY_AI_WALL,
+                (
+                    f"🧠 **Achtung: KI übernimmt bald Wall Street.**\n\n"
+                    f"Aktuelle Modell-Genauigkeit: **{accuracy:.1%}** – Das ist bemerkenswert gut.\n"
+                    "Bitte nicht mit echtem Geld testen. Aber falls doch: Wir haben nichts gesagt."
+                ),
+            )
+        )
 
     # --- Portfolio -50% ---
     total_return_pct = context.get("total_return_pct")
     if total_return_pct is not None and total_return_pct <= -50.0:
-        candidates.append((
-            _PRIORITY_BUST,
+        candidates.append(
             (
-                f"📉 **Even Warren Buffett hatte schlechte Tage…**\n\n"
-                f"Aktueller Drawdown: **{total_return_pct:.1f}%**\n"
-                "Berkshire Hathaway verlor 1999 rund 20%. Er kaufte trotzdem weiter.\n"
-                "Das hier ist Paper-Trading. Kein echtes Geld. Tief durchatmen. 🧘"
-            ),
-        ))
+                _PRIORITY_BUST,
+                (
+                    f"📉 **Even Warren Buffett hatte schlechte Tage…**\n\n"
+                    f"Aktueller Drawdown: **{total_return_pct:.1f}%**\n"
+                    "Berkshire Hathaway verlor 1999 rund 20%. Er kaufte trotzdem weiter.\n"
+                    "Das hier ist Paper-Trading. Kein echtes Geld. Tief durchatmen. 🧘"
+                ),
+            )
+        )
 
     # --- Zufalls-Egg (~1% Chance) ---
     force_random = context.get("force_random", False)
     if force_random or random.random() < 0.01:
-        candidates.append((
-            _PRIORITY_RANDOM,
-            "🎰 **Der Markt ist ein Casino – aber wenigstens kostenlos hier!**\n\n"
-            "Fun Fact: Ein zufälliger Dart-werfender Affe schlägt die Mehrheit der "
-            "Fondsmanager über 10 Jahre. Deine KI ist vermutlich besser als ein Affe. "
-            "Wahrscheinlich.",
-        ))
+        candidates.append(
+            (
+                _PRIORITY_RANDOM,
+                "🎰 **Der Markt ist ein Casino – aber wenigstens kostenlos hier!**\n\n"
+                "Fun Fact: Ein zufälliger Dart-werfender Affe schlägt die Mehrheit der "
+                "Fondsmanager über 10 Jahre. Deine KI ist vermutlich besser als ein Affe. "
+                "Wahrscheinlich.",
+            )
+        )
 
     if not candidates:
         return None
@@ -226,6 +236,7 @@ def check_easter_egg(context: dict) -> Optional[str]:
 # Weitere kontextuelle Easter Eggs (für direkte Abfrage)
 # ===========================================================================
 
+
 def get_streak_egg(correct_streak: int) -> Optional[str]:
     """
     Gibt ein Easter Egg für eine Vorhersage-Serie zurück.
@@ -238,18 +249,16 @@ def get_streak_egg(correct_streak: int) -> Optional[str]:
             "Oder beides. Genieße es, solange es anhält."
         )
     if correct_streak >= 5:
-        return (
-            f"⚡ **{correct_streak} in Folge richtig!** Nicht schlecht, Padawan."
-        )
+        return f"⚡ **{correct_streak} in Folge richtig!** Nicht schlecht, Padawan."
     return None
 
 
 def get_trade_count_egg(num_trades: int) -> Optional[str]:
     """Easter Eggs für Trade-Meilensteine."""
     milestones = {
-        1:   "🎉 **Erster Trade!** Der erste Schritt auf dem Weg zum Quant.",
-        10:  "📊 **10 Trades!** Du weißt jetzt, wie man eine Order platziert.",
-        50:  "💼 **50 Trades!** Das nächste Level: Steuerberater finden.",
+        1: "🎉 **Erster Trade!** Der erste Schritt auf dem Weg zum Quant.",
+        10: "📊 **10 Trades!** Du weißt jetzt, wie man eine Order platziert.",
+        50: "💼 **50 Trades!** Das nächste Level: Steuerberater finden.",
         100: "🏆 **100 Trades!** Offiziell erfahrener Paper-Trader.",
         500: "🤖 **500 Trades!** Das Modell handelt schneller als du denken kannst.",
     }
@@ -260,17 +269,20 @@ def get_trade_count_egg(num_trades: int) -> Optional[str]:
 # Backward-Kompatibilität (app.py, ui_components.py)
 # ===========================================================================
 
+
 @dataclass
 class EasterEgg:
-    id:      str
-    title:   str
+    id: str
+    title: str
     message: str
-    emoji:   str = "🥚"
+    emoji: str = "🥚"
 
 
 EASTER_EGGS: list[EasterEgg] = [
     EasterEgg(
-        id="moon", title="🚀 To the Moon!", emoji="🚀",
+        id="moon",
+        title="🚀 To the Moon!",
+        emoji="🚀",
         message=(
             "Das Modell sagt: 📈📈📈\n"
             "Aber vergiss nicht: Was rauf geht, kann auch runterkommen. "
@@ -278,7 +290,9 @@ EASTER_EGGS: list[EasterEgg] = [
         ),
     ),
     EasterEgg(
-        id="dip", title="Buy the Dip™", emoji="🛒",
+        id="dip",
+        title="Buy the Dip™",
+        emoji="🛒",
         message=(
             "Der Kurs ist gefallen. Die KI sieht eine Chance.\n"
             "Oder eine Falle. Wer weiß das schon? 🎰\n"
@@ -286,7 +300,9 @@ EASTER_EGGS: list[EasterEgg] = [
         ),
     ),
     EasterEgg(
-        id="diamond_hands", title="💎 Diamond Hands erkannt!", emoji="💎",
+        id="diamond_hands",
+        title="💎 Diamond Hands erkannt!",
+        emoji="💎",
         message=(
             "Du hältst diese Aktie schon sehr lange.\n"
             "Entweder bist du ein Genie oder ein geduldiger Mensch. "
@@ -294,7 +310,9 @@ EASTER_EGGS: list[EasterEgg] = [
         ),
     ),
     EasterEgg(
-        id="yolo", title="YOLO-Modus aktiviert", emoji="🎲",
+        id="yolo",
+        title="YOLO-Modus aktiviert",
+        emoji="🎲",
         message=(
             "Du hast 100% deines Portfolios in eine Aktie gesteckt.\n"
             "Mutig. Sehr mutig. 🎲\n"
@@ -302,7 +320,9 @@ EASTER_EGGS: list[EasterEgg] = [
         ),
     ),
     EasterEgg(
-        id="patience", title="🧘 Zen-Investor", emoji="🧘",
+        id="patience",
+        title="🧘 Zen-Investor",
+        emoji="🧘",
         message=(
             "Du hast heute keine einzige Order ausgeführt.\n"
             "Manchmal ist Nichtstun die beste Strategie. 🧘\n"
@@ -310,15 +330,19 @@ EASTER_EGGS: list[EasterEgg] = [
         ),
     ),
     EasterEgg(
-        id="first_profit", title="🎉 Erster Gewinn!", emoji="🎉",
+        id="first_profit",
+        title="🎉 Erster Gewinn!",
+        emoji="🎉",
         message=(
             "Dein erster realisierter Gewinn! 🎊\n"
             f"Das ist erst der Anfang. Der Lambo ist jetzt "
-            f"{LAMBO_PRICE_EUR/1000:.0f}k€ entfernt... aber du bist unterwegs!"
+            f"{LAMBO_PRICE_EUR / 1000:.0f}k€ entfernt... aber du bist unterwegs!"
         ),
     ),
     EasterEgg(
-        id="ten_trades", title="📊 Erfahrener Trader", emoji="📊",
+        id="ten_trades",
+        title="📊 Erfahrener Trader",
+        emoji="📊",
         message=(
             "10 Trades abgeschlossen!\n"
             "Du hast genug Erfahrung, um zu wissen, dass Märkte unvorhersehbar sind. "
@@ -331,11 +355,11 @@ EGG_LOOKUP = {egg.id: egg for egg in EASTER_EGGS}
 
 
 def check_triggers(
-    total_value:       float,
-    total_return_pct:  float,
-    num_trades:        int,
-    positions:         list[dict],
-    previous_value:    float = 0.0,
+    total_value: float,
+    total_return_pct: float,
+    num_trades: int,
+    positions: list[dict],
+    previous_value: float = 0.0,
 ) -> list[EasterEgg]:
     """
     Prüft auf Easter-Egg-Bedingungen (Legacy-API für app.py).
@@ -349,13 +373,10 @@ def check_triggers(
     if total_return_pct <= -10:
         triggered.append(EGG_LOOKUP["dip"])
 
-    if (previous_value > 0
-            and previous_value < 10_000
-            and total_value >= 10_000):
+    if previous_value > 0 and previous_value < 10_000 and total_value >= 10_000:
         triggered.append(EGG_LOOKUP["first_profit"])
 
-    if (len(positions) == 1
-            and positions[0].get("value", 0) / max(total_value, 1) > 0.95):
+    if len(positions) == 1 and positions[0].get("value", 0) / max(total_value, 1) > 0.95:
         triggered.append(EGG_LOOKUP["yolo"])
 
     if num_trades == 10:
@@ -367,6 +388,7 @@ def check_triggers(
 # ---------------------------------------------------------------------------
 # Lambo-Hilfsfunktionen (Compat: ui_components.py, app.py)
 # ---------------------------------------------------------------------------
+
 
 def eur_to_lambo(eur: float) -> float:
     return eur / LAMBO_PRICE_EUR

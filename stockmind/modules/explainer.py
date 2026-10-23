@@ -19,19 +19,19 @@ from modules.logger import logger  # noqa: E402
 
 # Lesbare deutsche Bezeichnungen für Feature-Namen
 _FEATURE_LABELS: dict[str, str] = {
-    "ret_1d":         "1-Tages-Rendite",
-    "ret_5d":         "5-Tages-Rendite",
-    "ret_20d":        "20-Tages-Rendite",
-    "sma_20":         "Abstand SMA-20",
-    "sma_50":         "Abstand SMA-50",
-    "sma_cross":      "SMA-20/50-Kreuzung",
+    "ret_1d": "1-Tages-Rendite",
+    "ret_5d": "5-Tages-Rendite",
+    "ret_20d": "20-Tages-Rendite",
+    "sma_20": "Abstand SMA-20",
+    "sma_50": "Abstand SMA-50",
+    "sma_cross": "SMA-20/50-Kreuzung",
     "volatility_20d": "20-Tages-Volatilität",
-    "vol_ratio":      "Volumen-Ratio",
-    "rsi":            "RSI (14)",
-    "macd_hist":      "MACD-Histogramm",
-    "bb_pos":         "Bollinger-Position",
-    "hl_range":       "High-Low-Range",
-    "sentiment":      "News-Sentiment",
+    "vol_ratio": "Volumen-Ratio",
+    "rsi": "RSI (14)",
+    "macd_hist": "MACD-Histogramm",
+    "bb_pos": "Bollinger-Position",
+    "hl_range": "High-Low-Range",
+    "sentiment": "News-Sentiment",
 }
 
 _SYSTEM_PROMPT = (
@@ -67,6 +67,7 @@ def explain_decision(
     """
     if provider is None:
         from modules.llm_providers import get_provider
+
         provider = get_provider()
 
     if not model_name:
@@ -95,6 +96,7 @@ def explain_decision(
 # Interne Hilfsfunktionen
 # ---------------------------------------------------------------------------
 
+
 def _top_features(
     features: dict[str, float],
     importances: dict[str, float],
@@ -121,9 +123,9 @@ def _build_prompt(
 ) -> str:
     """Baut den LLM-Prompt für die Erklärung."""
     signal_de = {
-        "KAUFEN":    "Kauf-Signal",
+        "KAUFEN": "Kauf-Signal",
         "VERKAUFEN": "Verkauf-Signal",
-        "HALTEN":    "Halte-Signal",
+        "HALTEN": "Halte-Signal",
     }.get(prediction, prediction)
 
     feature_lines = "\n".join(
@@ -147,8 +149,15 @@ def _fmt_value(feature_name: str, value: float) -> str:
     """Formatiert einen Feature-Wert lesbar (z.B. RSI als Integer, Renditen in %)."""
     if feature_name == "rsi":
         return f"{value:.1f}"
-    if feature_name in ("ret_1d", "ret_5d", "ret_20d", "sma_20", "sma_50",
-                        "sma_cross", "volatility_20d"):
+    if feature_name in (
+        "ret_1d",
+        "ret_5d",
+        "ret_20d",
+        "sma_20",
+        "sma_50",
+        "sma_cross",
+        "volatility_20d",
+    ):
         return f"{value:+.2%}"
     if feature_name == "sentiment":
         return f"{value:+.2f}"

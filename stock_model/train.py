@@ -1,4 +1,5 @@
 """Training script for the return forecasting model."""
+
 from __future__ import annotations
 
 import argparse
@@ -124,16 +125,28 @@ def _ratio_value(value: str) -> float:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("csv_path", type=Path, help="Path to CSV file containing prices")
-    parser.add_argument("--output", type=Path, default=Path("artifacts"), help="Directory to save model checkpoints")
-    parser.add_argument("--window", type=_positive_int, default=30, help="Number of past returns per sample")
+    parser.add_argument(
+        "--output", type=Path, default=Path("artifacts"), help="Directory to save model checkpoints"
+    )
+    parser.add_argument(
+        "--window", type=_positive_int, default=30, help="Number of past returns per sample"
+    )
     parser.add_argument("--batch-size", type=_positive_int, default=64, help="Training batch size")
-    parser.add_argument("--epochs", type=_positive_int, default=20, help="Number of training epochs")
+    parser.add_argument(
+        "--epochs", type=_positive_int, default=20, help="Number of training epochs"
+    )
     parser.add_argument("--lr", type=_positive_float, default=1e-3, help="Learning rate")
     parser.add_argument("--hidden-size", type=_positive_int, default=128, help="LSTM hidden size")
     parser.add_argument("--layers", type=_positive_int, default=2, help="Number of LSTM layers")
-    parser.add_argument("--dropout", type=_dropout_value, default=0.1, help="Dropout between LSTM layers")
-    parser.add_argument("--train-ratio", type=_ratio_value, default=0.8, help="Ratio of samples for training")
-    parser.add_argument("--device", type=str, default=None, help="Optional device override (cpu or cuda)")
+    parser.add_argument(
+        "--dropout", type=_dropout_value, default=0.1, help="Dropout between LSTM layers"
+    )
+    parser.add_argument(
+        "--train-ratio", type=_ratio_value, default=0.8, help="Ratio of samples for training"
+    )
+    parser.add_argument(
+        "--device", type=str, default=None, help="Optional device override (cpu or cuda)"
+    )
     return parser.parse_args()
 
 

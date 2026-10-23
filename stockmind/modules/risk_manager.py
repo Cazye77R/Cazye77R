@@ -30,10 +30,25 @@ from modules.logger import logger  # noqa: E402
 # ---------------------------------------------------------------------------
 
 _DE_SUFFIXES = frozenset({"DE", "F", "MU", "BE", "HM", "DU", "HA"})
-_CRYPTO_KEYWORDS = frozenset({
-    "BTC", "ETH", "BNB", "XRP", "ADA", "SOL", "DOT", "DOGE", "MATIC",
-    "LTC", "BCH", "XLM", "LINK", "AVAX", "ATOM",
-})
+_CRYPTO_KEYWORDS = frozenset(
+    {
+        "BTC",
+        "ETH",
+        "BNB",
+        "XRP",
+        "ADA",
+        "SOL",
+        "DOT",
+        "DOGE",
+        "MATIC",
+        "LTC",
+        "BCH",
+        "XLM",
+        "LINK",
+        "AVAX",
+        "ATOM",
+    }
+)
 
 
 def _ticker_market(ticker: str) -> str:
@@ -61,6 +76,7 @@ def _ticker_market(ticker: str) -> str:
 # RiskManager
 # ---------------------------------------------------------------------------
 
+
 class RiskManager:
     """
     Kapselung aller Risk-Management-Regeln für den Paper-Trader.
@@ -71,19 +87,19 @@ class RiskManager:
 
     def __init__(
         self,
-        max_risk_per_trade_pct:      float = MAX_RISK_PER_TRADE_PCT,
-        max_position_size_pct:       float = MAX_POSITION_SIZE_PCT,
-        max_drawdown_pct:            float = MAX_DRAWDOWN_PCT,
+        max_risk_per_trade_pct: float = MAX_RISK_PER_TRADE_PCT,
+        max_position_size_pct: float = MAX_POSITION_SIZE_PCT,
+        max_drawdown_pct: float = MAX_DRAWDOWN_PCT,
         max_correlated_exposure_pct: float = MAX_CORRELATED_EXPOSURE_PCT,
-        stop_loss_atr_multiple:      float = STOP_LOSS_ATR_MULTIPLE,
-        take_profit_atr_multiple:    float = TAKE_PROFIT_ATR_MULTIPLE,
+        stop_loss_atr_multiple: float = STOP_LOSS_ATR_MULTIPLE,
+        take_profit_atr_multiple: float = TAKE_PROFIT_ATR_MULTIPLE,
     ) -> None:
-        self.max_risk_per_trade_pct      = max_risk_per_trade_pct
-        self.max_position_size_pct       = max_position_size_pct
-        self.max_drawdown_pct            = max_drawdown_pct
+        self.max_risk_per_trade_pct = max_risk_per_trade_pct
+        self.max_position_size_pct = max_position_size_pct
+        self.max_drawdown_pct = max_drawdown_pct
         self.max_correlated_exposure_pct = max_correlated_exposure_pct
-        self.stop_loss_atr_multiple      = stop_loss_atr_multiple
-        self.take_profit_atr_multiple    = take_profit_atr_multiple
+        self.stop_loss_atr_multiple = stop_loss_atr_multiple
+        self.take_profit_atr_multiple = take_profit_atr_multiple
 
     # ------------------------------------------------------------------
     # 1. Positionsgröße
@@ -91,8 +107,8 @@ class RiskManager:
 
     def position_size(
         self,
-        equity:          float,
-        entry_price:     float,
+        equity: float,
+        entry_price: float,
         stop_loss_price: float,
     ) -> float:
         """
@@ -117,7 +133,7 @@ class RiskManager:
             return 0.0
 
         max_risk_eur = equity * self.max_risk_per_trade_pct / 100.0
-        risk_based   = max_risk_eur / risk_per_share
+        risk_based = max_risk_eur / risk_per_share
 
         # Obergrenze: max. % des Eigenkapitals in einer Position
         size_cap = (equity * self.max_position_size_pct / 100.0) / entry_price
@@ -130,9 +146,9 @@ class RiskManager:
 
     def compute_stops(
         self,
-        df_ohlcv:    pd.DataFrame,
+        df_ohlcv: pd.DataFrame,
         entry_price: float,
-        side:        str = "LONG",
+        side: str = "LONG",
     ) -> tuple[float, float]:
         """
         Berechnet Stop-Loss und Take-Profit als Vielfaches von ATR(14).
@@ -147,10 +163,10 @@ class RiskManager:
         """
         atr = self._atr14(df_ohlcv)
         if side.upper() == "LONG":
-            sl = entry_price - self.stop_loss_atr_multiple   * atr
+            sl = entry_price - self.stop_loss_atr_multiple * atr
             tp = entry_price + self.take_profit_atr_multiple * atr
         else:
-            sl = entry_price + self.stop_loss_atr_multiple   * atr
+            sl = entry_price + self.stop_loss_atr_multiple * atr
             tp = entry_price - self.take_profit_atr_multiple * atr
         return round(sl, 4), round(tp, 4)
 
@@ -161,16 +177,16 @@ class RiskManager:
             last = float(df["Close"].iloc[-1]) if not df.empty else 1.0
             return last * 0.02
 
-        highs      = df["High"].values.astype(float)
-        lows       = df["Low"].values.astype(float)
-        closes     = df["Close"].values.astype(float)
+        highs = df["High"].values.astype(float)
+        lows = df["Low"].values.astype(float)
+        closes = df["Close"].values.astype(float)
         close_prev = np.concatenate([[closes[0]], closes[:-1]])
 
         tr = np.maximum(
             highs - lows,
             np.maximum(
                 np.abs(highs - close_prev),
-                np.abs(lows  - close_prev),
+                np.abs(lows - close_prev),
             ),
         )
         window = min(14, len(tr))
@@ -199,7 +215,7 @@ class RiskManager:
         """Aktueller Drawdown in Prozent (≤ 0)."""
         if len(equity_curve) < 2:
             return 0.0
-        eq   = np.array(equity_curve, dtype=float)
+        eq = np.array(equity_curve, dtype=float)
         peak = float(np.maximum.accumulate(eq)[-1])
         if peak <= 0:
             return 0.0
@@ -211,9 +227,9 @@ class RiskManager:
 
     def check_exposure(
         self,
-        positions:   dict,
-        new_ticker:  str,
-        equity:      float,
+        positions: dict,
+        new_ticker: str,
+        equity: float,
         order_value: float = 0.0,
     ) -> bool:
         """
@@ -234,8 +250,8 @@ class RiskManager:
         if equity <= 0:
             return True
 
-        new_market        = _ticker_market(new_ticker)
-        correlated_value  = order_value + sum(
+        new_market = _ticker_market(new_ticker)
+        correlated_value = order_value + sum(
             pos.get("quantity", 0) * pos.get("avg_price", 0)
             for sym, pos in positions.items()
             if _ticker_market(sym) == new_market
@@ -255,15 +271,15 @@ class RiskManager:
 
     def validate_trade(
         self,
-        direction:       str,
-        ticker:          str,
-        entry_price:     float,
-        equity:          float,
-        cash:            float,
-        positions:       dict,
-        equity_curve:    list[float],
+        direction: str,
+        ticker: str,
+        entry_price: float,
+        equity: float,
+        cash: float,
+        positions: dict,
+        equity_curve: list[float],
         stop_loss_price: float | None = None,
-        order_value:     float = 0.0,
+        order_value: float = 0.0,
     ) -> tuple[bool, str]:
         """
         Umfassende Trade-Validierung. SELLs werden immer genehmigt.

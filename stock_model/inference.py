@@ -1,4 +1,5 @@
 """Inference helpers for return forecasting and price projection."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,7 +11,9 @@ import torch
 from .model import ReturnLSTM
 
 
-def load_model_from_checkpoint(checkpoint_source: Path | str | IO[bytes]) -> Tuple[ReturnLSTM, dict]:
+def load_model_from_checkpoint(
+    checkpoint_source: Path | str | IO[bytes],
+) -> Tuple[ReturnLSTM, dict]:
     """Load a trained :class:`ReturnLSTM` and its hyperparameters.
 
     Accepts a filesystem path or an in-memory file-like object (e.g. the

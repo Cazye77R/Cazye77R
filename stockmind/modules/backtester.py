@@ -39,48 +39,52 @@ logger.debug(f"Module loaded: {__name__}")
 # Datenklassen
 # ===========================================================================
 
+
 @dataclass
 class TradeRecord:
     """Einzelner Trade-Eintrag (BUY oder SELL)."""
-    id:           str        # Eindeutige Trade-ID
-    symbol:       str
-    direction:    str        # "BUY" | "SELL"
-    quantity:     float
-    price:        float      # Marktpreis
-    exec_price:   float      # Tatsächlicher Preis inkl. Spread
-    order_cost:   float      # Ordergebühr
-    total_cost:   float      # Gesamtkosten / Erlös
-    timestamp:    str
-    pnl:          float = 0.0     # Realisierter G/V (nur SELL)
-    pnl_pct:      float = 0.0
-    signal:       str  = ""       # Auslösendes Signal
-    reasoning:    str  = ""       # KI-Begründung (Auto-Modus)
-    method:       str  = ""       # Analysemethode
+
+    id: str  # Eindeutige Trade-ID
+    symbol: str
+    direction: str  # "BUY" | "SELL"
+    quantity: float
+    price: float  # Marktpreis
+    exec_price: float  # Tatsächlicher Preis inkl. Spread
+    order_cost: float  # Ordergebühr
+    total_cost: float  # Gesamtkosten / Erlös
+    timestamp: str
+    pnl: float = 0.0  # Realisierter G/V (nur SELL)
+    pnl_pct: float = 0.0
+    signal: str = ""  # Auslösendes Signal
+    reasoning: str = ""  # KI-Begründung (Auto-Modus)
+    method: str = ""  # Analysemethode
 
 
 @dataclass
 class Position:
     """Offene Position in einem Symbol."""
-    symbol:       str
-    quantity:     float
-    avg_price:    float      # Durchschnittlicher Einstandspreis (inkl. Spread)
-    opened_at:    str
+
+    symbol: str
+    quantity: float
+    avg_price: float  # Durchschnittlicher Einstandspreis (inkl. Spread)
+    opened_at: str
     last_updated: str
 
 
 @dataclass
 class PortfolioState:
     """Vollständiger Portfolio-Zustand."""
-    name:         str
+
+    name: str
     start_budget: float
-    cash:         float
-    order_cost:   float      = ORDER_COST_EUR
-    spread_pct:   float      = SPREAD_PERCENT
-    positions:    dict       = field(default_factory=dict)   # symbol → Position-dict
-    trades:       list       = field(default_factory=list)   # list[TradeRecord-dict]
-    equity_ts:    list       = field(default_factory=list)   # [{ts, value}]
-    created_at:   str        = field(default_factory=lambda: _now())
-    auto_log:     list       = field(default_factory=list)   # Auto-Trade Entscheidungs-Log
+    cash: float
+    order_cost: float = ORDER_COST_EUR
+    spread_pct: float = SPREAD_PERCENT
+    positions: dict = field(default_factory=dict)  # symbol → Position-dict
+    trades: list = field(default_factory=list)  # list[TradeRecord-dict]
+    equity_ts: list = field(default_factory=list)  # [{ts, value}]
+    created_at: str = field(default_factory=lambda: _now())
+    auto_log: list = field(default_factory=list)  # Auto-Trade Entscheidungs-Log
 
 
 def _now() -> str:
@@ -91,12 +95,14 @@ def _trade_id() -> str:
     """Eindeutige Trade-ID – Timestamp allein kollidiert bei zwei Orders
     in derselben Millisekunde und läuft nach ~116 Tagen über."""
     import uuid
+
     return f"T{uuid.uuid4().hex[:12]}"
 
 
 # ===========================================================================
 # PaperTrader – Klasse
 # ===========================================================================
+
 
 class PaperTrader:
     """
@@ -112,16 +118,16 @@ class PaperTrader:
 
     def __init__(
         self,
-        name:         str   = "default",
+        name: str = "default",
         start_budget: float = DEFAULT_BUDGET_EUR,
-        order_cost:   float = ORDER_COST_EUR,
-        spread_pct:   float = SPREAD_PERCENT,
-        base_dir:     str | None = None,
+        order_cost: float = ORDER_COST_EUR,
+        spread_pct: float = SPREAD_PERCENT,
+        base_dir: str | None = None,
     ) -> None:
-        self.name         = name
+        self.name = name
         self.start_budget = start_budget
-        self.order_cost   = order_cost
-        self.spread_pct   = spread_pct
+        self.order_cost = order_cost
+        self.spread_pct = spread_pct
 
         root = Path(os.path.dirname(os.path.dirname(__file__)))
         self._pf_dir = root / (base_dir or PORTFOLIO_DIR)
@@ -176,7 +182,7 @@ class PaperTrader:
     def save(self, state: PortfolioState) -> None:
         # Atomar (tmp + replace) – ein Crash mitten im Schreiben zerstört
         # sonst das gesamte Portfolio-JSON
-        p   = self._path()
+        p = self._path()
         tmp = p.with_suffix(".json.tmp")
         with open(tmp, "w") as f:
             json.dump(asdict(state), f, indent=2, default=str)
@@ -201,14 +207,14 @@ class PaperTrader:
 
     def place_order(
         self,
-        symbol:    str,
-        direction: str,        # "BUY" | "SELL"
-        quantity:  float,
-        price:     float,
+        symbol: str,
+        direction: str,  # "BUY" | "SELL"
+        quantity: float,
+        price: float,
         timestamp: str | None = None,
-        signal:    str = "",
+        signal: str = "",
         reasoning: str = "",
-        method:    str = "",
+        method: str = "",
     ) -> dict[str, object]:
         """
         Platziert eine Order und aktualisiert Cash + Positionen.
@@ -231,16 +237,16 @@ class PaperTrader:
             return {"ok": False, "error": f"Ungültiger Preis: {price}"}
 
         state = self.load()
-        ts    = timestamp or _now()
+        ts = timestamp or _now()
 
         spread = price * state.spread_pct / 100
         if direction == "BUY":
             exec_price = price + spread
-            gross      = quantity * exec_price
+            gross = quantity * exec_price
             total_cost = gross + state.order_cost
             if total_cost > state.cash:
                 return {
-                    "ok":    False,
+                    "ok": False,
                     "error": (
                         f"Nicht genug Cash: benötigt {total_cost:.2f} €, "
                         f"verfügbar {state.cash:.2f} €"
@@ -249,6 +255,7 @@ class PaperTrader:
 
             # Risk-Management-Gate: Drawdown-Schutz + korrelierte Exposure
             from modules.risk_manager import RiskManager
+
             _pos_val = sum(
                 p["quantity"] * (p.get("last_price") or p["avg_price"])
                 for p in state.positions.values()
@@ -273,49 +280,49 @@ class PaperTrader:
             per_share_cost = total_cost / quantity
             pos = state.positions.get(symbol)
             if pos:
-                old_qty   = pos["quantity"]
-                old_avg   = pos["avg_price"]
-                new_qty   = old_qty + quantity
-                new_avg   = (old_qty * old_avg + total_cost) / new_qty
+                old_qty = pos["quantity"]
+                old_avg = pos["avg_price"]
+                new_qty = old_qty + quantity
+                new_avg = (old_qty * old_avg + total_cost) / new_qty
                 state.positions[symbol] = {
                     **pos,
-                    "symbol":       symbol,
-                    "quantity":     round(new_qty, 8),
-                    "avg_price":    round(new_avg, 6),
-                    "last_price":   round(price, 6),
+                    "symbol": symbol,
+                    "quantity": round(new_qty, 8),
+                    "avg_price": round(new_avg, 6),
+                    "last_price": round(price, 6),
                     "last_updated": ts,
                 }
             else:
                 state.positions[symbol] = {
-                    "symbol":       symbol,
-                    "quantity":     round(quantity, 8),
-                    "avg_price":    round(per_share_cost, 6),
-                    "last_price":   round(price, 6),
-                    "opened_at":    ts,
+                    "symbol": symbol,
+                    "quantity": round(quantity, 8),
+                    "avg_price": round(per_share_cost, 6),
+                    "last_price": round(price, 6),
+                    "opened_at": ts,
                     "last_updated": ts,
                 }
-            pnl     = 0.0
+            pnl = 0.0
             pnl_pct = 0.0
 
         else:  # SELL
             pos = state.positions.get(symbol)
             if not pos or pos["quantity"] <= 0:
                 return {"ok": False, "error": f"Keine offene Position in {symbol}."}
-            sell_qty    = min(quantity, pos["quantity"])
-            exec_price  = price - spread
-            gross       = sell_qty * exec_price
-            total_cost  = gross - state.order_cost    # Erlös nach Gebühr
-            cost_basis  = sell_qty * pos["avg_price"]
-            pnl         = total_cost - cost_basis
-            pnl_pct     = pnl / cost_basis * 100 if cost_basis > 0 else 0.0
+            sell_qty = min(quantity, pos["quantity"])
+            exec_price = price - spread
+            gross = sell_qty * exec_price
+            total_cost = gross - state.order_cost  # Erlös nach Gebühr
+            cost_basis = sell_qty * pos["avg_price"]
+            pnl = total_cost - cost_basis
+            pnl_pct = pnl / cost_basis * 100 if cost_basis > 0 else 0.0
 
             state.cash += total_cost
-            remaining   = pos["quantity"] - sell_qty
+            remaining = pos["quantity"] - sell_qty
             if remaining > 1e-8:
                 state.positions[symbol] = {
                     **pos,
-                    "quantity":     round(remaining, 8),
-                    "last_price":   round(price, 6),
+                    "quantity": round(remaining, 8),
+                    "last_price": round(price, 6),
                     "last_updated": ts,
                 }
             else:
@@ -324,28 +331,28 @@ class PaperTrader:
             quantity = sell_qty
 
         rec = {
-            "id":         _trade_id(),
-            "symbol":     symbol,
-            "direction":  direction,
-            "quantity":   round(quantity, 8),
-            "price":      round(price, 4),
+            "id": _trade_id(),
+            "symbol": symbol,
+            "direction": direction,
+            "quantity": round(quantity, 8),
+            "price": round(price, 4),
             "exec_price": round(exec_price, 4),
             "order_cost": round(state.order_cost, 2),
             "total_cost": round(total_cost, 4),
-            "timestamp":  ts,
-            "pnl":        round(pnl, 4),
-            "pnl_pct":    round(pnl_pct, 4),
-            "signal":     signal,
-            "reasoning":  reasoning,
-            "method":     method,
+            "timestamp": ts,
+            "pnl": round(pnl, 4),
+            "pnl_pct": round(pnl_pct, 4),
+            "signal": signal,
+            "reasoning": reasoning,
+            "method": method,
         }
         state.trades.append(rec)
 
         # Equity-Zeitreihe aktualisieren – Mark-to-Market: zuletzt bekannter
         # Marktpreis je Position statt Einstandskurs
         pos_val = sum(
-            p["quantity"] * (price if p["symbol"] == symbol
-                             else p.get("last_price") or p["avg_price"])
+            p["quantity"]
+            * (price if p["symbol"] == symbol else p.get("last_price") or p["avg_price"])
             for p in state.positions.values()
         )
         state.equity_ts.append({"ts": ts, "value": round(state.cash + pos_val, 2)})
@@ -359,8 +366,8 @@ class PaperTrader:
 
     def close_position(
         self,
-        symbol:    str,
-        price:     float,
+        symbol: str,
+        price: float,
         timestamp: str | None = None,
         reasoning: str = "",
     ) -> dict[str, object]:
@@ -371,7 +378,7 @@ class PaperTrader:
             dict mit P&L-Informationen und Trade-Record
         """
         state = self.load()
-        pos   = state.positions.get(symbol)
+        pos = state.positions.get(symbol)
         if not pos or pos["quantity"] <= 0:
             return {"ok": False, "error": f"Keine offene Position in {symbol}."}
 
@@ -414,62 +421,69 @@ class PaperTrader:
               positions: [...], closed_trades: [...]
             }
         """
-        state  = self.load()
+        state = self.load()
         prices = current_prices or {}
 
         # Positions-Werte
-        pos_value   = 0.0
-        unrealized  = 0.0
+        pos_value = 0.0
+        unrealized = 0.0
         positions_d = []
         for sym, pos in state.positions.items():
-            curr  = prices.get(sym) or pos.get("last_price") or pos["avg_price"]
-            val   = pos["quantity"] * curr
+            curr = prices.get(sym) or pos.get("last_price") or pos["avg_price"]
+            val = pos["quantity"] * curr
             unrlz = (curr - pos["avg_price"]) * pos["quantity"]
-            pos_value  += val
+            pos_value += val
             unrealized += unrlz
-            positions_d.append({
-                "symbol":        sym,
-                "quantity":      round(pos["quantity"], 6),
-                "avg_price":     round(pos["avg_price"], 4),
-                "current_price": round(curr, 4),
-                "value":         round(val, 2),
-                "unrealized_pnl":    round(unrlz, 2),
-                "unrealized_pnl_pct": round(unrlz / (pos["quantity"] * pos["avg_price"]) * 100, 2)
-                                       if pos["avg_price"] > 0 else 0.0,
-            })
+            positions_d.append(
+                {
+                    "symbol": sym,
+                    "quantity": round(pos["quantity"], 6),
+                    "avg_price": round(pos["avg_price"], 4),
+                    "current_price": round(curr, 4),
+                    "value": round(val, 2),
+                    "unrealized_pnl": round(unrlz, 2),
+                    "unrealized_pnl_pct": round(
+                        unrlz / (pos["quantity"] * pos["avg_price"]) * 100, 2
+                    )
+                    if pos["avg_price"] > 0
+                    else 0.0,
+                }
+            )
 
-        total_value    = state.cash + pos_value
-        realized_pnl   = sum(t.get("pnl", 0.0) for t in state.trades if t["direction"] == "SELL")
-        total_return    = total_value - state.start_budget
-        total_return_pct = total_return / state.start_budget * 100 if state.start_budget > 0 else 0.0
+        total_value = state.cash + pos_value
+        realized_pnl = sum(t.get("pnl", 0.0) for t in state.trades if t["direction"] == "SELL")
+        total_return = total_value - state.start_budget
+        total_return_pct = (
+            total_return / state.start_budget * 100 if state.start_budget > 0 else 0.0
+        )
 
         # Win / Loss
         sell_trades = [t for t in state.trades if t["direction"] == "SELL"]
-        wins        = [t for t in sell_trades if t.get("pnl", 0) > 0]
-        win_rate    = len(wins) / len(sell_trades) if sell_trades else 0.0
+        wins = [t for t in sell_trades if t.get("pnl", 0) > 0]
+        win_rate = len(wins) / len(sell_trades) if sell_trades else 0.0
 
-        best_trade  = max(sell_trades, key=lambda t: t.get("pnl", 0), default=None)
+        best_trade = max(sell_trades, key=lambda t: t.get("pnl", 0), default=None)
         worst_trade = min(sell_trades, key=lambda t: t.get("pnl", 0), default=None)
 
         return {
-            "total_value":        round(total_value, 2),
-            "cash":               round(state.cash, 2),
-            "position_value":     round(pos_value, 2),
-            "realized_pnl":       round(realized_pnl, 2),
-            "unrealized_pnl":     round(unrealized, 2),
-            "total_return":       round(total_return, 2),
-            "total_return_pct":   round(total_return_pct, 4),
-            "win_rate":           round(win_rate, 4),
-            "best_trade":         best_trade,
-            "worst_trade":        worst_trade,
-            "num_trades":         len(state.trades),
-            "num_sell_trades":    len(sell_trades),
+            "total_value": round(total_value, 2),
+            "cash": round(state.cash, 2),
+            "position_value": round(pos_value, 2),
+            "realized_pnl": round(realized_pnl, 2),
+            "unrealized_pnl": round(unrealized, 2),
+            "total_return": round(total_return, 2),
+            "total_return_pct": round(total_return_pct, 4),
+            "win_rate": round(win_rate, 4),
+            "best_trade": best_trade,
+            "worst_trade": worst_trade,
+            "num_trades": len(state.trades),
+            "num_sell_trades": len(sell_trades),
             "num_open_positions": len(state.positions),
-            "lambo_value":        lambo_value(total_value),
-            "lambo_pct":          round(total_value / LAMBO_PRICE_EUR * 100, 4),
-            "start_budget":       state.start_budget,
-            "positions":          positions_d,
-            "closed_trades":      sell_trades,
+            "lambo_value": lambo_value(total_value),
+            "lambo_pct": round(total_value / LAMBO_PRICE_EUR * 100, 4),
+            "start_budget": state.start_budget,
+            "positions": positions_d,
+            "closed_trades": sell_trades,
         }
 
     # ------------------------------------------------------------------
@@ -488,20 +502,24 @@ class PaperTrader:
         state = self.load()
         if not state.equity_ts:
             # Nur Startpunkt
-            return pd.DataFrame([{
-                "timestamp":   state.created_at,
-                "value":       state.start_budget,
-                "return_pct":  0.0,
-                "drawdown_pct": 0.0,
-            }])
+            return pd.DataFrame(
+                [
+                    {
+                        "timestamp": state.created_at,
+                        "value": state.start_budget,
+                        "return_pct": 0.0,
+                        "drawdown_pct": 0.0,
+                    }
+                ]
+            )
 
         df = pd.DataFrame(state.equity_ts)
-        df["timestamp"]  = pd.to_datetime(df["ts"])
-        df["value"]      = df["value"].astype(float)
+        df["timestamp"] = pd.to_datetime(df["ts"])
+        df["value"] = df["value"].astype(float)
         df["return_pct"] = (df["value"] / state.start_budget - 1) * 100
 
         # Drawdown
-        peak             = df["value"].cummax()
+        peak = df["value"].cummax()
         df["drawdown_pct"] = (df["value"] - peak) / peak.replace(0, float("nan")) * 100
 
         return df[["timestamp", "value", "return_pct", "drawdown_pct"]].reset_index(drop=True)
@@ -512,12 +530,12 @@ class PaperTrader:
 
     def auto_trade(
         self,
-        symbol:     str,
+        symbol: str,
         model_name: str,
-        cycles:     int = 5,
-        method:     str = "Auto (KI wählt)",
-        invest_pct: float = 0.2,   # Anteil des Cashs je BUY-Signal
-        provider:   str | None = None,
+        cycles: int = 5,
+        method: str = "Auto (KI wählt)",
+        invest_pct: float = 0.2,  # Anteil des Cashs je BUY-Signal
+        provider: str | None = None,
     ) -> list[dict[str, object]]:
         """
         Automatischer Trading-Modus:
@@ -553,9 +571,9 @@ class PaperTrader:
         from modules.risk_manager import RiskManager
         from modules.trainer import StockTrainer
 
-        trainer  = StockTrainer()
-        rm       = RiskManager()
-        log      = []
+        trainer = StockTrainer()
+        rm = RiskManager()
+        log = []
 
         for i in range(cycles):
             # Vorhersage holen
@@ -566,10 +584,10 @@ class PaperTrader:
 
             if result.get("error"):
                 entry = {
-                    "cycle":     i + 1,
-                    "symbol":    symbol,
-                    "decision":  "SKIP",
-                    "reason":    result["error"],
+                    "cycle": i + 1,
+                    "symbol": symbol,
+                    "decision": "SKIP",
+                    "reason": result["error"],
                     "timestamp": _now(),
                 }
                 log.append(entry)
@@ -577,7 +595,7 @@ class PaperTrader:
 
             prediction = result.get("prediction")
             confidence = result.get("confidence", 0.0)
-            reasoning  = result.get("reasoning", "")
+            reasoning = result.get("reasoning", "")
             used_method = result.get("method", method)
 
             # Aktuellen Kurs laden. "1mo" statt "5d", damit compute_stops()
@@ -585,7 +603,7 @@ class PaperTrader:
             # Handelstage Historie) statt eines faktischen ATR(3-5).
             df = fetch_ohlcv(symbol, period="1mo")
             if df.empty:
-                log.append({"cycle": i+1, "decision": "SKIP", "reason": "Kein Kurs abrufbar"})
+                log.append({"cycle": i + 1, "decision": "SKIP", "reason": "Kein Kurs abrufbar"})
                 continue
             current_price = float(df["Close"].iloc[-1])
 
@@ -604,13 +622,15 @@ class PaperTrader:
                 tp = open_pos.get("take_profit")
                 if sl and current_price <= sl:
                     trade_result = self.close_position(
-                        symbol=symbol, price=current_price,
+                        symbol=symbol,
+                        price=current_price,
                         reasoning=f"Stop-Loss ausgelöst ({current_price:.2f} ≤ {sl:.2f})",
                     )
                     decision = "STOP_LOSS" if trade_result.get("ok") else "SELL_FAILED"
                 elif tp and current_price >= tp:
                     trade_result = self.close_position(
-                        symbol=symbol, price=current_price,
+                        symbol=symbol,
+                        price=current_price,
                         reasoning=f"Take-Profit erreicht ({current_price:.2f} ≥ {tp:.2f})",
                     )
                     decision = "TAKE_PROFIT" if trade_result.get("ok") else "SELL_FAILED"
@@ -627,12 +647,12 @@ class PaperTrader:
                         p["quantity"] * (p.get("last_price") or p["avg_price"])
                         for p in state.positions.values()
                     )
-                    equity    = state.cash + _pos_val
-                    risk_qty  = rm.position_size(equity, current_price, sl_price)
+                    equity = state.cash + _pos_val
+                    risk_qty = rm.position_size(equity, current_price, sl_price)
                     # Budget-Cap: invest_pct des Cashs abzüglich Ordergebühr
                     invest_eur = max(state.cash * invest_pct - self.order_cost, 0.0)
-                    cash_qty   = invest_eur / (current_price * (1 + state.spread_pct / 100))
-                    quantity   = min(risk_qty, cash_qty) if risk_qty > 0 else 0.0
+                    cash_qty = invest_eur / (current_price * (1 + state.spread_pct / 100))
+                    quantity = min(risk_qty, cash_qty) if risk_qty > 0 else 0.0
 
                     if quantity <= 0:
                         decision = "HOLD_RISK_LIMIT"
@@ -651,7 +671,7 @@ class PaperTrader:
                             # Stops an der Position persistieren (für Exits oben)
                             st2 = self.load()
                             if symbol in st2.positions:
-                                st2.positions[symbol]["stop_loss"]   = sl_price
+                                st2.positions[symbol]["stop_loss"] = sl_price
                                 st2.positions[symbol]["take_profit"] = tp_price
                                 self.save(st2)
                 else:
@@ -673,25 +693,25 @@ class PaperTrader:
 
             summary = self.get_portfolio_summary({symbol: current_price})
             entry = {
-                "cycle":         i + 1,
-                "symbol":        symbol,
-                "method":        used_method,
-                "prediction":    prediction,
-                "confidence":    confidence,
+                "cycle": i + 1,
+                "symbol": symbol,
+                "method": used_method,
+                "prediction": prediction,
+                "confidence": confidence,
                 "current_price": current_price,
-                "decision":      decision,
-                "reasoning":     reasoning[:300],
-                "pnl":           trade_result.get("pnl", 0.0),
+                "decision": decision,
+                "reasoning": reasoning[:300],
+                "pnl": trade_result.get("pnl", 0.0),
                 "portfolio_value": summary["total_value"],
-                "lambo_value":   summary["lambo_value"],
-                "timestamp":     _now(),
+                "lambo_value": summary["lambo_value"],
+                "timestamp": _now(),
             }
             log.append(entry)
 
             # Im Portfolio-Zustand persistieren
             state2 = self.load()
             state2.auto_log.extend(log[-1:])
-            state2.auto_log = state2.auto_log[-50:]   # Maximal 50 Einträge
+            state2.auto_log = state2.auto_log[-50:]  # Maximal 50 Einträge
             self.save(state2)
 
         return log
@@ -700,6 +720,7 @@ class PaperTrader:
 # ===========================================================================
 # 4. Lambo-Konverter (Modul-Ebene)
 # ===========================================================================
+
 
 def lambo_value(eur_value: float) -> float:
     """
@@ -721,9 +742,9 @@ def lambo_display(eur_value: float) -> str:
     if lv >= 1.0:
         return f"{lv:.4f} 🏎️ Lambos (ZIEL ERREICHT! 🎉)"
     if lv >= 0.1:
-        return f"{lv:.4f} 🏎️ Lambos ({lv*100:.1f}% eines Lambos)"
+        return f"{lv:.4f} 🏎️ Lambos ({lv * 100:.1f}% eines Lambos)"
     if lv >= 0.01:
-        return f"{lv:.4f} 🏎️ Lambos ({lv*100:.2f}% eines Lambos)"
+        return f"{lv:.4f} 🏎️ Lambos ({lv * 100:.2f}% eines Lambos)"
     return f"{lv:.6f} 🏎️ Lambos (noch ein langer Weg…)"
 
 
@@ -749,12 +770,13 @@ def lambo_progress(eur_value: float) -> tuple[float, str]:
 # Slippage / Ausführungspreis
 # ===========================================================================
 
+
 def compute_slippage(
-    price:             float,
-    order_size:        float,
-    avg_daily_volume:  float = SLIPPAGE_DAILY_VOLUME_DEFAULT,
-    base_pct:          float = SLIPPAGE_BASE_PCT,
-    volume_factor:     float = SLIPPAGE_VOLUME_FACTOR,
+    price: float,
+    order_size: float,
+    avg_daily_volume: float = SLIPPAGE_DAILY_VOLUME_DEFAULT,
+    base_pct: float = SLIPPAGE_BASE_PCT,
+    volume_factor: float = SLIPPAGE_VOLUME_FACTOR,
 ) -> float:  # EUR, absolut
     """
     Volumenabhängiges Slippage-Modell.
@@ -774,7 +796,7 @@ def compute_slippage(
     if avg_daily_volume <= 0:
         avg_daily_volume = SLIPPAGE_DAILY_VOLUME_DEFAULT
     volume_impact = volume_factor * (order_size / avg_daily_volume)
-    slippage_pct  = base_pct + volume_impact
+    slippage_pct = base_pct + volume_impact
     return price * slippage_pct / 100.0
 
 
@@ -787,26 +809,27 @@ def _eff_price(price: float, action: str, spread_pct: float = SPREAD_PERCENT) ->
 # Backtesting-Funktion (app.py Backtesting-Seite)
 # ===========================================================================
 
+
 @dataclass
 class BacktestResult:
-    ticker:           str
+    ticker: str
     total_return_pct: float
     buy_and_hold_pct: float
-    num_trades:       int
-    win_rate:         float
+    num_trades: int
+    win_rate: float
     max_drawdown_pct: float
-    sharpe_ratio:     float
-    trades:           list
-    equity_curve:     list
+    sharpe_ratio: float
+    trades: list
+    equity_curve: list
 
 
 def backtest_signals(
-    ticker:       str,
-    df:           pd.DataFrame,
-    signals:      pd.Series,
+    ticker: str,
+    df: pd.DataFrame,
+    signals: pd.Series,
     initial_cash: float = DEFAULT_BUDGET_EUR,
-    order_cost:   float = ORDER_COST_EUR,
-    spread_pct:   float = SPREAD_PERCENT,
+    order_cost: float = ORDER_COST_EUR,
+    spread_pct: float = SPREAD_PERCENT,
 ) -> BacktestResult:
     """
     Simuliert Handelssignale auf historischen Daten.
@@ -825,35 +848,35 @@ def backtest_signals(
     Returns:
         BacktestResult mit Equity-Kurve und Kennzahlen
     """
-    cash      = initial_cash
-    shares    = 0.0
+    cash = initial_cash
+    shares = 0.0
     avg_price = 0.0
     equity_curve: list[float] = []
-    trades:       list[dict]  = []
+    trades: list[dict] = []
 
     has_volume = "Volume" in df.columns
     if has_volume:
         # Trailing-Volumen (60 Tage, 1 Bar verzögert) statt Gesamtmittel –
         # das Gesamtmittel würde Volumen NACH dem Handelstag einpreisen
-        vol_ma = (
-            df["Volume"].replace(0, np.nan)
-            .rolling(60, min_periods=5).mean().shift(1)
-        )
+        vol_ma = df["Volume"].replace(0, np.nan).rolling(60, min_periods=5).mean().shift(1)
     else:
         vol_ma = None
 
-    aligned           = df[["Close"]].copy()
+    aligned = df[["Close"]].copy()
     # Look-Ahead-Fix: Signal aus Bar i wird erst am Close von Bar i+1
     # ausgeführt – sonst handelt die Strategie auf den Kurs, den sie zur
     # Signalberechnung schon kannte
     aligned["signal"] = signals.reindex(df.index).shift(1).fillna("HALTEN")
 
     for date, row in aligned.iterrows():
-        price    = float(row["Close"])
-        sig      = row["signal"]
+        price = float(row["Close"])
+        sig = row["signal"]
         if has_volume:
-            bar_vol = float(vol_ma.loc[date]) if pd.notna(vol_ma.loc[date]) \
-                      else SLIPPAGE_DAILY_VOLUME_DEFAULT
+            bar_vol = (
+                float(vol_ma.loc[date])
+                if pd.notna(vol_ma.loc[date])
+                else SLIPPAGE_DAILY_VOLUME_DEFAULT
+            )
         else:
             bar_vol = SLIPPAGE_DAILY_VOLUME_DEFAULT
 
@@ -863,14 +886,16 @@ def backtest_signals(
             if invest > 0:
                 if has_volume:
                     est_shares = invest / price
-                    eff_buy    = price + compute_slippage(price, est_shares, bar_vol)
+                    eff_buy = price + compute_slippage(price, est_shares, bar_vol)
                 else:
                     eff_buy = _eff_price(price, "BUY", spread_pct)
-                shares     = invest / eff_buy
-                cash      -= invest + order_cost
+                shares = invest / eff_buy
+                cash -= invest + order_cost
                 # Ordergebühr in Kostenbasis (sonst PnL je Roundtrip überhöht)
-                avg_price  = (invest + order_cost) / shares
-                trades.append({"date": str(date), "action": "BUY", "price": price, "shares": shares})
+                avg_price = (invest + order_cost) / shares
+                trades.append(
+                    {"date": str(date), "action": "BUY", "price": price, "shares": shares}
+                )
 
         elif sig == "VERKAUFEN" and shares > 0:
             if has_volume:
@@ -878,10 +903,11 @@ def backtest_signals(
             else:
                 eff_sell = _eff_price(price, "SELL", spread_pct)
             revenue = shares * eff_sell - order_cost
-            pnl     = revenue - shares * avg_price
-            cash   += revenue
-            trades.append({"date": str(date), "action": "SELL", "price": price,
-                            "shares": shares, "pnl": pnl})
+            pnl = revenue - shares * avg_price
+            cash += revenue
+            trades.append(
+                {"date": str(date), "action": "SELL", "price": price, "shares": shares, "pnl": pnl}
+            )
             shares = 0.0
 
         equity_curve.append(cash + shares * price)
@@ -892,33 +918,45 @@ def backtest_signals(
     if shares > 0:
         last_price = float(aligned["Close"].iloc[-1])
         if has_volume:
-            last_vol = float(vol_ma.iloc[-1]) if pd.notna(vol_ma.iloc[-1]) \
-                       else SLIPPAGE_DAILY_VOLUME_DEFAULT
+            last_vol = (
+                float(vol_ma.iloc[-1])
+                if pd.notna(vol_ma.iloc[-1])
+                else SLIPPAGE_DAILY_VOLUME_DEFAULT
+            )
             eff_sell = last_price - compute_slippage(last_price, shares, last_vol)
         else:
             eff_sell = _eff_price(last_price, "SELL", spread_pct)
         revenue = shares * eff_sell - order_cost
-        pnl     = revenue - shares * avg_price
-        trades.append({"date": str(aligned.index[-1]), "action": "SELL",
-                       "price": last_price, "shares": shares, "pnl": pnl})
-        cash  += revenue
+        pnl = revenue - shares * avg_price
+        trades.append(
+            {
+                "date": str(aligned.index[-1]),
+                "action": "SELL",
+                "price": last_price,
+                "shares": shares,
+                "pnl": pnl,
+            }
+        )
+        cash += revenue
         shares = 0.0
         if equity_curve:
             equity_curve[-1] = cash
 
-    total_return_pct  = (cash - initial_cash) / initial_cash * 100
-    buy_and_hold_pct  = (float(aligned["Close"].iloc[-1]) / float(aligned["Close"].iloc[0]) - 1) * 100
+    total_return_pct = (cash - initial_cash) / initial_cash * 100
+    buy_and_hold_pct = (
+        float(aligned["Close"].iloc[-1]) / float(aligned["Close"].iloc[0]) - 1
+    ) * 100
 
-    sells    = [t for t in trades if t["action"] == "SELL"]
-    wins     = [t for t in sells  if t.get("pnl", 0) > 0]
+    sells = [t for t in trades if t["action"] == "SELL"]
+    wins = [t for t in sells if t.get("pnl", 0) > 0]
     win_rate = len(wins) / len(sells) if sells else 0.0
 
-    eq          = np.array(equity_curve)
-    peak        = np.maximum.accumulate(eq)
-    dd          = (eq - peak) / np.where(peak == 0, 1, peak)
-    max_dd      = float(dd.min() * 100)
+    eq = np.array(equity_curve)
+    peak = np.maximum.accumulate(eq)
+    dd = (eq - peak) / np.where(peak == 0, 1, peak)
+    max_dd = float(dd.min() * 100)
 
-    rets   = pd.Series(equity_curve).pct_change().dropna()
+    rets = pd.Series(equity_curve).pct_change().dropna()
     sharpe = float(rets.mean() / rets.std() * math.sqrt(252)) if rets.std() > 0 else 0.0
 
     return BacktestResult(
@@ -938,9 +976,10 @@ def backtest_signals(
 # Erweiterte Performance-Metriken
 # ===========================================================================
 
+
 def compute_metrics(
     equity_curve: pd.Series,
-    trades:       pd.DataFrame,
+    trades: pd.DataFrame,
     periods_per_year: int = 252,
 ) -> dict[str, object]:
     """
@@ -975,7 +1014,7 @@ def compute_metrics(
 
     # Sharpe (risk-free = 0)
     mean_r = float(returns.mean())
-    std_r  = float(returns.std(ddof=1))
+    std_r = float(returns.std(ddof=1))
     sharpe = mean_r / std_r * math.sqrt(periods_per_year) if std_r > 1e-12 else 0.0
 
     # Sortino (nur negative Renditen im Nenner)
@@ -984,8 +1023,8 @@ def compute_metrics(
     sortino = mean_r / downside_std * math.sqrt(periods_per_year) if downside_std > 1e-12 else 0.0
 
     # Max Drawdown
-    peak  = eq.cummax()
-    dd    = (eq - peak) / peak.replace(0, np.nan)
+    peak = eq.cummax()
+    dd = (eq - peak) / peak.replace(0, np.nan)
     max_dd = float(dd.min())
 
     # Max Drawdown Duration in Handelstagen
@@ -995,22 +1034,26 @@ def compute_metrics(
     calmar = cagr / abs(max_dd) if abs(max_dd) > 1e-12 else 0.0
 
     # Trade-basierte Kennzahlen
-    sells = trades[trades["action"] == "SELL"] if not trades.empty and "action" in trades.columns else pd.DataFrame()
+    sells = (
+        trades[trades["action"] == "SELL"]
+        if not trades.empty and "action" in trades.columns
+        else pd.DataFrame()
+    )
 
     n_trades = len(sells)
     if n_trades > 0 and "pnl" in sells.columns:
         pnl_vals = sells["pnl"].dropna()
-        wins  = pnl_vals[pnl_vals > 0]
+        wins = pnl_vals[pnl_vals > 0]
         losses = pnl_vals[pnl_vals <= 0]
 
-        win_rate      = len(wins) / n_trades
-        gross_profit  = float(wins.sum())
-        gross_loss    = float(losses.abs().sum())
+        win_rate = len(wins) / n_trades
+        gross_profit = float(wins.sum())
+        gross_loss = float(losses.abs().sum())
         profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else float("inf")
-        expectancy    = float(pnl_vals.mean())
-        avg_win       = float(wins.mean()) if len(wins) > 0 else 0.0
-        avg_loss      = float(losses.abs().mean()) if len(losses) > 0 else 0.0
-        payoff_ratio  = avg_win / avg_loss if avg_loss > 1e-12 else float("inf")
+        expectancy = float(pnl_vals.mean())
+        avg_win = float(wins.mean()) if len(wins) > 0 else 0.0
+        avg_loss = float(losses.abs().mean()) if len(losses) > 0 else 0.0
+        payoff_ratio = avg_win / avg_loss if avg_loss > 1e-12 else float("inf")
         max_consec_losses = _max_consecutive_losses(pnl_vals)
     else:
         win_rate = profit_factor = expectancy = payoff_ratio = 0.0
@@ -1020,30 +1063,39 @@ def compute_metrics(
     avg_duration = _avg_trade_duration(trades)
 
     return {
-        "total_return":              round(total_return * 100, 2),
-        "cagr":                      round(cagr * 100, 2),
-        "sharpe":                    round(sharpe, 3),
-        "sortino":                   round(sortino, 3),
-        "calmar":                    round(calmar, 3),
-        "max_drawdown":              round(max_dd * 100, 2),
+        "total_return": round(total_return * 100, 2),
+        "cagr": round(cagr * 100, 2),
+        "sharpe": round(sharpe, 3),
+        "sortino": round(sortino, 3),
+        "calmar": round(calmar, 3),
+        "max_drawdown": round(max_dd * 100, 2),
         "max_drawdown_duration_days": dd_duration,
-        "win_rate":                  round(win_rate * 100, 2),
-        "profit_factor":             round(profit_factor, 3),
-        "expectancy":                round(expectancy, 2),
-        "payoff_ratio":              round(payoff_ratio, 3),
-        "max_consecutive_losses":    max_consec_losses,
-        "n_trades":                  n_trades,
-        "avg_trade_duration_days":   avg_duration,
+        "win_rate": round(win_rate * 100, 2),
+        "profit_factor": round(profit_factor, 3),
+        "expectancy": round(expectancy, 2),
+        "payoff_ratio": round(payoff_ratio, 3),
+        "max_consecutive_losses": max_consec_losses,
+        "n_trades": n_trades,
+        "avg_trade_duration_days": avg_duration,
     }
 
 
 def _empty_metrics() -> dict:
     return {
-        "total_return": 0.0, "cagr": 0.0, "sharpe": 0.0, "sortino": 0.0,
-        "calmar": 0.0, "max_drawdown": 0.0, "max_drawdown_duration_days": 0,
-        "win_rate": 0.0, "profit_factor": 0.0, "expectancy": 0.0,
-        "payoff_ratio": 0.0, "max_consecutive_losses": 0,
-        "n_trades": 0, "avg_trade_duration_days": 0,
+        "total_return": 0.0,
+        "cagr": 0.0,
+        "sharpe": 0.0,
+        "sortino": 0.0,
+        "calmar": 0.0,
+        "max_drawdown": 0.0,
+        "max_drawdown_duration_days": 0,
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "expectancy": 0.0,
+        "payoff_ratio": 0.0,
+        "max_consecutive_losses": 0,
+        "n_trades": 0,
+        "avg_trade_duration_days": 0,
     }
 
 
@@ -1080,14 +1132,14 @@ def _avg_trade_duration(trades: pd.DataFrame) -> int:
     if trades.empty or "action" not in trades.columns or "date" not in trades.columns:
         return 0
     try:
-        buys  = trades[trades["action"] == "BUY"].reset_index(drop=True)
+        buys = trades[trades["action"] == "BUY"].reset_index(drop=True)
         sells = trades[trades["action"] == "SELL"].reset_index(drop=True)
         n = min(len(buys), len(sells))
         if n == 0:
             return 0
-        buy_dates  = pd.to_datetime(buys["date"].iloc[:n])
+        buy_dates = pd.to_datetime(buys["date"].iloc[:n])
         sell_dates = pd.to_datetime(sells["date"].iloc[:n])
-        durations  = (sell_dates.values - buy_dates.values).astype("timedelta64[D]").astype(int)
+        durations = (sell_dates.values - buy_dates.values).astype("timedelta64[D]").astype(int)
         return int(np.mean(durations))
     except Exception:
         return 0

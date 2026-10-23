@@ -43,21 +43,21 @@ _YAHOO_HEADERS = {
 _CACHE_TTL_S: int = CACHE_TTL_HOURS * 3600
 
 # WKN: genau 6 alphanumerische Zeichen (deutsche Wertpapierkennnummer)
-_WKN_RE = re.compile(r'^[A-Za-z0-9]{6}$')
+_WKN_RE = re.compile(r"^[A-Za-z0-9]{6}$")
 
 # ISIN: 2 Buchstaben + 10 Zeichen
-_ISIN_RE = re.compile(r'^[A-Z]{2}[A-Z0-9]{10}$')
+_ISIN_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{10}$")
 
 # Lesbarer Typ je Yahoo quoteType
 _TYPE_MAP: dict[str, str] = {
-    "EQUITY":         "Aktie",
-    "ETF":            "ETF",
-    "MUTUALFUND":     "Fonds",
-    "INDEX":          "Index",
-    "FUTURE":         "Future",
-    "CURRENCY":       "Währung",
+    "EQUITY": "Aktie",
+    "ETF": "ETF",
+    "MUTUALFUND": "Fonds",
+    "INDEX": "Index",
+    "FUTURE": "Future",
+    "CURRENCY": "Währung",
     "CRYPTOCURRENCY": "Krypto",
-    "OPTION":         "Option",
+    "OPTION": "Option",
 }
 
 # Bekannte deutsche Xetra-Suffixe für WKN-Mapping-Fallback
@@ -69,33 +69,94 @@ _DE_SFXS = frozenset({"F", "MU", "BE", "HM", "DU", "HA"})
 # Binance REST API für Crypto-OHLCV
 _BINANCE_URL = "https://api.binance.com/api/v3/klines"
 _BINANCE_PERIOD_LIMIT: dict[str, int] = {
-    "1mo": 30, "3mo": 90, "6mo": 180,
-    "1y": 365, "2y": 730, "5y": 1825,
+    "1mo": 30,
+    "3mo": 90,
+    "6mo": 180,
+    "1y": 365,
+    "2y": 730,
+    "5y": 1825,
 }
 _BINANCE_INTERVAL_MAP: dict[str, str] = {
-    "1d": "1d", "1h": "1h", "1wk": "1w", "1mo": "1M",
+    "1d": "1d",
+    "1h": "1h",
+    "1wk": "1w",
+    "1mo": "1M",
 }
 
 # Statische Liste der wichtigsten Kryptowährungen (Fallback wenn Yahoo-Suche nichts liefert)
 _CRYPTO_STATIC: list[dict] = [
-    {"symbol": "BTC-USD",  "name": "Bitcoin",       "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
-    {"symbol": "ETH-USD",  "name": "Ethereum",      "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
-    {"symbol": "BNB-USD",  "name": "BNB",           "exchange": "Binance",          "type": "Krypto", "wkn": ""},
-    {"symbol": "XRP-USD",  "name": "XRP",           "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
-    {"symbol": "SOL-USD",  "name": "Solana",        "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
-    {"symbol": "ADA-USD",  "name": "Cardano",       "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
-    {"symbol": "DOGE-USD", "name": "Dogecoin",      "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
-    {"symbol": "AVAX-USD", "name": "Avalanche",     "exchange": "Binance",          "type": "Krypto", "wkn": ""},
-    {"symbol": "DOT-USD",  "name": "Polkadot",      "exchange": "Binance",          "type": "Krypto", "wkn": ""},
-    {"symbol": "LINK-USD", "name": "Chainlink",     "exchange": "Binance",          "type": "Krypto", "wkn": ""},
-    {"symbol": "LTC-USD",  "name": "Litecoin",      "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
-    {"symbol": "MATIC-USD","name": "Polygon (MATIC)","exchange": "Binance",         "type": "Krypto", "wkn": ""},
-    {"symbol": "UNI-USD",  "name": "Uniswap",       "exchange": "Binance",          "type": "Krypto", "wkn": ""},
-    {"symbol": "ATOM-USD", "name": "Cosmos",        "exchange": "Binance",          "type": "Krypto", "wkn": ""},
-    {"symbol": "XLM-USD",  "name": "Stellar",       "exchange": "Binance/Coinbase", "type": "Krypto", "wkn": ""},
-    {"symbol": "TRX-USD",  "name": "TRON",          "exchange": "Binance",          "type": "Krypto", "wkn": ""},
-    {"symbol": "TON-USD",  "name": "Toncoin",       "exchange": "Binance",          "type": "Krypto", "wkn": ""},
-    {"symbol": "SHIB-USD", "name": "Shiba Inu",     "exchange": "Binance",          "type": "Krypto", "wkn": ""},
+    {
+        "symbol": "BTC-USD",
+        "name": "Bitcoin",
+        "exchange": "Binance/Coinbase",
+        "type": "Krypto",
+        "wkn": "",
+    },
+    {
+        "symbol": "ETH-USD",
+        "name": "Ethereum",
+        "exchange": "Binance/Coinbase",
+        "type": "Krypto",
+        "wkn": "",
+    },
+    {"symbol": "BNB-USD", "name": "BNB", "exchange": "Binance", "type": "Krypto", "wkn": ""},
+    {
+        "symbol": "XRP-USD",
+        "name": "XRP",
+        "exchange": "Binance/Coinbase",
+        "type": "Krypto",
+        "wkn": "",
+    },
+    {
+        "symbol": "SOL-USD",
+        "name": "Solana",
+        "exchange": "Binance/Coinbase",
+        "type": "Krypto",
+        "wkn": "",
+    },
+    {
+        "symbol": "ADA-USD",
+        "name": "Cardano",
+        "exchange": "Binance/Coinbase",
+        "type": "Krypto",
+        "wkn": "",
+    },
+    {
+        "symbol": "DOGE-USD",
+        "name": "Dogecoin",
+        "exchange": "Binance/Coinbase",
+        "type": "Krypto",
+        "wkn": "",
+    },
+    {"symbol": "AVAX-USD", "name": "Avalanche", "exchange": "Binance", "type": "Krypto", "wkn": ""},
+    {"symbol": "DOT-USD", "name": "Polkadot", "exchange": "Binance", "type": "Krypto", "wkn": ""},
+    {"symbol": "LINK-USD", "name": "Chainlink", "exchange": "Binance", "type": "Krypto", "wkn": ""},
+    {
+        "symbol": "LTC-USD",
+        "name": "Litecoin",
+        "exchange": "Binance/Coinbase",
+        "type": "Krypto",
+        "wkn": "",
+    },
+    {
+        "symbol": "MATIC-USD",
+        "name": "Polygon (MATIC)",
+        "exchange": "Binance",
+        "type": "Krypto",
+        "wkn": "",
+    },
+    {"symbol": "UNI-USD", "name": "Uniswap", "exchange": "Binance", "type": "Krypto", "wkn": ""},
+    {"symbol": "ATOM-USD", "name": "Cosmos", "exchange": "Binance", "type": "Krypto", "wkn": ""},
+    {
+        "symbol": "XLM-USD",
+        "name": "Stellar",
+        "exchange": "Binance/Coinbase",
+        "type": "Krypto",
+        "wkn": "",
+    },
+    {"symbol": "TRX-USD", "name": "TRON", "exchange": "Binance", "type": "Krypto", "wkn": ""},
+    {"symbol": "TON-USD", "name": "Toncoin", "exchange": "Binance", "type": "Krypto", "wkn": ""},
+    {"symbol": "SHIB-USD", "name": "Shiba Inu", "exchange": "Binance", "type": "Krypto", "wkn": ""},
 ]
 
 # Schlüsselwörter die ALLE Kryptowährungen zurückgeben (generische Suchanfragen)
@@ -105,6 +166,7 @@ _CRYPTO_KEYWORDS = frozenset({"krypto", "crypto", "cryptocurrency", "coin", "tok
 # ---------------------------------------------------------------------------
 # 1. Ticker-Suche
 # ---------------------------------------------------------------------------
+
 
 def search_stocks(query: str) -> list[dict]:
     """
@@ -192,13 +254,15 @@ def _yahoo_search(query: str) -> list[dict]:
         if not symbol or symbol in seen:
             continue
         seen.add(symbol)
-        out.append({
-            "symbol": symbol,
-            "name": q.get("longname") or q.get("shortname") or symbol,
-            "exchange": q.get("exchange", ""),
-            "type": _TYPE_MAP.get(q.get("quoteType", ""), q.get("quoteType", "–")),
-            "wkn": "",      # Yahoo liefert keine WKN; Feld für Konsistenz
-        })
+        out.append(
+            {
+                "symbol": symbol,
+                "name": q.get("longname") or q.get("shortname") or symbol,
+                "exchange": q.get("exchange", ""),
+                "type": _TYPE_MAP.get(q.get("quoteType", ""), q.get("quoteType", "–")),
+                "wkn": "",  # Yahoo liefert keine WKN; Feld für Konsistenz
+            }
+        )
 
     # XETRA (.DE) vor deutschen Regionalbörsen (.F, .MU, .BE, …) vor Rest.
     # Stabile Sortierung: Reihenfolge innerhalb jeder Gruppe bleibt erhalten.
@@ -226,7 +290,7 @@ def _search_crypto_static(query: str) -> list[dict]:
 
     matches = []
     for c in _CRYPTO_STATIC:
-        base = c["symbol"].replace("-USD", "")   # z. B. "BTC" aus "BTC-USD"
+        base = c["symbol"].replace("-USD", "")  # z. B. "BTC" aus "BTC-USD"
         if q == base or c["name"].upper().startswith(q) or q in c["name"].upper():
             matches.append(c)
     return matches
@@ -250,6 +314,7 @@ def resolve_ticker(query: str) -> Optional[str]:
 # 2. WKN → Yahoo Finance Symbol
 # ---------------------------------------------------------------------------
 
+
 def get_wkn_symbol(wkn: str) -> str:
     """
     Versucht eine WKN in ein Yahoo Finance Ticker-Symbol umzuwandeln.
@@ -269,28 +334,28 @@ def get_wkn_symbol(wkn: str) -> str:
         "716460": "SAP.DE",
         "840400": "DBK.DE",
         "519000": "BMW.DE",
-        "710000": "DAI.DE",      # Mercedes (ehem. Daimler)
-        "766403": "MBG.DE",      # Mercedes-Benz Group
-        "555750": "DTE.DE",      # Deutsche Telekom
-        "515100": "BAS.DE",      # BASF
-        "575200": "BAY.DE",      # Bayer
-        "604843": "ADS.DE",      # Adidas
-        "695200": "ALV.DE",      # Allianz
-        "521000": "MUV2.DE",     # Munich Re
+        "710000": "DAI.DE",  # Mercedes (ehem. Daimler)
+        "766403": "MBG.DE",  # Mercedes-Benz Group
+        "555750": "DTE.DE",  # Deutsche Telekom
+        "515100": "BAS.DE",  # BASF
+        "575200": "BAY.DE",  # Bayer
+        "604843": "ADS.DE",  # Adidas
+        "695200": "ALV.DE",  # Allianz
+        "521000": "MUV2.DE",  # Munich Re
         "555200": "RWE.DE",
-        "ENAG99": "EOAN.DE",     # E.ON
-        "703712": "VOW3.DE",     # Volkswagen Vz.
-        "760177": "VOW.DE",      # Volkswagen St.
-        "677650": "FRE.DE",      # Fresenius SE
-        "578560": "FME.DE",      # Fresenius Medical Care
-        "543900": "HEN3.DE",     # Henkel Vz.
-        "604700": "IFX.DE",      # Infineon (alte WKN)
-        "623100": "IFX.DE",      # Infineon
-        "648300": "LIN.DE",      # Linde
-        "555480": "SIE.DE",      # Siemens
-        "766030": "AIR.DE",      # Airbus
-        "A14Y8F": "DHER.DE",     # Delivery Hero
-        "A2E4K2": "PUM.DE",      # Puma
+        "ENAG99": "EOAN.DE",  # E.ON
+        "703712": "VOW3.DE",  # Volkswagen Vz.
+        "760177": "VOW.DE",  # Volkswagen St.
+        "677650": "FRE.DE",  # Fresenius SE
+        "578560": "FME.DE",  # Fresenius Medical Care
+        "543900": "HEN3.DE",  # Henkel Vz.
+        "604700": "IFX.DE",  # Infineon (alte WKN)
+        "623100": "IFX.DE",  # Infineon
+        "648300": "LIN.DE",  # Linde
+        "555480": "SIE.DE",  # Siemens
+        "766030": "AIR.DE",  # Airbus
+        "A14Y8F": "DHER.DE",  # Delivery Hero
+        "A2E4K2": "PUM.DE",  # Puma
     }
     if wkn in _STATIC:
         return _STATIC[wkn]
@@ -307,6 +372,7 @@ def get_wkn_symbol(wkn: str) -> str:
 # ---------------------------------------------------------------------------
 # 3. OHLCV-Download-Helfer
 # ---------------------------------------------------------------------------
+
 
 def _normalize_raw(raw: pd.DataFrame) -> Optional[pd.DataFrame]:
     """Normalisiert einen rohen yfinance-DataFrame auf OHLCV-Spalten ohne Zeitzone."""
@@ -327,7 +393,8 @@ def _fetch_yf_history(symbol: str, period: str, interval: str) -> Optional[pd.Da
     """Primärer yfinance-Download via Ticker.history() – robuster als yf.download()."""
     try:
         raw = yf.Ticker(symbol).history(
-            period=period, interval=interval,
+            period=period,
+            interval=interval,
             # auto_adjust=True:  Bereinigt Splits und Dividenden (OHLCV bleibt vergleichbar).
             # back_adjust=False: Historische Preise werden NICHT rückwärts skaliert –
             #   forward-adjustierte Preise sind für ML-Features stabiler und verhindern
@@ -348,7 +415,9 @@ def _fetch_yf_download(symbol: str, period: str, interval: str) -> Optional[pd.D
     """Fallback-Download via yf.download() mit MultiIndex-Normalisierung."""
     try:
         raw = yf.download(
-            symbol, period=period, interval=interval,
+            symbol,
+            period=period,
+            interval=interval,
             progress=False,
             # Gleiche Bereinigungsstrategie wie _fetch_yf_history – siehe dort.
             auto_adjust=True,
@@ -370,7 +439,7 @@ def _fetch_binance_ohlcv(symbol: str, period: str, interval: str) -> Optional[pd
     """
     if not symbol.endswith("-USD"):
         return None
-    base = symbol[:-4]   # "BTC" aus "BTC-USD"
+    base = symbol[:-4]  # "BTC" aus "BTC-USD"
     binance_sym = base + "USDT"
     limit = _BINANCE_PERIOD_LIMIT.get(period, 365)
     b_interval = _BINANCE_INTERVAL_MAP.get(interval, "1d")
@@ -386,11 +455,11 @@ def _fetch_binance_ohlcv(symbol: str, period: str, interval: str) -> Optional[pd
             return None
         rows = [
             {
-                "Date":   pd.Timestamp(k[0], unit="ms"),
-                "Open":   float(k[1]),
-                "High":   float(k[2]),
-                "Low":    float(k[3]),
-                "Close":  float(k[4]),
+                "Date": pd.Timestamp(k[0], unit="ms"),
+                "Open": float(k[1]),
+                "High": float(k[2]),
+                "Low": float(k[3]),
+                "Close": float(k[4]),
                 "Volume": float(k[5]),
             }
             for k in klines
@@ -406,6 +475,7 @@ def _fetch_binance_ohlcv(symbol: str, period: str, interval: str) -> Optional[pd
 # ---------------------------------------------------------------------------
 # 4. OHLCV + Technische Indikatoren (mit Cache)
 # ---------------------------------------------------------------------------
+
 
 def fetch_ohlcv(
     symbol: str,
@@ -427,8 +497,8 @@ def fetch_ohlcv(
         DataFrame mit OHLCV + Indikatoren.
         Bei Fehler: leeres DataFrame mit df.attrs["error"] gesetzt – kein Crash.
     """
-    symbol    = symbol.strip().upper()
-    requested = symbol   # Original-Anfrage – für den Cache-Key nach Fallbacks
+    symbol = symbol.strip().upper()
+    requested = symbol  # Original-Anfrage – für den Cache-Key nach Fallbacks
 
     # Cache prüfen
     cached = _load_cache(symbol, period, interval)
@@ -453,8 +523,8 @@ def fetch_ohlcv(
 
     if raw is None:
         parts = symbol.rsplit(".", 1)
-        base  = parts[0] if len(parts) == 2 else symbol
-        sfx   = parts[1] if len(parts) == 2 else ""
+        base = parts[0] if len(parts) == 2 else symbol
+        sfx = parts[1] if len(parts) == 2 else ""
 
         # Fallback 1: deutsche Regionalbörse (z. B. BMW3.F) → XETRA (BMW.DE) probieren
         if sfx in _DE_SFXS:
@@ -478,7 +548,12 @@ def fetch_ohlcv(
                     symbol = alt
 
         # Fallback 3: kein Suffix, kein Krypto, kein Index → XETRA (.DE) versuchen
-        if raw is None and "." not in symbol and not symbol.endswith("-USD") and not symbol.startswith("^"):
+        if (
+            raw is None
+            and "." not in symbol
+            and not symbol.endswith("-USD")
+            and not symbol.startswith("^")
+        ):
             xetra = symbol + ".DE"
             logger.info(f"Kein Suffix für '{symbol}' – versuche XETRA-Fallback: {xetra}")
             raw = _fetch_yf_history(xetra, period, interval)
@@ -529,17 +604,17 @@ def _add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
         # MACD(12/26/9)
         macd_obj = MACD(close=close, window_fast=12, window_slow=26, window_sign=9)
-        df["macd"]        = macd_obj.macd()
+        df["macd"] = macd_obj.macd()
         df["macd_signal"] = macd_obj.macd_signal()
-        df["macd_diff"]   = macd_obj.macd_diff()
+        df["macd_diff"] = macd_obj.macd_diff()
 
         # Bollinger Bands(20, 2σ)
         bb = BollingerBands(close=close, window=20, window_dev=2)
         df["bb_upper"] = bb.bollinger_hband()
         df["bb_lower"] = bb.bollinger_lband()
-        df["bb_mid"]   = bb.bollinger_mavg()
-        df["bb_pband"] = bb.bollinger_pband()   # Position innerhalb der Bänder (0–1)
-        df["bb_wband"] = bb.bollinger_wband()   # Bandbreite (Volatilität)
+        df["bb_mid"] = bb.bollinger_mavg()
+        df["bb_pband"] = bb.bollinger_pband()  # Position innerhalb der Bänder (0–1)
+        df["bb_wband"] = bb.bollinger_wband()  # Bandbreite (Volatilität)
 
         # SMAs
         for w in (20, 50, 200):
@@ -574,16 +649,16 @@ def _add_indicators_manual(df: pd.DataFrame) -> pd.DataFrame:
     # MACD
     ema12 = close.ewm(span=12, adjust=False).mean()
     ema26 = close.ewm(span=26, adjust=False).mean()
-    df["macd"]        = ema12 - ema26
+    df["macd"] = ema12 - ema26
     df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
-    df["macd_diff"]   = df["macd"] - df["macd_signal"]
+    df["macd_diff"] = df["macd"] - df["macd_signal"]
     df["ema_12"] = ema12
     df["ema_26"] = ema26
 
     # Bollinger Bands
     bb_mid = close.rolling(20).mean()
     bb_std = close.rolling(20).std()
-    df["bb_mid"]   = bb_mid
+    df["bb_mid"] = bb_mid
     df["bb_upper"] = bb_mid + 2 * bb_std
     df["bb_lower"] = bb_mid - 2 * bb_std
     band_range = df["bb_upper"] - df["bb_lower"]
@@ -601,6 +676,7 @@ def _add_indicators_manual(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # 4. Fetch-Info (unverändert für app.py-Kompatibilität)
 # ---------------------------------------------------------------------------
+
 
 def fetch_info(ticker: str) -> dict:
     """
@@ -630,9 +706,10 @@ def fetch_info(ticker: str) -> dict:
 # Hilfsfunktionen
 # ---------------------------------------------------------------------------
 
+
 def is_valid_ticker(ticker: str) -> bool:
     """Prüft ob ein Ticker syntaktisch plausibel ist (1–12 Zeichen: Buchstaben, Ziffern, .)."""
-    return bool(re.match(r'^[A-Za-z0-9.^]{1,12}$', ticker.strip()))
+    return bool(re.match(r"^[A-Za-z0-9.^]{1,12}$", ticker.strip()))
 
 
 def is_wkn(query: str) -> bool:
@@ -656,7 +733,9 @@ def cache_info(symbol: str, period: str = DEFAULT_PERIOD, interval: str = DEFAUL
     }
 
 
-def invalidate_cache(symbol: str, period: str = DEFAULT_PERIOD, interval: str = DEFAULT_INTERVAL) -> bool:
+def invalidate_cache(
+    symbol: str, period: str = DEFAULT_PERIOD, interval: str = DEFAULT_INTERVAL
+) -> bool:
     """Löscht den Cache-Eintrag für ein Symbol. Returns True wenn eine Datei gelöscht wurde."""
     path = _cache_path(symbol, period, interval)
     if path.exists():
@@ -669,8 +748,8 @@ def invalidate_cache(symbol: str, period: str = DEFAULT_PERIOD, interval: str = 
 # Datenqualitäts-Report
 # ---------------------------------------------------------------------------
 
-_MAX_MOVE_WARN_PCT: float = 20.0   # Tagesbewegung > 20 % als Outlier markieren
-_MISSING_DAYS_WARN: int   = 5      # mehr als 5 fehlende Handelstage → Warning
+_MAX_MOVE_WARN_PCT: float = 20.0  # Tagesbewegung > 20 % als Outlier markieren
+_MISSING_DAYS_WARN: int = 5  # mehr als 5 fehlende Handelstage → Warning
 
 
 def get_data_quality_report(df: pd.DataFrame) -> dict:
@@ -708,14 +787,14 @@ def get_data_quality_report(df: pd.DataFrame) -> dict:
 
     idx = pd.to_datetime(df.index).tz_localize(None)
     first_date = idx[0].date().isoformat()
-    last_date  = idx[-1].date().isoformat()
+    last_date = idx[-1].date().isoformat()
 
     # --- Fehlende Handelstage (Mo–Fr, Feiertage nicht ausgenommen) ---
     expected_bdays = pd.bdate_range(idx[0], idx[-1])
     # Normalisiere beide Seiten auf Datum für den Vergleich
-    actual_dates   = set(d.date() for d in idx)
+    actual_dates = set(d.date() for d in idx)
     expected_dates = set(d.date() for d in expected_bdays)
-    missing_days   = len(expected_dates - actual_dates)
+    missing_days = len(expected_dates - actual_dates)
 
     # --- Zero-Volume-Tage ---
     if "Volume" in df.columns:
@@ -734,8 +813,7 @@ def get_data_quality_report(df: pd.DataFrame) -> dict:
     issues: list[str] = []
     if missing_days > _MISSING_DAYS_WARN:
         issues.append(
-            f"{missing_days} fehlende Handelstage "
-            f"(Feiertage zählen mit – realer Wert niedriger)"
+            f"{missing_days} fehlende Handelstage (Feiertage zählen mit – realer Wert niedriger)"
         )
     if zero_volume_days > 0:
         issues.append(f"{zero_volume_days} Tage mit Volume = 0")
@@ -746,19 +824,20 @@ def get_data_quality_report(df: pd.DataFrame) -> dict:
         )
 
     return {
-        "missing_days":       missing_days,
-        "zero_volume_days":   zero_volume_days,
+        "missing_days": missing_days,
+        "zero_volume_days": zero_volume_days,
         "max_daily_move_pct": round(max_daily_move_pct, 2),
-        "first_date":         first_date,
-        "last_date":          last_date,
-        "issues":             issues,
-        "ok":                 len(issues) == 0,
+        "first_date": first_date,
+        "last_date": last_date,
+        "issues": issues,
+        "ok": len(issues) == 0,
     }
 
 
 # ---------------------------------------------------------------------------
 # Cache-Implementierung (intern)
 # ---------------------------------------------------------------------------
+
 
 def _cache_path(symbol: str, period: str, interval: str) -> Path:
     """Berechnet den Dateipfad für einen Cache-Eintrag."""
@@ -767,7 +846,7 @@ def _cache_path(symbol: str, period: str, interval: str) -> Path:
     cache_dir = root / CACHE_DIR
     cache_dir.mkdir(parents=True, exist_ok=True)
     # Dateiname: sicher, eindeutig
-    safe_symbol = re.sub(r'[^A-Za-z0-9]', '_', symbol)
+    safe_symbol = re.sub(r"[^A-Za-z0-9]", "_", symbol)
     key = f"{safe_symbol}_{period}_{interval}"
     return cache_dir / f"{key}.parquet"
 
@@ -785,7 +864,7 @@ def _load_cache(symbol: str, period: str, interval: str) -> Optional[pd.DataFram
     if not path.exists():
         return None
     if time.time() - path.stat().st_mtime > _cache_ttl_s(interval):
-        return None     # Abgelaufen – nicht löschen, wird beim nächsten Fetch überschrieben
+        return None  # Abgelaufen – nicht löschen, wird beim nächsten Fetch überschrieben
     try:
         df = pd.read_parquet(path)
     except Exception as _exc:
@@ -812,7 +891,7 @@ def _load_cache(symbol: str, period: str, interval: str) -> Optional[pd.DataFram
 def _save_cache(symbol: str, period: str, interval: str, df: pd.DataFrame) -> None:
     """Persistiert einen DataFrame als Cache-Eintrag (atomar, mit Metadaten)."""
     path = _cache_path(symbol, period, interval)
-    tmp  = path.with_suffix(".parquet.tmp")
+    tmp = path.with_suffix(".parquet.tmp")
     try:
         df.to_parquet(tmp, compression="snappy")
         os.replace(tmp, path)

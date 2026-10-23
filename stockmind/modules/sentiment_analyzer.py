@@ -22,8 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from modules.logger import logger  # noqa: E402
 
 _SYSTEM_PROMPT = (
-    "Du bist ein Finanzanalyse-Assistent. "
-    "Antworte ausschließlich mit Zahlen, niemals mit Text."
+    "Du bist ein Finanzanalyse-Assistent. Antworte ausschließlich mit Zahlen, niemals mit Text."
 )
 
 _BATCH_SYSTEM_PROMPT = (
@@ -65,6 +64,7 @@ def analyze_news(
 
     if provider is None:
         from modules.llm_providers import get_provider
+
         provider = get_provider()
 
     if not model_name:
@@ -91,10 +91,7 @@ def analyze_news(
     return {
         "score": round(max(-1.0, min(1.0, agg)), 3),
         "n_news": len(headlines),
-        "samples": [
-            {"title": h, "score": s}
-            for h, s in zip(headlines, scores)
-        ],
+        "samples": [{"title": h, "score": s} for h, s in zip(headlines, scores)],
         "error": "",
     }
 
@@ -103,10 +100,12 @@ def analyze_news(
 # Interne Hilfsfunktionen
 # ---------------------------------------------------------------------------
 
+
 def _fetch_headlines(ticker: str, n: int) -> list[str]:
     """Holt bis zu ``n`` aktuelle Schlagzeilen via yfinance."""
     try:
         import yfinance as yf
+
         news_items = yf.Ticker(ticker).news or []
     except Exception as exc:
         logger.warning(f"yfinance News für {ticker} nicht abrufbar: {exc}")
@@ -116,11 +115,7 @@ def _fetch_headlines(ticker: str, n: int) -> list[str]:
     for item in news_items:
         # Newer yfinance format: item["content"]["title"]
         # Older format:          item["title"]
-        title = (
-            (item.get("content") or {}).get("title")
-            or item.get("title")
-            or ""
-        )
+        title = (item.get("content") or {}).get("title") or item.get("title") or ""
         title = title.strip()
         if title:
             titles.append(title)
@@ -153,7 +148,7 @@ def _score_batch(
             f"Headline: {headlines[0]}"
         )
     else:
-        numbered = "\n".join(f"{i+1}. {h}" for i, h in enumerate(headlines))
+        numbered = "\n".join(f"{i + 1}. {h}" for i, h in enumerate(headlines))
         prompt = (
             f"Bewerte die folgenden {n} Headlines für den Aktienkurs von {ticker} "
             f"auf einer Skala von -1 (sehr negativ) bis +1 (sehr positiv). "

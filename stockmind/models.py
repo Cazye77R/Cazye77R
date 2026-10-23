@@ -118,9 +118,7 @@ class Portfolio(BaseModel):
 
     @property
     def total_invested(self) -> float:
-        return sum(
-            p.quantity * p.avg_price for p in self.positions.values()
-        )
+        return sum(p.quantity * p.avg_price for p in self.positions.values())
 
     @property
     def equity(self) -> float:

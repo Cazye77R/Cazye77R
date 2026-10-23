@@ -1,4 +1,5 @@
 """StockMind – NVIDIA NIM LLM Provider (OpenAI-kompatibel)."""
+
 from __future__ import annotations
 
 import os
@@ -37,8 +38,7 @@ class NvidiaProvider(LLMProvider):
                 "url": _NIM_URL,
                 "model_count": 0,
                 "error": (
-                    "NVIDIA_API_KEY nicht gesetzt oder ungültig "
-                    "(muss mit 'nvapi-' beginnen)."
+                    "NVIDIA_API_KEY nicht gesetzt oder ungültig (muss mit 'nvapi-' beginnen)."
                 ),
                 "install_guide": (
                     "API-Key unter https://build.nvidia.com/ erstellen "
@@ -61,13 +61,15 @@ class NvidiaProvider(LLMProvider):
         return [self._model]
 
     def list_models_with_info(self) -> list[dict]:
-        return [{
-            "name": self._model,
-            "full_name": self._model,
-            "size_gb": 0.0,
-            "modified": "",
-            "description": "NVIDIA NIM Cloud API",
-        }]
+        return [
+            {
+                "name": self._model,
+                "full_name": self._model,
+                "size_gb": 0.0,
+                "modified": "",
+                "description": "NVIDIA NIM Cloud API",
+            }
+        ]
 
     # ------------------------------------------------------------------
     # inference

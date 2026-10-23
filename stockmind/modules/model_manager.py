@@ -27,7 +27,7 @@ logger.debug(f"Module loaded: {__name__}")
 
 
 # ANSI-Escape-Sequenzen aus subprocess-Output entfernen
-_ANSI_RE = re.compile(r'\x1b\[[0-9;]*[mGKHF]|\r')
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[mGKHF]|\r")
 
 
 def _strip_ansi(text: str) -> str:
@@ -38,9 +38,11 @@ def _strip_ansi(text: str) -> str:
 # 1. Verbindungscheck
 # ---------------------------------------------------------------------------
 
+
 def is_ollama_running() -> bool:
     """Prüft ob Ollama erreichbar ist. Shim für Rückwärtskompatibilität."""
     from modules.llm_providers.ollama_provider import OllamaProvider
+
     return OllamaProvider().health()
 
 
@@ -52,6 +54,7 @@ def is_llm_ready(provider: str | None = None) -> bool:
 def get_ollama_status() -> dict:
     """Status des Ollama-Providers. Shim für Rückwärtskompatibilität."""
     from modules.llm_providers.ollama_provider import OllamaProvider
+
     return OllamaProvider().get_status()
 
 
@@ -63,6 +66,7 @@ def get_llm_status(provider: str | None = None) -> dict:
 # ---------------------------------------------------------------------------
 # 2. Installierte Modelle abfragen
 # ---------------------------------------------------------------------------
+
 
 def get_available_models() -> list[str]:
     """Verfügbare Modelle des aktuellen Providers."""
@@ -83,6 +87,7 @@ def is_model_available(model: str) -> bool:
 # 3. Modell herunterladen (Ollama-spezifisch)
 # ---------------------------------------------------------------------------
 
+
 def download_model(model_name: str) -> Generator[str, None, None]:
     """
     Lädt ein Ollama-Modell via `ollama pull` herunter und streamt den
@@ -96,6 +101,7 @@ def download_model(model_name: str) -> Generator[str, None, None]:
         ConnectionError: wenn Ollama-Dienst nicht läuft
     """
     from modules.llm_providers.ollama_provider import OllamaProvider
+
     if not OllamaProvider().health():
         raise ConnectionError(
             f"Ollama-Dienst nicht erreichbar ({OLLAMA_BASE_URL}).\n"
@@ -113,8 +119,7 @@ def download_model(model_name: str) -> Generator[str, None, None]:
         )
     except FileNotFoundError:
         raise RuntimeError(
-            "ollama CLI nicht gefunden. "
-            "Bitte Ollama installieren: https://ollama.ai"
+            "ollama CLI nicht gefunden. Bitte Ollama installieren: https://ollama.ai"
         )
 
     assert proc.stdout is not None
@@ -137,6 +142,7 @@ def download_model(model_name: str) -> Generator[str, None, None]:
 # ---------------------------------------------------------------------------
 # 4. Inferenz
 # ---------------------------------------------------------------------------
+
 
 def query_model(
     model_name: str,
@@ -178,11 +184,10 @@ def query_model(
                 f"query_model Versuch {attempt + 1}/{max_retries + 1} fehlgeschlagen: {exc}"
             )
             if attempt < max_retries:
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
 
     raise RuntimeError(
-        f"Anfrage an '{model_name}' nach {max_retries + 1} Versuchen fehlgeschlagen: "
-        f"{last_exc}"
+        f"Anfrage an '{model_name}' nach {max_retries + 1} Versuchen fehlgeschlagen: {last_exc}"
     )
 
 
@@ -224,6 +229,7 @@ def chat(
                     delta = data.get("message", {}).get("content", "")
                     if delta:
                         yield delta
+
         return _token_gen()
 
     return get_provider().chat(messages, model=model, temperature=temperature)
@@ -270,6 +276,7 @@ def analyze_stock(
 # Backward-Kompatibilität (alte Funktionsnamen bleiben erhalten)
 # ---------------------------------------------------------------------------
 
+
 def list_local_models() -> list[str]:
     """Alias für get_available_models()."""
     return get_available_models()
@@ -286,6 +293,5 @@ def ensure_model(model: str) -> tuple[bool, str]:
         return True, ""
     return (
         False,
-        f"Modell '{model}' ist nicht lokal installiert. "
-        "Bitte über die Sidebar herunterladen.",
+        f"Modell '{model}' ist nicht lokal installiert. Bitte über die Sidebar herunterladen.",
     )

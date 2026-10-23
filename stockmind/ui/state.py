@@ -32,6 +32,7 @@ from modules.trainer import (
 # Alle externen API-Aufrufe laufen garantiert im Hauptthread (kein Context-Loss).
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def current_provider() -> str:
     """
     Provider-Auswahl dieser Session (Selectbox in Tab 3); Fallback auf .env.
@@ -88,7 +89,9 @@ def cached_search(query: str) -> list:
 def cached_compare_bandits(history: list) -> dict:
     """Bandit-A/B-Replay – gecacht auf die History (O(T²), sonst bei jedem Rerun)."""
     from modules.trainer import _METHODS as _avail
+
     return compare_bandits(history, _avail)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Session State
@@ -97,6 +100,7 @@ def cached_compare_bandits(history: list) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # Startup-Health-Check: Verzeichnisse + Ollama-Status
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def ensure_data_dirs() -> None:
     """Erstellt fehlende Daten-Ordner beim ersten Start."""
@@ -137,6 +141,7 @@ def startup_check() -> None:
         )
 
     st.session_state.startup_done = True
+
 
 def init_session() -> None:
     defaults: dict = {
@@ -184,4 +189,3 @@ def init_session() -> None:
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
-

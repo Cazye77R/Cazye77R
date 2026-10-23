@@ -68,19 +68,23 @@ def render() -> None:
         row_a, row_b, row_c, row_d = st.columns([4, 1, 1, 1])
         with row_a:
             q = st.text_input(
-                "Suche", placeholder="z.B. BMW, 519000, Apple, SAP.DE",
-                key="search_q", label_visibility="collapsed",
+                "Suche",
+                placeholder="z.B. BMW, 519000, Apple, SAP.DE",
+                key="search_q",
+                label_visibility="collapsed",
             )
         with row_b:
             do_search = st.form_submit_button("🔍 Suchen", use_container_width=True)
         with row_c:
             st.session_state.period = st.selectbox(
-                "Zeitraum", ["1mo", "3mo", "6mo", "1y", "2y", "5y"],
-                index=3, key="period_sel", label_visibility="collapsed",
+                "Zeitraum",
+                ["1mo", "3mo", "6mo", "1y", "2y", "5y"],
+                index=3,
+                key="period_sel",
+                label_visibility="collapsed",
             )
         with row_d:
-            do_load = st.form_submit_button("📥 Laden", use_container_width=True,
-                                            type="primary")
+            do_load = st.form_submit_button("📥 Laden", use_container_width=True, type="primary")
 
     # Suche ausführen
     if do_search and q:
@@ -96,11 +100,12 @@ def render() -> None:
     # Autocomplete-Dropdown
     if st.session_state.search_results:
         opts = [
-            f"{r.get('symbol','?')} – {r.get('name','')[:40]} ({r.get('exchange','')})"
+            f"{r.get('symbol', '?')} – {r.get('name', '')[:40]} ({r.get('exchange', '')})"
             for r in st.session_state.search_results
         ]
         idx = st.selectbox(
-            "Ergebnisse", range(len(opts)),
+            "Ergebnisse",
+            range(len(opts)),
             format_func=lambda i: opts[i],
             key="search_sel",
             label_visibility="collapsed",
@@ -111,9 +116,7 @@ def render() -> None:
     if do_load:
         # Ticker bestimmen: aus Suchergebnis oder direkt aus Text-Input
         if st.session_state.search_results and st.session_state.search_query == q:
-            sel = st.session_state.search_results[
-                st.session_state.search_selected_idx
-            ]
+            sel = st.session_state.search_results[st.session_state.search_selected_idx]
             ticker_to_load = sel["symbol"]
         elif q:
             ticker_to_load = q.strip().upper()
@@ -133,9 +136,9 @@ def render() -> None:
                 # Tatsächlich geladener Ticker (kann nach .DE-Fallback abweichen)
                 actual_ticker = df_new.attrs.get("symbol", ticker_to_load)
                 st.session_state.ticker = actual_ticker
-                st.session_state.df     = df_new
-                st.session_state.info   = cached_info(actual_ticker)
-                st.session_state.prediction    = None
+                st.session_state.df = df_new
+                st.session_state.info = cached_info(actual_ticker)
+                st.session_state.prediction = None
                 st.session_state.analysis_text = ""
                 st.session_state.sentiment_result = None
                 st.session_state.explanation_text = ""
@@ -162,15 +165,15 @@ def render() -> None:
     # ── B: Chart + Controls ──────────────────────────────────────────────────
     if st.session_state.df is not None:
         df: pd.DataFrame = st.session_state.df
-        ticker: str      = st.session_state.ticker
-        info: dict       = st.session_state.info
+        ticker: str = st.session_state.ticker
+        info: dict = st.session_state.info
 
         # Kopfzeile
-        name  = info.get("name", ticker)
-        curr  = info.get("currency", "")
-        last  = float(df["Close"].iloc[-1])
-        prev  = float(df["Close"].iloc[-2]) if len(df) > 1 else last
-        chg   = (last - prev) / prev * 100 if prev else 0
+        name = info.get("name", ticker)
+        curr = info.get("currency", "")
+        last = float(df["Close"].iloc[-1])
+        prev = float(df["Close"].iloc[-2]) if len(df) > 1 else last
+        chg = (last - prev) / prev * 100 if prev else 0
         chg_c = GREEN if chg >= 0 else RED
         # Data Quality Badge (inline mit dem Preis-Header)
         dq = st.session_state.data_quality or get_data_quality_report(df)
@@ -184,7 +187,7 @@ def render() -> None:
             dq_badge = (
                 f'<span title="Datenqualität: {issues_html}" '
                 f'style="font-size:13px;margin-left:10px;cursor:default;color:#f0b429;">'
-                f'⚠️ Datenqualität</span>'
+                f"⚠️ Datenqualität</span>"
             )
 
         st.markdown(
@@ -195,11 +198,11 @@ def render() -> None:
             f'&nbsp;&nbsp;<span style="font-family:IBM Plex Mono;font-size:20px;'
             f'font-weight:700;color:#00ff88;">{last:.2f}</span>'
             f'&nbsp;<span style="color:{chg_c};font-size:14px;">{chg:+.2f}%</span>'
-            f'{dq_badge}'
-            f'</div>'
+            f"{dq_badge}"
+            f"</div>"
             f'<div style="margin:0 0 10px;font-size:11px;color:#8b949e;">'
-            f'{dq["first_date"]} – {dq["last_date"]} &nbsp;·&nbsp; {len(df)} Kerzen'
-            f'</div>',
+            f"{dq['first_date']} – {dq['last_date']} &nbsp;·&nbsp; {len(df)} Kerzen"
+            f"</div>",
             unsafe_allow_html=True,
         )
         if not dq["ok"]:
@@ -219,39 +222,48 @@ def render() -> None:
             except ValueError:
                 def_idx = 0
             st.session_state.model = st.selectbox(
-                "🤖 KI-Modell", model_opts, index=def_idx, key="model_sel",
+                "🤖 KI-Modell",
+                model_opts,
+                index=def_idx,
+                key="model_sel",
             )
             # Methode
             st.session_state.method = st.selectbox(
-                "📐 Analyse-Methode", ANALYSIS_METHODS,
+                "📐 Analyse-Methode",
+                ANALYSIS_METHODS,
                 index=ANALYSIS_METHODS.index(st.session_state.method)
-                      if st.session_state.method in ANALYSIS_METHODS else 0,
+                if st.session_state.method in ANALYSIS_METHODS
+                else 0,
                 key="method_sel",
             )
             # Schnell-Aktionen
             st.divider()
             section("⚡ Schnellaktionen")
 
-            if st.button("🔮 Signal berechnen", use_container_width=True,
-                         key="btn_quick_pred"):
+            if st.button("🔮 Signal berechnen", use_container_width=True, key="btn_quick_pred"):
                 with st.spinner("Berechne Signal…"):
                     _sent_score = (st.session_state.sentiment_result or {}).get("score", 0.0)
-                    pred = predict(ticker, df, method=st.session_state.method,
-                                  ml_bundle=load_model(ticker), training_state=load_state(ticker),
-                                  sentiment_score=_sent_score)
-                    st.session_state.prediction   = pred
+                    pred = predict(
+                        ticker,
+                        df,
+                        method=st.session_state.method,
+                        ml_bundle=load_model(ticker),
+                        training_state=load_state(ticker),
+                        sentiment_score=_sent_score,
+                    )
+                    st.session_state.prediction = pred
                     st.session_state.last_pred_ticker = ticker
                     st.session_state.last_pred_signal = pred.signal
-                    st.session_state.last_pred_conf   = pred.confidence
-                    st.session_state.last_pred_time   = time.strftime("%H:%M:%S")
+                    st.session_state.last_pred_conf = pred.confidence
+                    st.session_state.last_pred_time = time.strftime("%H:%M:%S")
                 st.rerun()
 
             if st.session_state.prediction:
                 pred = st.session_state.prediction
                 st.markdown(
-                    f'{signal_badge_html(pred.signal)}'
+                    f"{signal_badge_html(pred.signal)}"
                     f'&nbsp;<span style="color:#8b949e;font-size:12px;">'
-                    f'{pred.confidence:.0%}</span>',
+                    f"{pred.confidence:.0%}</span>",
                     unsafe_allow_html=True,
                 )
                 if pred.summary:
@@ -260,26 +272,34 @@ def render() -> None:
             # KI-Analyse (Sentiment + Erklärung)
             llm_ok = cached_check_llm(current_provider())
             if llm_ok:
-                if st.button("🤖 Sentiment & Erklärung", use_container_width=True,
-                             key="btn_quick_ai"):
+                if st.button(
+                    "🤖 Sentiment & Erklärung", use_container_width=True, key="btn_quick_ai"
+                ):
                     pred = st.session_state.prediction or predict(
-                        ticker, df, method=st.session_state.method,
-                        ml_bundle=load_model(ticker), training_state=load_state(ticker),
+                        ticker,
+                        df,
+                        method=st.session_state.method,
+                        ml_bundle=load_model(ticker),
+                        training_state=load_state(ticker),
                         sentiment_score=(st.session_state.sentiment_result or {}).get("score", 0.0),
                     )
                     with st.spinner("Analysiere News-Sentiment…"):
                         try:
                             from modules.llm_providers import get_provider
+
                             _prov = get_provider(current_provider())
                             sent = analyze_news(
-                                ticker, n=5,
+                                ticker,
+                                n=5,
                                 provider=_prov,
                                 model_name=st.session_state.model,
                             )
                             st.session_state.sentiment_result = sent
                         except Exception as _e:
                             st.session_state.sentiment_result = {
-                                "score": 0.0, "n_news": 0, "samples": [],
+                                "score": 0.0,
+                                "n_news": 0,
+                                "samples": [],
                                 "error": str(_e),
                             }
                     sent = st.session_state.sentiment_result or {}
@@ -287,14 +307,15 @@ def render() -> None:
                         try:
                             ml_b = load_model(ticker)
                             feat_dict: dict = {}
-                            imp_dict: dict  = {}
+                            imp_dict: dict = {}
                             if ml_b and len(df) > 0:
                                 from modules.predictor import _build_features
+
                                 fdf = _build_features(df, sent.get("score", 0.0))
                                 if len(fdf) > 0:
                                     feat_dict = fdf.iloc[-1].to_dict()
                                 imp_raw = getattr(ml_b.get("model"), "feature_importances_", None)
-                                fn  = ml_b.get("feature_names", list(feat_dict.keys()))
+                                fn = ml_b.get("feature_names", list(feat_dict.keys()))
                                 if imp_raw is not None and len(imp_raw) == len(fn):
                                     imp_dict = dict(zip(fn, imp_raw.tolist()))
                             expl = explain_decision(
@@ -329,19 +350,17 @@ def render() -> None:
                     score = sent.get("score", 0.0)
                     n_news = sent.get("n_news", 0)
                     score_color = (
-                        "#00ff88" if score > 0.2
-                        else "#ff4444" if score < -0.2
-                        else "#f0b429"
+                        "#00ff88" if score > 0.2 else "#ff4444" if score < -0.2 else "#f0b429"
                     )
                     st.markdown(
                         f'<div class="sm-card" style="margin-bottom:8px;">'
                         f'<div class="sm-label">News-Sentiment ({n_news} Headlines)</div>'
                         f'<div style="font-family:IBM Plex Mono;font-size:22px;'
                         f'font-weight:700;color:{score_color};margin-top:4px;">'
-                        f'{score:+.2f}</div>'
+                        f"{score:+.2f}</div>"
                         f'<div class="sm-label" style="margin-top:2px;">'
-                        f'Skala -1 (sehr negativ) bis +1 (sehr positiv)</div>'
-                        f'</div>',
+                        f"Skala -1 (sehr negativ) bis +1 (sehr positiv)</div>"
+                        f"</div>",
                         unsafe_allow_html=True,
                     )
                 if expl:
@@ -359,7 +378,7 @@ def render() -> None:
                 width="stretch",
             )
             ind_opts = ["– keiner –", "RSI", "MACD", "Bollinger Bands"]
-            ind_sel  = st.selectbox("Indikator", ind_opts, key="ind_sel")
+            ind_sel = st.selectbox("Indikator", ind_opts, key="ind_sel")
             if ind_sel != "– keiner –":
                 fig_ind = indicator_fig(df, ind_sel)
                 if fig_ind:
@@ -370,9 +389,24 @@ def render() -> None:
         st.markdown('<div style="height:24px;"></div>', unsafe_allow_html=True)
         c1, c2, c3 = st.columns(3)
         for col, icon, head, txt in [
-            (c1, "📈", "Analysieren", "KI-gestützte Analyse mit lokalen LLMs. Keine Cloud, keine API-Keys."),
-            (c2, "🎓", "Trainieren",  "Trainiere Vorhersagemodelle und verfolge deren Genauigkeit im Zeitverlauf."),
-            (c3, "🏎️", "Paper-Trading", f"Starte mit {DEFAULT_BUDGET_EUR:,.0f}€ virtuellem Kapital und jage den Lambo."),
+            (
+                c1,
+                "📈",
+                "Analysieren",
+                "KI-gestützte Analyse mit lokalen LLMs. Keine Cloud, keine API-Keys.",
+            ),
+            (
+                c2,
+                "🎓",
+                "Trainieren",
+                "Trainiere Vorhersagemodelle und verfolge deren Genauigkeit im Zeitverlauf.",
+            ),
+            (
+                c3,
+                "🏎️",
+                "Paper-Trading",
+                f"Starte mit {DEFAULT_BUDGET_EUR:,.0f}€ virtuellem Kapital und jage den Lambo.",
+            ),
         ]:
             with col:
                 st.markdown(
@@ -380,7 +414,7 @@ def render() -> None:
                     f'<div style="font-size:40px;">{icon}</div>'
                     f'<div style="color:#00ff88;font-weight:700;margin:8px 0;">{head}</div>'
                     f'<div style="color:#8b949e;font-size:13px;">{txt}</div>'
-                    f'</div>',
+                    f"</div>",
                     unsafe_allow_html=True,
                 )
 
@@ -389,7 +423,7 @@ def render() -> None:
         st.divider()
         section("🎓 Training & Backtesting")
 
-        state   = load_state(st.session_state.ticker)
+        state = load_state(st.session_state.ticker)
         trainer = StockTrainer()
 
         sub1, sub2, sub3 = st.tabs(["🤖 LLM-Zyklus", "🔄 Auto-Modus", "📊 Backtesting"])
@@ -403,10 +437,15 @@ def render() -> None:
                     [m for m in ANALYSIS_METHODS if m != "Auto (KI wählt)"],
                     key="train_method_llm",
                 )
-                btn_cycle = st.button("▶ Zyklus starten", use_container_width=True,
-                                      type="primary", key="btn_llm_cycle")
+                btn_cycle = st.button(
+                    "▶ Zyklus starten",
+                    use_container_width=True,
+                    type="primary",
+                    key="btn_llm_cycle",
+                )
                 btn_ml = st.button(
-                    "📈 ML-Modell trainieren", use_container_width=True,
+                    "📈 ML-Modell trainieren",
+                    use_container_width=True,
                     key="btn_ml_train",
                     help=(
                         "Trainiert das sklearn-GBM-Modell (TimeSeriesSplit-CV "
@@ -418,8 +457,7 @@ def render() -> None:
                         with st.spinner("Trainiere GBM-Modell (5-Fold-CV)…"):
                             _ml_state = train_ml_model(st.session_state.ticker, df)
                         st.toast(
-                            f"ML-Training fertig – Balanced Accuracy "
-                            f"{_ml_state['accuracy']:.1%}",
+                            f"ML-Training fertig – Balanced Accuracy {_ml_state['accuracy']:.1%}",
                             icon="✅",
                         )
                     except ValueError as _e:
@@ -432,9 +470,9 @@ def render() -> None:
                         anim_slot = st.empty()
                         quote = random.choice(QUOTES)
                         anim_slot.markdown(
-                            ticker_html() +
-                            f'<div class="sm-quote">"<span class="sm-pulse">⬛</span> '
-                            f'KI analysiert {html.escape(st.session_state.ticker)}… · '
+                            ticker_html()
+                            + f'<div class="sm-quote">"<span class="sm-pulse">⬛</span> '
+                            f"KI analysiert {html.escape(st.session_state.ticker)}… · "
                             f'{html.escape(quote)}"</div>',
                             unsafe_allow_html=True,
                         )
@@ -452,34 +490,35 @@ def render() -> None:
                             cycle = result.get("cycle", 0)
                             # Easter Egg einmalig beim Abschluss auswerten
                             if ENABLE_EASTER_EGGS:
-                                result["_egg"] = check_easter_egg({
-                                    "cycles": cycle,
-                                    "previous_cycles": st.session_state.prev_cycles,
-                                    "accuracy": result.get("overall_accuracy", 0.0),
-                                    "total_return_pct": None,
-                                })
+                                result["_egg"] = check_easter_egg(
+                                    {
+                                        "cycles": cycle,
+                                        "previous_cycles": st.session_state.prev_cycles,
+                                        "accuracy": result.get("overall_accuracy", 0.0),
+                                        "total_return_pct": None,
+                                    }
+                                )
                             st.session_state.prev_cycles = cycle
 
                             # Ergebnis persistieren – überlebt so den Rerun
                             st.session_state.cycle_result = result
                             st.session_state.last_pred_ticker = st.session_state.ticker
                             st.session_state.last_pred_signal = result.get("prediction", "?")
-                            st.session_state.last_pred_conf   = result.get("confidence", 0.0)
-                            st.session_state.last_pred_time   = time.strftime("%H:%M:%S")
+                            st.session_state.last_pred_conf = result.get("confidence", 0.0)
+                            st.session_state.last_pred_time = time.strftime("%H:%M:%S")
                             st.rerun()
 
                 # Persistiertes Ergebnis rendern (auch nach Rerun sichtbar)
                 _cyc = st.session_state.cycle_result
                 if _cyc and not _cyc.get("error"):
-                    ok       = _cyc.get("correct", False)
+                    ok = _cyc.get("correct", False)
                     pred_sig = _cyc.get("prediction", "?")
-                    conf     = _cyc.get("confidence", 0.0)
-                    m_acc    = _cyc.get("method_accuracy", 0.0)
-                    o_acc    = _cyc.get("overall_accuracy", 0.0)
+                    conf = _cyc.get("confidence", 0.0)
+                    m_acc = _cyc.get("method_accuracy", 0.0)
+                    o_acc = _cyc.get("overall_accuracy", 0.0)
 
                     mc1, mc2, mc3, mc4 = st.columns(4)
-                    mc1.metric("Vorhersage",
-                               pred_sig, "✅ Korrekt" if ok else "❌ Falsch")
+                    mc1.metric("Vorhersage", pred_sig, "✅ Korrekt" if ok else "❌ Falsch")
                     mc2.metric("Konfidenz", f"{conf:.0%}")
                     mc3.metric("Methoden-Acc", f"{m_acc:.1%}")
                     mc4.metric("Gesamt-Acc", f"{o_acc:.1%}")
@@ -508,8 +547,11 @@ def render() -> None:
                 n_auto = st.slider("Zyklen", 1, 20, 3, key="auto_n")
 
                 # Bandit-Auswahl
-                bandit_idx = list(_BANDIT_NAMES).index(st.session_state.bandit_algo) \
-                    if st.session_state.bandit_algo in _BANDIT_NAMES else 0
+                bandit_idx = (
+                    list(_BANDIT_NAMES).index(st.session_state.bandit_algo)
+                    if st.session_state.bandit_algo in _BANDIT_NAMES
+                    else 0
+                )
                 selected_bandit = st.selectbox(
                     "Bandit-Algorithmus",
                     list(_BANDIT_NAMES),
@@ -523,8 +565,9 @@ def render() -> None:
                 )
                 st.session_state.bandit_algo = selected_bandit
 
-                btn_auto = st.button("🔄 Auto starten", use_container_width=True,
-                                     type="primary", key="btn_auto")
+                btn_auto = st.button(
+                    "🔄 Auto starten", use_container_width=True, type="primary", key="btn_auto"
+                )
             with col_y:
                 if btn_auto:
                     if not cached_check_llm(current_provider()):
@@ -539,9 +582,7 @@ def render() -> None:
                             expanded=True,
                         ) as status:
                             for i in range(n_auto):
-                                status.update(
-                                    label=f"Zyklus {i+1}/{n_auto} läuft…"
-                                )
+                                status.update(label=f"Zyklus {i + 1}/{n_auto} läuft…")
                                 res = trainer.auto_mode(
                                     st.session_state.ticker,
                                     st.session_state.model,
@@ -550,15 +591,15 @@ def render() -> None:
                                 )
                                 last_res = res
                                 if res.get("error"):
-                                    line = f"❌ Zyklus {i+1}: {res['error']}"
+                                    line = f"❌ Zyklus {i + 1}: {res['error']}"
                                     st.write(line)
                                     log_lines.append(line)
                                     break
                                 ok_sym = "✅" if res.get("correct") else "❌"
                                 line = (
-                                    f"{ok_sym} Zyklus {i+1} · "
-                                    f"**{res.get('prediction','?')}** · "
-                                    f"Methode: {res.get('method','?')} · "
+                                    f"{ok_sym} Zyklus {i + 1} · "
+                                    f"**{res.get('prediction', '?')}** · "
+                                    f"Methode: {res.get('method', '?')} · "
                                     f"Acc: {res.get('overall_accuracy', 0):.1%}"
                                 )
                                 st.write(line)
@@ -568,16 +609,20 @@ def render() -> None:
                         egg = None
                         if last_res and not last_res.get("error"):
                             if ENABLE_EASTER_EGGS:
-                                egg = check_easter_egg({
-                                    "cycles": last_res.get("cycle", 0),
-                                    "previous_cycles": st.session_state.prev_cycles,
-                                    "accuracy": last_res.get("overall_accuracy"),
-                                    "total_return_pct": None,
-                                })
+                                egg = check_easter_egg(
+                                    {
+                                        "cycles": last_res.get("cycle", 0),
+                                        "previous_cycles": st.session_state.prev_cycles,
+                                        "accuracy": last_res.get("overall_accuracy"),
+                                        "total_return_pct": None,
+                                    }
+                                )
                             st.session_state.prev_cycles = last_res.get("cycle", 0)
                         # Protokoll persistieren – überlebt so den Rerun
                         st.session_state.auto_result = {
-                            "log": log_lines, "egg": egg, "bandit": selected_bandit,
+                            "log": log_lines,
+                            "egg": egg,
+                            "bandit": selected_bandit,
                         }
                         st.rerun()
 
@@ -609,8 +654,8 @@ def render() -> None:
                         st.plotly_chart(_cmp["figure"], width="stretch")
                         fr = _cmp.get("final_rewards", {})
                         _cr1, _cr2, _cr3 = st.columns(3)
-                        _cr1.metric("UCB1 Gesamt",     f"{fr.get('UCB1', 0):.1f}")
-                        _cr2.metric("D-UCB Gesamt",    f"{fr.get('D-UCB', 0):.1f}")
+                        _cr1.metric("UCB1 Gesamt", f"{fr.get('UCB1', 0):.1f}")
+                        _cr2.metric("D-UCB Gesamt", f"{fr.get('D-UCB', 0):.1f}")
                         _cr3.metric("Thompson Gesamt", f"{fr.get('Thompson', 0):.1f}")
                 elif len(_hist) > 0:
                     st.caption(f"A/B-Vergleich ab 6 Zyklen verfügbar ({len(_hist)}/6).")
@@ -626,8 +671,10 @@ def render() -> None:
                 )
             with bt_col2:
                 bt_budget = st.number_input(
-                    "Startkapital (€)", value=DEFAULT_BUDGET_EUR,
-                    step=1000.0, key="bt_budget",
+                    "Startkapital (€)",
+                    value=DEFAULT_BUDGET_EUR,
+                    step=1000.0,
+                    key="bt_budget",
                 )
             st.warning(
                 "⚠️ **Survivorship Bias:** yfinance enthält nur derzeit gelistete Aktien. "
@@ -635,8 +682,7 @@ def render() -> None:
                 "daher optimistisch verzerrt. Reale Performance typischerweise **1–3 % p.a. niedriger**.",
                 icon=None,
             )
-            if st.button("▶ Backtest starten", use_container_width=True,
-                         key="btn_bt"):
+            if st.button("▶ Backtest starten", use_container_width=True, key="btn_bt"):
                 fn = SIGNAL_FUNCTIONS.get(bt_method)
                 if not fn:
                     st.toast(f"Methode '{bt_method}' nicht verfügbar.", icon="🚨")
@@ -649,7 +695,7 @@ def render() -> None:
                     bt_bar = st.progress(0.0, text="Berechne Signale…")
                     for j, i in enumerate(range(50, len(df_bt))):
                         try:
-                            sig, _ = fn(df_bt.iloc[:i+1])
+                            sig, _ = fn(df_bt.iloc[: i + 1])
                             signals[df_bt.index[i]] = sig
                         except Exception:
                             signals[df_bt.index[i]] = "HALTEN"
@@ -660,16 +706,20 @@ def render() -> None:
                                 text=f"Berechne Signale… {j + 1}/{n_bars}",
                             )
                     bt_bar.empty()
-                    sig_s  = pd.Series(signals)
+                    sig_s = pd.Series(signals)
                     with st.spinner("Simuliere Trades…"):
                         result = backtest_signals(
-                            st.session_state.ticker, df_bt, sig_s,
+                            st.session_state.ticker,
+                            df_bt,
+                            sig_s,
                             initial_cash=bt_budget,
                         )
                     # Ergebnis persistieren – überlebt jede weitere Interaktion
                     st.session_state.backtest_result = {
-                        "result": result, "method": bt_method,
-                        "budget": bt_budget, "failed": failed,
+                        "result": result,
+                        "method": bt_method,
+                        "budget": bt_budget,
+                        "failed": failed,
                         "ticker": st.session_state.ticker,
                         "index": df_bt.index,
                     }
@@ -677,9 +727,9 @@ def render() -> None:
             # Persistiertes Backtest-Ergebnis rendern
             _bt = st.session_state.backtest_result
             if _bt:
-                result    = _bt["result"]
-                bt_m      = _bt["method"]
-                bt_b      = _bt["budget"]
+                result = _bt["result"]
+                bt_m = _bt["method"]
+                bt_b = _bt["budget"]
                 st.caption(f"Backtest: {_bt['ticker']} · {bt_m} · Startkapital {bt_b:,.0f} €")
                 if _bt.get("failed"):
                     st.warning(
@@ -695,7 +745,7 @@ def render() -> None:
                 bc5.metric("Sharpe", f"{result.sharpe_ratio:.2f}")
 
                 if result.equity_curve:
-                    eq_idx = _bt["index"][-len(result.equity_curve):]
+                    eq_idx = _bt["index"][-len(result.equity_curve) :]
                     eq_series = pd.Series(result.equity_curve, index=eq_idx)
                     trades_df = pd.DataFrame(result.trades)
                     ext = compute_metrics(eq_series, trades_df)
@@ -713,13 +763,11 @@ def render() -> None:
                     # Equity-Kurve + Underwater-Chart
                     eq_df = pd.DataFrame({"value": result.equity_curve})
                     st.plotly_chart(
-                        equity_chart(eq_df, bt_b,
-                                      f"Equity Curve – {bt_m}"),
+                        equity_chart(eq_df, bt_b, f"Equity Curve – {bt_m}"),
                         width="stretch",
                     )
                     st.plotly_chart(
-                        underwater_chart(eq_series,
-                                          f"Drawdown – {bt_m}"),
+                        underwater_chart(eq_series, f"Drawdown – {bt_m}"),
                         width="stretch",
                     )
                     # CSV-Export: Equity-Kurve + Trades
@@ -753,7 +801,7 @@ def render() -> None:
                     f'<div class="sm-card" style="text-align:center;">'
                     f'<div class="sm-label">Trainingszyklen</div>'
                     f'<div class="sm-big-num">{state["cycles"]}</div>'
-                    f'</div>',
+                    f"</div>",
                     unsafe_allow_html=True,
                 )
             with s2:
@@ -763,7 +811,7 @@ def render() -> None:
                     f'<div class="sm-label">Beste Methode</div>'
                     f'<div style="font-family:IBM Plex Mono;font-size:15px;'
                     f'font-weight:700;color:#f0b429;margin-top:8px;">{html.escape(str(best))}</div>'
-                    f'</div>',
+                    f"</div>",
                     unsafe_allow_html=True,
                 )
             with s3:

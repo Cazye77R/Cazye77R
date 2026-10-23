@@ -1,4 +1,5 @@
 """Utilities for loading and preparing stock price data for sequence models."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -59,8 +60,7 @@ def load_prices(
     missing = [c for c in (date_col, price_col) if c not in df.columns]
     if missing:
         raise ValueError(
-            f"Spalte(n) {missing} nicht in der CSV gefunden. "
-            f"Verfügbare Spalten: {list(df.columns)}"
+            f"Spalte(n) {missing} nicht in der CSV gefunden. Verfügbare Spalten: {list(df.columns)}"
         )
 
     try:
@@ -72,14 +72,18 @@ def load_prices(
     try:
         prices = df[price_col].astype(float).to_numpy()
     except (ValueError, TypeError) as exc:
-        raise ValueError(f"Preisspalte '{price_col}' enthält nicht-numerische Werte: {exc}") from exc
+        raise ValueError(
+            f"Preisspalte '{price_col}' enthält nicht-numerische Werte: {exc}"
+        ) from exc
 
     if len(prices) < 2:
         raise ValueError("Mindestens 2 Kurs-Datenpunkte erforderlich.")
     if not np.all(np.isfinite(prices)):
         raise ValueError(f"Preisspalte '{price_col}' enthält NaN/Inf-Werte.")
     if np.any(prices <= 0):
-        raise ValueError(f"Preisspalte '{price_col}' enthält Werte <= 0 (ungültig für Renditeberechnung).")
+        raise ValueError(
+            f"Preisspalte '{price_col}' enthält Werte <= 0 (ungültig für Renditeberechnung)."
+        )
 
     raw_returns = np.diff(prices) / prices[:-1]
 
@@ -126,7 +130,7 @@ def chronological_split(
     split_idx = int(len(returns) * train_ratio)
     split_idx = max(window + 1, min(split_idx, len(returns) - window - 1))
     train_returns = returns[:split_idx]
-    val_returns = returns[split_idx - window:]
+    val_returns = returns[split_idx - window :]
     return train_returns, val_returns
 
 
