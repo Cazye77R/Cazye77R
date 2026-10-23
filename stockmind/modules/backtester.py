@@ -528,6 +528,154 @@ class PaperTrader:
     # 5. auto_trade
     # ------------------------------------------------------------------
 
+    def _check_risk_exit(
+        self, state: PortfolioState, symbol: str, current_price: float
+    ) -> tuple[str, dict]:
+        """Schließt die Position bei Stop-Loss/Take-Profit. Gibt (decision, trade_result) zurück."""
+        open_pos = state.positions.get(symbol)
+        if open_pos:
+            sl = open_pos.get("stop_loss")
+            tp = open_pos.get("take_profit")
+            if sl and current_price <= sl:
+                res = self.close_position(
+                    symbol=symbol,
+                    price=current_price,
+                    reasoning=f"Stop-Loss ausgelöst ({current_price:.2f} ≤ {sl:.2f})",
+                )
+                return ("STOP_LOSS" if res.get("ok") else "SELL_FAILED"), res
+            if tp and current_price >= tp:
+                res = self.close_position(
+                    symbol=symbol,
+                    price=current_price,
+                    reasoning=f"Take-Profit erreicht ({current_price:.2f} ≥ {tp:.2f})",
+                )
+                return ("TAKE_PROFIT" if res.get("ok") else "SELL_FAILED"), res
+        return "HOLD", {}
+
+    def _open_long(
+        self,
+        state: PortfolioState,
+        symbol: str,
+        df: pd.DataFrame,
+        current_price: float,
+        invest_pct: float,
+        signal_label: str,
+        reasoning: str,
+        method: str,
+    ) -> tuple[str, dict]:
+        """Eröffnet eine Long-Position mit ATR-Stops und Risk-Manager-Größe."""
+        from modules.risk_manager import RiskManager
+
+        rm = RiskManager()
+        # Stop-Loss/Take-Profit via ATR, Größe über Risk-Manager
+        sl_price, tp_price = rm.compute_stops(df, current_price)
+        _pos_val = sum(
+            p["quantity"] * (p.get("last_price") or p["avg_price"])
+            for p in state.positions.values()
+        )
+        equity = state.cash + _pos_val
+        risk_qty = rm.position_size(equity, current_price, sl_price)
+        # Budget-Cap: invest_pct des Cashs abzüglich Ordergebühr
+        invest_eur = max(state.cash * invest_pct - self.order_cost, 0.0)
+        cash_qty = invest_eur / (current_price * (1 + state.spread_pct / 100))
+        quantity = min(risk_qty, cash_qty) if risk_qty > 0 else 0.0
+        if quantity <= 0:
+            return "HOLD_RISK_LIMIT", {}
+        trade_result = self.place_order(
+            symbol=symbol,
+            direction="BUY",
+            quantity=quantity,
+            price=current_price,
+            signal=f"{signal_label} SL:{sl_price:.2f} TP:{tp_price:.2f}",
+            reasoning=reasoning,
+            method=method,
+        )
+        if not trade_result.get("ok"):
+            return "BUY_FAILED", trade_result
+        # Stops an der Position persistieren (für Exits)
+        st2 = self.load()
+        if symbol in st2.positions:
+            st2.positions[symbol]["stop_loss"] = sl_price
+            st2.positions[symbol]["take_profit"] = tp_price
+            self.save(st2)
+        return "BUY", trade_result
+
+    def strategy_trade(
+        self,
+        symbol: str,
+        strategy_key: str,
+        params: dict,
+        invest_pct: float = 0.2,
+        label: str = "",
+    ) -> dict[str, object]:
+        """
+        Handelt EIN Signal einer regelbasierten Strategie (ohne LLM).
+
+        Berechnet die Zielposition (investiert/Cash) aus den aktuellen Daten:
+        Stops zuerst, dann Kauf bei Ziel=1 ohne Position bzw. Verkauf bei
+        Ziel=0 mit Position. Erneutes Ausführen ist idempotent.
+        """
+        from modules.data_fetcher import fetch_ohlcv
+        from modules.strategies import STRATEGIES
+
+        strat = STRATEGIES.get(strategy_key)
+        if strat is None:
+            return {"decision": "SKIP", "reason": f"Unbekannte Strategie '{strategy_key}'"}
+        df = fetch_ohlcv(symbol, period="2y")
+        if df.empty:
+            return {"decision": "SKIP", "reason": "Kein Kurs abrufbar"}
+        target = int(strat.positions(df, params).iloc[-1] >= 0.5)
+        current_price = float(df["Close"].iloc[-1])
+        name = label or strat.label
+        state = self.load()
+
+        decision, trade_result = self._check_risk_exit(state, symbol, current_price)
+        if decision == "HOLD":
+            if target == 1 and symbol not in state.positions:
+                if state.cash > self.order_cost * 3:
+                    decision, trade_result = self._open_long(
+                        state,
+                        symbol,
+                        df,
+                        current_price,
+                        invest_pct,
+                        signal_label=f"STRAT/{strategy_key}",
+                        reasoning=f"Strategie '{name}' ist investiert.",
+                        method=name,
+                    )
+                else:
+                    decision = "HOLD_LOW_CASH"
+            elif target == 0 and symbol in state.positions:
+                trade_result = self.close_position(
+                    symbol=symbol,
+                    price=current_price,
+                    reasoning=f"Strategie '{name}' signalisiert Cash.",
+                )
+                decision = "SELL" if trade_result.get("ok") else "SELL_FAILED"
+            else:
+                decision = "HOLD_ALREADY_IN" if target == 1 else "HOLD_NO_POSITION"
+
+        summary = self.get_portfolio_summary({symbol: current_price})
+        entry = {
+            "cycle": 1,
+            "symbol": symbol,
+            "method": name,
+            "prediction": "UP" if target == 1 else "DOWN",
+            "confidence": 1.0,
+            "current_price": current_price,
+            "decision": decision,
+            "reasoning": f"Strategie '{name}' → {'investiert' if target else 'Cash'}",
+            "pnl": trade_result.get("pnl", 0.0),
+            "portfolio_value": summary["total_value"],
+            "lambo_value": summary["lambo_value"],
+            "timestamp": _now(),
+        }
+        state2 = self.load()
+        state2.auto_log.append(entry)
+        state2.auto_log = state2.auto_log[-50:]
+        self.save(state2)
+        return entry
+
     def auto_trade(
         self,
         symbol: str,
@@ -568,11 +716,9 @@ class PaperTrader:
             Liste der Auto-Log-Einträge dieser Session
         """
         from modules.data_fetcher import fetch_ohlcv
-        from modules.risk_manager import RiskManager
         from modules.trainer import StockTrainer
 
         trainer = StockTrainer()
-        rm = RiskManager()
         log = []
 
         for i in range(cycles):
@@ -616,24 +762,7 @@ class PaperTrader:
             # 0. Risk-Exits zuerst: Stop-Loss / Take-Profit der offenen Position
             #    prüfen – unabhängig von der LLM-Vorhersage (begrenzt Verluste
             #    auch wenn das Modell weiter UP sagt).
-            open_pos = state.positions.get(symbol)
-            if open_pos:
-                sl = open_pos.get("stop_loss")
-                tp = open_pos.get("take_profit")
-                if sl and current_price <= sl:
-                    trade_result = self.close_position(
-                        symbol=symbol,
-                        price=current_price,
-                        reasoning=f"Stop-Loss ausgelöst ({current_price:.2f} ≤ {sl:.2f})",
-                    )
-                    decision = "STOP_LOSS" if trade_result.get("ok") else "SELL_FAILED"
-                elif tp and current_price >= tp:
-                    trade_result = self.close_position(
-                        symbol=symbol,
-                        price=current_price,
-                        reasoning=f"Take-Profit erreicht ({current_price:.2f} ≥ {tp:.2f})",
-                    )
-                    decision = "TAKE_PROFIT" if trade_result.get("ok") else "SELL_FAILED"
+            decision, trade_result = self._check_risk_exit(state, symbol, current_price)
 
             if decision != "HOLD":
                 pass  # Risk-Exit hat bereits gehandelt
@@ -641,39 +770,16 @@ class PaperTrader:
             elif prediction == "UP" and confidence >= 0.5:
                 # Kaufen falls keine offene Position UND genug Cash
                 if symbol not in state.positions and state.cash > self.order_cost * 3:
-                    # Stop-Loss/Take-Profit via ATR, Größe über Risk-Manager
-                    sl_price, tp_price = rm.compute_stops(df, current_price)
-                    _pos_val = sum(
-                        p["quantity"] * (p.get("last_price") or p["avg_price"])
-                        for p in state.positions.values()
+                    decision, trade_result = self._open_long(
+                        state,
+                        symbol,
+                        df,
+                        current_price,
+                        invest_pct,
+                        signal_label=f"UP/{confidence:.0%}",
+                        reasoning=reasoning,
+                        method=used_method,
                     )
-                    equity = state.cash + _pos_val
-                    risk_qty = rm.position_size(equity, current_price, sl_price)
-                    # Budget-Cap: invest_pct des Cashs abzüglich Ordergebühr
-                    invest_eur = max(state.cash * invest_pct - self.order_cost, 0.0)
-                    cash_qty = invest_eur / (current_price * (1 + state.spread_pct / 100))
-                    quantity = min(risk_qty, cash_qty) if risk_qty > 0 else 0.0
-
-                    if quantity <= 0:
-                        decision = "HOLD_RISK_LIMIT"
-                    else:
-                        trade_result = self.place_order(
-                            symbol=symbol,
-                            direction="BUY",
-                            quantity=quantity,
-                            price=current_price,
-                            signal=f"UP/{confidence:.0%} SL:{sl_price:.2f} TP:{tp_price:.2f}",
-                            reasoning=reasoning,
-                            method=used_method,
-                        )
-                        decision = "BUY" if trade_result.get("ok") else "BUY_FAILED"
-                        if trade_result.get("ok"):
-                            # Stops an der Position persistieren (für Exits oben)
-                            st2 = self.load()
-                            if symbol in st2.positions:
-                                st2.positions[symbol]["stop_loss"] = sl_price
-                                st2.positions[symbol]["take_profit"] = tp_price
-                                self.save(st2)
                 else:
                     decision = "HOLD_ALREADY_IN" if symbol in state.positions else "HOLD_LOW_CASH"
 

@@ -133,3 +133,25 @@ def test_lab_ui_renders_end_to_end(monkeypatch):
     at.button(key="btn_lab").click().run()
     assert not at.exception
     assert any("Aktuelle Auswahl" in m.value for m in at.markdown)
+
+
+def test_strategy_trade_buys_then_is_idempotent_then_sells(tmp_path, monkeypatch):
+    from modules import data_fetcher
+    from modules.backtester import PaperTrader
+
+    up = _ohlc(100 * np.exp(np.cumsum(np.full(400, 0.003))))
+    down = _ohlc(200 * np.exp(np.cumsum(np.full(400, -0.004))))
+    frames = {"df": up}
+    monkeypatch.setattr(data_fetcher, "fetch_ohlcv", lambda *a, **k: frames["df"])
+
+    pt = PaperTrader(name="strat_test", base_dir=str(tmp_path))
+    pt.reset(10_000)
+    e1 = pt.strategy_trade("TEST", "trend_filter", {"window": 50})
+    assert e1["decision"] == "BUY"
+    e2 = pt.strategy_trade("TEST", "trend_filter", {"window": 50})
+    assert e2["decision"] == "HOLD_ALREADY_IN"
+    frames["df"] = down
+    e3 = pt.strategy_trade("TEST", "trend_filter", {"window": 50})
+    assert e3["decision"] in {"SELL", "STOP_LOSS"}
+    assert "TEST" not in pt.load().positions
+    assert pt.strategy_trade("TEST", "gibtsnicht", {})["decision"] == "SKIP"

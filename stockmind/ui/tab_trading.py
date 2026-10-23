@@ -346,6 +346,36 @@ def render() -> None:
                 with st.expander("📋 Letzter Auto-Trade-Lauf", expanded=True):
                     for line in _at_res["log"]:
                         st.write(line)
+
+            # ── Strategie-Autopilot (ohne LLM) ─────────────────────────────
+            st.divider()
+            st.markdown("**🧪 Strategie-Signal ausführen** (aus dem Strategie-Labor)")
+            _lab = st.session_state.get("lab_result")
+            if not _lab or _lab["ticker"] != st.session_state.ticker or not _lab["res"].current:
+                st.caption(
+                    "Zuerst im Tab Analyse → Training & Backtesting → 🧪 Strategie-Labor "
+                    "die beste Strategie für diesen Wert finden."
+                )
+            else:
+                _cur = _lab["res"].current
+                _verdict = _lab["res"].verdict
+                st.write(f"Gewählt: **{_cur['strategy']}** → aktuell **{_cur['position_now']}**")
+                if _verdict != "besser":
+                    st.warning(
+                        "Die Auswahl war out-of-sample nicht nachweislich besser als Buy & Hold "
+                        f"(Urteil: {_verdict.replace('_', ' ')}). Nur zum Ausprobieren im Paper-Trading."
+                    )
+                if st.button("▶ Strategie-Signal jetzt handeln", key="btn_strat_trade"):
+                    with st.spinner("Berechne Signal…"):
+                        _e = pt.strategy_trade(
+                            st.session_state.ticker,
+                            _cur["key"],
+                            _cur["params"],
+                            invest_pct=at_invest,
+                            label=_cur["strategy"],
+                        )
+                    st.session_state.auto_trade_result = {"log": [_at_log_line(_e)]}
+                    st.rerun()
         else:
             st.info("Bitte zuerst eine Aktie laden.")
 
