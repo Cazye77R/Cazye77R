@@ -217,7 +217,35 @@ def search_stocks(query: str) -> list[dict]:
     for r in results:
         if "error" in r:
             logger.warning(f"Ticker-Suche '{query}': {r['error']}")
+    if not clean:
+        clean = _probe_ticker(query)
     return clean
+
+
+_TICKER_LIKE_RE = re.compile(r"^[A-Za-z0-9.\-^=]{1,12}$")
+
+
+def _probe_ticker(query: str) -> list[dict]:
+    """
+    Notfall-Auflösung, wenn die Yahoo-Suche ausfällt oder nichts liefert:
+    Die Eingabe direkt als Ticker (und mit XETRA-Suffix) per Kursabfrage prüfen.
+    """
+    if not _TICKER_LIKE_RE.match(query):
+        return []
+    q = query.upper()
+    candidates = [q] if ("." in q or q.startswith("^") or q.endswith("-USD")) else [q, q + ".DE"]
+    for sym in candidates:
+        if _fetch_yf_history(sym, "5d", "1d") is not None:
+            return [
+                {
+                    "symbol": sym,
+                    "name": sym,
+                    "exchange": "",
+                    "type": "–",
+                    "wkn": "",
+                }
+            ]
+    return []
 
 
 def _yahoo_search(query: str) -> list[dict]:
@@ -374,6 +402,49 @@ def get_wkn_symbol(wkn: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def clean_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Bereinigt OHLCV-Rohdaten, ohne Zeilen zu erfinden.
+
+    - Index sortieren, doppelte Zeitstempel entfernen (letzter gewinnt)
+    - Zeilen mit fehlendem oder nicht-positivem Close entfernen
+    - Open/High/Low mit fehlendem/nicht-positivem Wert auf Close setzen
+    - High/Low konsistent machen (High >= max(O,C), Low <= min(O,C))
+    - Negatives/fehlendes Volumen auf 0
+    Zählt Korrekturen in ``df.attrs["cleaned"]`` für den Datenqualitätsbericht.
+    """
+    out = df.copy()
+    n0 = len(out)
+    out = out[~out.index.duplicated(keep="last")].sort_index()
+    out = out[out["Close"].notna() & (out["Close"] > 0)]
+    fixed = 0
+    for col in ("Open", "High", "Low"):
+        if col in out.columns:
+            bad = out[col].isna() | (out[col] <= 0)
+            fixed += int(bad.sum())
+            out.loc[bad, col] = out.loc[bad, "Close"]
+    if {"Open", "High", "Low"} <= set(out.columns):
+        hi = out[["Open", "Close", "High"]].max(axis=1)
+        lo = out[["Open", "Close", "Low"]].min(axis=1)
+        fixed += int(((hi != out["High"]) | (lo != out["Low"])).sum())
+        out["High"], out["Low"] = hi, lo
+    if "Volume" in out.columns:
+        out["Volume"] = out["Volume"].fillna(0).clip(lower=0)
+    out.attrs["cleaned"] = {"rows_dropped": n0 - len(out), "values_fixed": fixed}
+    return out
+
+
+def _with_retry(fn, attempts: int = 3, base_delay: float = 0.6):
+    """Führt ``fn`` bei Ausnahmen mit exponentiellem Backoff erneut aus (Netzwerk-Hänger)."""
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception:
+            if i == attempts - 1:
+                raise
+            time.sleep(base_delay * (2**i))
+
+
 def _normalize_raw(raw: pd.DataFrame) -> Optional[pd.DataFrame]:
     """Normalisiert einen rohen yfinance-DataFrame auf OHLCV-Spalten ohne Zeitzone."""
     if raw is None or raw.empty:
@@ -385,22 +456,24 @@ def _normalize_raw(raw: pd.DataFrame) -> Optional[pd.DataFrame]:
     ohlcv = [c for c in ("Open", "High", "Low", "Close", "Volume") if c in raw.columns]
     if len(ohlcv) < 5:
         return None
-    df = raw[list(ohlcv)].dropna(subset=["Close"])
+    df = clean_ohlcv(raw[list(ohlcv)].dropna(subset=["Close"]))
     return df if len(df) >= 2 else None
 
 
 def _fetch_yf_history(symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
     """Primärer yfinance-Download via Ticker.history() – robuster als yf.download()."""
     try:
-        raw = yf.Ticker(symbol).history(
-            period=period,
-            interval=interval,
-            # auto_adjust=True:  Bereinigt Splits und Dividenden (OHLCV bleibt vergleichbar).
-            # back_adjust=False: Historische Preise werden NICHT rückwärts skaliert –
-            #   forward-adjustierte Preise sind für ML-Features stabiler und verhindern
-            #   negative Preise bei Reverse-Splits.
-            auto_adjust=True,
-            back_adjust=False,
+        raw = _with_retry(
+            lambda: yf.Ticker(symbol).history(
+                period=period,
+                interval=interval,
+                # auto_adjust=True:  Bereinigt Splits und Dividenden (OHLCV bleibt vergleichbar).
+                # back_adjust=False: Historische Preise werden NICHT rückwärts skaliert –
+                #   forward-adjustierte Preise sind für ML-Features stabiler und verhindern
+                #   negative Preise bei Reverse-Splits.
+                auto_adjust=True,
+                back_adjust=False,
+            )
         )
         if raw is None or raw.empty:
             logger.warning(f"yf.Ticker.history: keine Daten für {symbol} (period={period})")
@@ -414,14 +487,16 @@ def _fetch_yf_history(symbol: str, period: str, interval: str) -> Optional[pd.Da
 def _fetch_yf_download(symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
     """Fallback-Download via yf.download() mit MultiIndex-Normalisierung."""
     try:
-        raw = yf.download(
-            symbol,
-            period=period,
-            interval=interval,
-            progress=False,
-            # Gleiche Bereinigungsstrategie wie _fetch_yf_history – siehe dort.
-            auto_adjust=True,
-            back_adjust=False,
+        raw = _with_retry(
+            lambda: yf.download(
+                symbol,
+                period=period,
+                interval=interval,
+                progress=False,
+                # Gleiche Bereinigungsstrategie wie _fetch_yf_history – siehe dort.
+                auto_adjust=True,
+                back_adjust=False,
+            )
         )
         if raw is None or raw.empty:
             logger.warning(f"yf.download: keine Daten für {symbol} (period={period})")
@@ -564,6 +639,16 @@ def fetch_ohlcv(
 
         if raw is None:
             logger.warning(f"Alle Quellen erfolglos für {symbol} (period={period})")
+            # Offline/Rate-Limit: lieber veraltete Daten (klar gekennzeichnet) als gar keine
+            stale = _load_cache(requested, period, interval, allow_stale=True)
+            if stale is not None and not stale.empty:
+                stale.attrs["stale"] = True
+                age_h = (
+                    time.time() - _cache_path(requested, period, interval).stat().st_mtime
+                ) / 3600
+                stale.attrs["stale_age_h"] = round(age_h, 1)
+                logger.warning(f"Verwende veralteten Cache für {requested} ({age_h:.0f} h alt)")
+                return stale
             return _empty_df(
                 f"Keine Daten für '{symbol}' — alle Quellen erfolglos "
                 f"(period={period}, interval={interval}). "
@@ -823,6 +908,18 @@ def get_data_quality_report(df: pd.DataFrame) -> dict:
             f"(möglicher Kurs-Split oder Datenfehler)"
         )
 
+    if df.attrs.get("stale"):
+        issues.append(
+            f"Veraltete Daten aus dem Cache ({df.attrs.get('stale_age_h', '?')} h alt) – "
+            "Download zurzeit nicht möglich"
+        )
+    cleaned = df.attrs.get("cleaned") or {}
+    if cleaned.get("rows_dropped") or cleaned.get("values_fixed"):
+        issues.append(
+            f"Automatisch bereinigt: {cleaned.get('rows_dropped', 0)} Zeilen entfernt, "
+            f"{cleaned.get('values_fixed', 0)} Werte korrigiert"
+        )
+
     return {
         "missing_days": missing_days,
         "zero_volume_days": zero_volume_days,
@@ -858,12 +955,14 @@ def _cache_ttl_s(interval: str) -> int:
     return _CACHE_TTL_S
 
 
-def _load_cache(symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
-    """Lädt gecachte Daten wenn vorhanden und nicht abgelaufen."""
+def _load_cache(
+    symbol: str, period: str, interval: str, allow_stale: bool = False
+) -> Optional[pd.DataFrame]:
+    """Lädt gecachte Daten; abgelaufene nur mit ``allow_stale`` (Offline-Notfall)."""
     path = _cache_path(symbol, period, interval)
     if not path.exists():
         return None
-    if time.time() - path.stat().st_mtime > _cache_ttl_s(interval):
+    if not allow_stale and time.time() - path.stat().st_mtime > _cache_ttl_s(interval):
         return None  # Abgelaufen – nicht löschen, wird beim nächsten Fetch überschrieben
     try:
         df = pd.read_parquet(path)

@@ -38,6 +38,7 @@ from modules.trainer import (
     train as train_ml_model,
 )
 
+from ui import tab_lab
 from ui.charts import (
     GREEN,
     RED,
@@ -480,7 +481,9 @@ def render() -> None:
         state = load_state(st.session_state.ticker)
         trainer = StockTrainer()
 
-        sub1, sub2, sub3 = st.tabs(["🤖 LLM-Zyklus", "🔄 Auto-Modus", "📊 Backtesting"])
+        sub1, sub2, sub3, sub4 = st.tabs(
+            ["🤖 LLM-Zyklus", "🔄 Auto-Modus", "📊 Backtesting", "🧪 Strategie-Labor"]
+        )
 
         # ── LLM-Zyklus ──────────────────────────────────────────────────────
         with sub1:
@@ -841,6 +844,10 @@ def render() -> None:
                             mime="text/csv",
                             key="dl_bt_trades",
                         )
+
+        # ── Strategie-Labor ─────────────────────────────────────────────────
+        with sub4:
+            tab_lab.render(st.session_state.ticker)
 
         # ── Trainings-Statistiken ────────────────────────────────────────────
         state = load_state(st.session_state.ticker)
