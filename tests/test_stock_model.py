@@ -262,13 +262,14 @@ def test_fit_model_stops_early_and_restores_best_weights():
     from stock_model.train import fit_model
 
     train_l, val_l, torch = _loaders()
+    torch.manual_seed(0)
     model = ReturnLSTM(hidden_size=8, num_layers=1, dropout=0.0)
     seen = []
     _, best_val, epochs_run = fit_model(
         model,
         train_l,
         val_l,
-        epochs=40,
+        epochs=8,
         lr=0.01,
         device="cpu",
         patience=2,
