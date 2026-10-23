@@ -162,3 +162,26 @@ Und wer fleißig trainiert, wird belohnt... 🤫
 ## Lizenz
 
 MIT – do whatever you want, but don't blame us for YOLO trades.
+
+## Autopilot (Paper-Trading im Dauerbetrieb)
+
+Ohne Browser und ohne LLM: wählt pro Ticker automatisch die beste Strategie
+(Walk-Forward, siehe Strategie-Labor), wählt sie alle 7 Tage neu und handelt
+das Signal in einem eigenen Paper-Portfolio `autopilot`.
+
+```bash
+# Doppelklick bzw. Start mit Rückfrage nach den Tickern:
+start_autopilot.bat        # Windows
+./start_autopilot.sh       # Linux/macOS
+
+# oder direkt:
+python autopilot.py AAPL MSFT BMW.DE            # läuft bis Strg+C
+python autopilot.py AAPL --once                 # ein Durchlauf (z. B. per Cron/Aufgabenplanung)
+python autopilot.py AAPL --interval 30 --reselect-days 14 --invest-pct 0.1
+```
+
+- Gehandelt wird nur bei Urteil „besser“ oder „unklar“; bei „schlechter“ / „zu wenig
+  Daten“ nur mit `--force`.
+- Beenden: Strg+C oder leere Datei `data/AUTOPILOT_STOP` anlegen.
+- Zustand: `data/autopilot_state.json` (gewählte Strategien); Portfolio unter `data/portfolio/`.
+- Nur Simulation – keine echten Orders.
