@@ -19,7 +19,16 @@ from modules.backtester import PaperTrader
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    ap.add_argument("tickers", nargs="+", help="Ticker, z. B. AAPL BMW.DE BTC-USD")
+    ap.add_argument(
+        "tickers",
+        nargs="*",
+        help="Ticker, z. B. AAPL BMW.DE BTC-USD (ohne Angabe: data/autopilot_tickers.txt)",
+    )
+    ap.add_argument(
+        "--save-tickers",
+        action="store_true",
+        help="Ticker in data/autopilot_tickers.txt speichern (für den Autostart)",
+    )
     ap.add_argument("--once", action="store_true", help="Nur ein Durchlauf, dann beenden")
     ap.add_argument("--interval", type=float, default=60.0, help="Minuten zwischen Läufen")
     ap.add_argument("--reselect-days", type=int, default=7, help="Strategie alle N Tage neu wählen")
@@ -33,6 +42,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Auch bei Urteil 'schlechter' / 'zu wenig Daten' handeln",
     )
     args = ap.parse_args(argv)
+    tickers_file = stop_path().parent / "autopilot_tickers.txt"
+    if args.tickers and args.save_tickers:
+        tickers_file.parent.mkdir(parents=True, exist_ok=True)
+        tickers_file.write_text("\n".join(t.upper() for t in args.tickers) + "\n", encoding="utf-8")
+        print(f"Ticker gespeichert: {tickers_file}")
+    if not args.tickers:
+        try:
+            args.tickers = tickers_file.read_text(encoding="utf-8").split()
+        except OSError:
+            args.tickers = []
+        if not args.tickers:
+            ap.error(f"Keine Ticker angegeben und {tickers_file} fehlt/leer.")
     if not 0.05 <= args.invest_pct <= 0.5:
         ap.error("--invest-pct muss zwischen 0.05 und 0.5 liegen")
     if args.interval <= 0 or args.reselect_days < 1:

@@ -110,3 +110,20 @@ def test_run_forever_respects_max_runs_and_stop_file(tmp_path, patched, monkeypa
 
     (tmp_path / "STOP").write_text("")
     assert autopilot.run_forever(["AAA"], sleep=sleeps.append, trader=tr) == 0
+
+
+def test_cli_saves_and_reads_ticker_file(tmp_path, monkeypatch):
+    import autopilot as cli
+
+    monkeypatch.setattr(cli, "stop_path", lambda: tmp_path / "AUTOPILOT_STOP")
+    seen = []
+    monkeypatch.setattr(cli, "run_once", lambda tickers, **k: seen.append(tickers))
+    monkeypatch.setattr(cli, "PaperTrader", lambda **k: object())
+
+    cli.main(["aapl", "msft", "--save-tickers", "--once"])
+    assert (tmp_path / "autopilot_tickers.txt").read_text().split() == ["AAPL", "MSFT"]
+    cli.main(["--once"])  # ohne Argumente: aus Datei
+    assert seen == [["aapl", "msft"], ["AAPL", "MSFT"]]
+    (tmp_path / "autopilot_tickers.txt").write_text("")
+    with pytest.raises(SystemExit):
+        cli.main(["--once"])
