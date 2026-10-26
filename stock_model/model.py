@@ -1,4 +1,5 @@
 """Neural network model definitions for forecasting returns."""
+
 from __future__ import annotations
 
 import torch

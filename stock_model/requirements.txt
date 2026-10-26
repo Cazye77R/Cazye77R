@@ -1,0 +1,8 @@
+# Abhängigkeiten für stock_model/ (PyTorch-LSTM-Forecaster + Streamlit-UI)
+# Start: streamlit run run.py   (aus dem Repo-Root)
+# Training: python -m stock_model.train <daten.csv>
+torch>=2.2.0
+numpy>=1.24
+pandas>=2.0
+plotly>=5.20
+streamlit>=1.33
