@@ -100,7 +100,7 @@
 
     /* ── Main ── */
     main {
-      max-width: 1200px;
+      max-width: 1800px;
       margin: 0 auto;
       padding: 1.5rem;
     }
@@ -291,18 +291,21 @@
       color: var(--text-muted);
       font-weight: 600;
       font-size: 0.77rem;
-      padding: 0.65rem 0.8rem;
+      padding: 0.65rem 0.5rem;
       text-align: left;
-      white-space: nowrap;
+      vertical-align: bottom;
       border-bottom: 1px solid var(--border);
     }
 
     td {
-      padding: 0.6rem 0.8rem;
+      padding: 0.6rem 0.5rem;
       border-bottom: 1px solid var(--border);
     }
 
+    .btn-icon + .btn-icon { margin-left: 0.15rem; }
+
     .cell-nowrap { white-space: nowrap; }
+    td.col-desc  { min-width: 140px; }
 
     tbody tr:last-child td { border-bottom: none; }
     tbody tr:hover { background: rgba(108,99,255,0.05); }
@@ -634,13 +637,13 @@
                   <span class="preview-label">Marge</span>
                   <span class="preview-value" id="prev-margin">— %</span>
                 </div>
-                <div class="preview-item" style="margin-top:.5rem;border-top:1px solid var(--border);padding-top:.5rem;">
+                <div class="preview-item" style="grid-column:1/-1;margin-top:.3rem;border-top:1px solid var(--border);padding-top:.6rem;">
                   <span class="preview-label">Vorgeschlagener Preis</span>
-                  <span class="preview-value" id="prev-suggested-price">— €</span>
-                </div>
-                <div class="preview-item">
-                  <span class="preview-label">Marge (Vorschlag)</span>
-                  <span class="preview-value" id="prev-suggested-margin">— %</span>
+                  <span class="preview-value">
+                    <span id="prev-suggested-price">— €</span>
+                    <span style="color:var(--text-muted);font-weight:400;margin-left:.6rem;">Marge</span>
+                    <span id="prev-suggested-margin">— %</span>
+                  </span>
                 </div>
               </div>
             </div>
@@ -936,6 +939,13 @@
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
       }) + ' €';
+    }
+
+    function formatNum(val, digits) {
+      return Number(val || 0).toLocaleString('de-DE', {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits
+      });
     }
 
     function formatDate(iso) {
@@ -1643,8 +1653,8 @@
           renderChart(parseInt(sel.value) || new Date().getFullYear());
         }
         if (tabId === 'statistiken') renderStatistics();
-      }
-    };
+      },
+
       updateFormPreview() {
         const settings = loadSettings();
         const profileSel = document.getElementById('f-filament-profile').value;
@@ -1669,15 +1679,15 @@
         setVal('prev-elec',     electricityCost, false);
         setVal('prev-total',    totalCost, false);
         setVal('prev-profit',   profit, true);
-        document.getElementById('prev-kwh-total').textContent = totalKwh.toFixed(3) + ' kWh';
-        document.getElementById('prev-margin').textContent = margin.toFixed(1) + ' %';
+        document.getElementById('prev-kwh-total').textContent = formatNum(totalKwh, 3) + ' kWh';
+        document.getElementById('prev-margin').textContent = formatNum(margin, 1) + ' %';
         const markup = settings.suggestedPriceMarkup ?? 3.0;
         const suggestedPrice = Math.round(totalCost * markup * 100) / 100;
         const suggestedMargin = suggestedPrice > 0
           ? Math.round(((suggestedPrice - totalCost) / suggestedPrice) * 1000) / 10
           : 0;
         document.getElementById('prev-suggested-price').textContent  = totalCost > 0 ? formatEur(suggestedPrice)          : '— €';
-        document.getElementById('prev-suggested-margin').textContent = totalCost > 0 ? suggestedMargin.toFixed(1) + ' %'  : '— %';
+        document.getElementById('prev-suggested-margin').textContent = totalCost > 0 ? formatNum(suggestedMargin, 1) + ' %' : '— %';
       },
 
       resetPreview() {
@@ -1689,6 +1699,8 @@
         const pp = document.getElementById('prev-profit');
         pp.textContent = '— €';
         pp.className = 'preview-value';
+        document.getElementById('prev-kwh-total').textContent        = '— kWh';
+        document.getElementById('prev-margin').textContent           = '— %';
         document.getElementById('prev-suggested-price').textContent  = '— €';
         document.getElementById('prev-suggested-margin').textContent = '— %';
       },
@@ -1709,18 +1721,18 @@
           const shortComment = comment.length > 40 ? escapeHtml(comment.slice(0, 40)) + '…' : escapeHtml(comment);
           return `<tr>
             <td class="cell-nowrap">${formatDate(b.date)}</td>
-            <td>${escapeHtml(b.description)}</td>
+            <td class="col-desc">${escapeHtml(b.description)}</td>
             <td class="cell-nowrap">${dur}</td>
             <td>${escapeHtml(b.filamentProfileName || '—')}</td>
             <td class="cell-nowrap">${b.filamentGrams}</td>
-            <td class="cell-nowrap">${b.electricityKwPerHour}</td>
-            <td class="cell-nowrap">${(b.electricityKwhTotal || 0).toFixed(3)}</td>
+            <td class="cell-nowrap">${Number(b.electricityKwPerHour || 0).toLocaleString('de-DE')}</td>
+            <td class="cell-nowrap">${formatNum(b.electricityKwhTotal, 3)}</td>
             <td class="cell-nowrap">${formatEur(b.filamentCost)}</td>
             <td class="cell-nowrap">${formatEur(b.electricityCost)}</td>
             <td class="cell-nowrap">${formatEur(b.totalCost)}</td>
             <td class="cell-nowrap">${formatEur(b.sellingPrice)}</td>
             <td class="cell-nowrap ${profitClass}">${formatEur(b.profit)}</td>
-            <td class="cell-nowrap ${profitClass}">${(b.margin ?? 0).toFixed(1)} %</td>
+            <td class="cell-nowrap ${profitClass}">${formatNum(b.margin, 1)} %</td>
             <td>${escapeHtml(invoices)}</td>
             <td title="${escapeHtml(comment)}">${shortComment}</td>
             <td class="cell-nowrap">
